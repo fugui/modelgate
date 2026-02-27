@@ -19,11 +19,15 @@ const (
 )
 
 type Service struct {
-	store *models.APIKeyStore
+	store     *models.APIKeyStore
+	userStore *models.UserStore
 }
 
-func NewService(store *models.APIKeyStore) *Service {
-	return &Service{store: store}
+func NewService(store *models.APIKeyStore, userStore *models.UserStore) *Service {
+	return &Service{
+		store:     store,
+		userStore: userStore,
+	}
 }
 
 // GenerateKey 生成新的 API Key
@@ -69,10 +73,6 @@ func (s *Service) ValidateKey(plainKey string) (*models.APIKey, *models.User, er
 	}
 
 	// 从数据库查找匹配的 key
-	// 由于 bcrypt 验证需要逐个比较，我们需要先获取所有可能的 key
-	// 实际生产环境应该使用 key prefix 索引优化
-
-	// 这里我们需要一个更好的方式 - 通过 store 查询
 	key, err := s.store.GetByKeyPrefix(plainKey[:prefixLen])
 	if err != nil {
 		return nil, nil, err
@@ -96,7 +96,19 @@ func (s *Service) ValidateKey(plainKey string) (*models.APIKey, *models.User, er
 		return nil, nil, fmt.Errorf("key disabled")
 	}
 
-	return key, nil, nil
+	// 检查所属用户状态
+	user, err := s.userStore.GetByID(key.UserID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get user: %w", err)
+	}
+	if user == nil {
+		return nil, nil, fmt.Errorf("user not found")
+	}
+	if !user.Enabled {
+		return nil, nil, fmt.Errorf("user disabled")
+	}
+
+	return key, user, nil
 }
 
 // GetUserKeys 获取用户的所有 API Key

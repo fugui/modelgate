@@ -59,7 +59,7 @@ func main() {
 	jwtManager := auth.NewJWTManager(cfg.JWT.Secret, cfg.JWT.ExpireHours)
 
 	// 初始化服务层
-	apiKeyService := apikey.NewService(apiKeyStore)
+	apiKeyService := apikey.NewService(apiKeyStore, userStore)
 	quotaService := quota.NewService(quotaStore)
 	usageService := usage.NewService(userLogger)
 
