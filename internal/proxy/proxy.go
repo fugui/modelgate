@@ -151,25 +151,7 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 	latency := int(time.Since(startTime).Milliseconds())
 
 	// 记录使用
-	record := &models.UsageRecord{
-		Timestamp:     startTime,
-		UserID:        userID,
-		APIKeyID:      &apiKeyID,
-		ModelID:       modelID,
-		BackendURL:    backend,
-		InputTokens:   inputTokens,
-		OutputTokens:  outputTokens,
-		LatencyMs:     latency,
-		StatusCode:    resp.StatusCode,
-		RequestPath:   c.Request.URL.Path,
-		RequestMethod: c.Request.Method,
-	}
-
-	if resp.StatusCode >= 400 {
-		record.ErrorMsg = string(respBody)
-	}
-
-	p.usageService.RecordUsage(record)
+	p.usageService.RecordUsage(userID, modelID, inputTokens, outputTokens, latency)
 
 	// 扣除配额
 	_ = p.quotaService.DeductQuota(userID, modelID, inputTokens, outputTokens)

@@ -10,11 +10,11 @@ import (
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
-	Redis    RedisConfig    `yaml:"redis"`
 	JWT      JWTConfig      `yaml:"jwt"`
 	Models   []ModelConfig  `yaml:"models"`
 	Policies []PolicyConfig `yaml:"quota_policies"`
 	Admin    AdminConfig    `yaml:"admin"`
+	Logs     LogConfig      `yaml:"logs"`
 }
 
 type ServerConfig struct {
@@ -23,24 +23,17 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	DBName   string `yaml:"dbname"`
-	SSLMode  string `yaml:"sslmode"`
-}
-
-type RedisConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	Password string `yaml:"password"`
-	DB       int    `yaml:"db"`
+	Path string `yaml:"path"`
 }
 
 type JWTConfig struct {
 	Secret      string `yaml:"secret"`
 	ExpireHours int    `yaml:"expire_hours"`
+}
+
+type LogConfig struct {
+	Path          string `yaml:"path"`
+	RetentionDays int    `yaml:"retention_days"`
 }
 
 type ModelConfig struct {
@@ -89,15 +82,15 @@ func Load(path string) (*Config, error) {
 	if cfg.JWT.ExpireHours == 0 {
 		cfg.JWT.ExpireHours = 24
 	}
+	if cfg.Database.Path == "" {
+		cfg.Database.Path = "llmgate.db"
+	}
+	if cfg.Logs.Path == "" {
+		cfg.Logs.Path = "logs"
+	}
+	if cfg.Logs.RetentionDays == 0 {
+		cfg.Logs.RetentionDays = 7
+	}
 
 	return &cfg, nil
-}
-
-func (c *DatabaseConfig) DSN() string {
-	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		c.Host, c.Port, c.User, c.Password, c.DBName, c.SSLMode)
-}
-
-func (c *RedisConfig) Addr() string {
-	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }

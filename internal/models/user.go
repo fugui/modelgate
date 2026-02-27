@@ -19,7 +19,7 @@ const (
 	RoleUser    Role = "user"
 )
 
-// StringArray 用于 PostgreSQL text[] 类型
+// StringArray 用于 JSON 字符串数组类型
 type StringArray []string
 
 func (a StringArray) Value() (driver.Value, error) {
@@ -62,7 +62,7 @@ type User struct {
 
 type UserCreateRequest struct {
 	Email       string   `json:"email" binding:"required,email"`
-	Password    string   `json:"password" binding:"required,min=6"`
+	Password    string   `json:"password" binding:"required,min:6"`
 	Name        string   `json:"name" binding:"required"`
 	Role        Role     `json:"role"`
 	Department  string   `json:"department"`
@@ -117,15 +117,17 @@ func NewUserStore(db *sql.DB) *UserStore {
 }
 
 func (s *UserStore) Create(user *User) error {
+	user.ID = uuid.New()
 	query := `
-		INSERT INTO users (email, password_hash, name, role, department, quota_policy, models, enabled)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, created_at, updated_at`
+		INSERT INTO users (id, email, password_hash, name, role, department, quota_policy, models, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		RETURNING created_at, updated_at`
 
+	modelsJSON, _ := json.Marshal(user.Models)
 	return s.db.QueryRow(query,
-		user.Email, user.PasswordHash, user.Name, user.Role, user.Department,
-		user.QuotaPolicy, user.Models, user.Enabled,
-	).Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
+		user.ID.String(), user.Email, user.PasswordHash, user.Name, user.Role, user.Department,
+		user.QuotaPolicy, string(modelsJSON), user.Enabled,
+	).Scan(&user.CreatedAt, &user.UpdatedAt)
 }
 
 func (s *UserStore) GetByID(id uuid.UUID) (*User, error) {
@@ -133,17 +135,22 @@ func (s *UserStore) GetByID(id uuid.UUID) (*User, error) {
 	query := `
 		SELECT id, email, password_hash, name, role, department, quota_policy,
 		       models, enabled, created_at, updated_at, last_login_at
-		FROM users WHERE id = $1`
+		FROM users WHERE id = ?`
 
-	err := s.db.QueryRow(query, id).Scan(
+	var modelsJSON string
+	err := s.db.QueryRow(query, id.String()).Scan(
 		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
-		&user.Department, &user.QuotaPolicy, &user.Models, &user.Enabled,
+		&user.Department, &user.QuotaPolicy, &modelsJSON, &user.Enabled,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return user, err
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal([]byte(modelsJSON), &user.Models)
+	return user, nil
 }
 
 func (s *UserStore) GetByEmail(email string) (*User, error) {
@@ -151,24 +158,29 @@ func (s *UserStore) GetByEmail(email string) (*User, error) {
 	query := `
 		SELECT id, email, password_hash, name, role, department, quota_policy,
 		       models, enabled, created_at, updated_at, last_login_at
-		FROM users WHERE email = $1 AND enabled = true`
+		FROM users WHERE email = ? AND enabled = 1`
 
+	var modelsJSON string
 	err := s.db.QueryRow(query, email).Scan(
 		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
-		&user.Department, &user.QuotaPolicy, &user.Models, &user.Enabled,
+		&user.Department, &user.QuotaPolicy, &modelsJSON, &user.Enabled,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return user, err
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal([]byte(modelsJSON), &user.Models)
+	return user, nil
 }
 
 func (s *UserStore) List(limit, offset int) ([]*User, error) {
 	query := `
 		SELECT id, email, password_hash, name, role, department, quota_policy,
 		       models, enabled, created_at, updated_at, last_login_at
-		FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+		FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`
 
 	rows, err := s.db.Query(query, limit, offset)
 	if err != nil {
@@ -179,14 +191,16 @@ func (s *UserStore) List(limit, offset int) ([]*User, error) {
 	var users []*User
 	for rows.Next() {
 		user := &User{}
+		var modelsJSON string
 		err := rows.Scan(
 			&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
-			&user.Department, &user.QuotaPolicy, &user.Models, &user.Enabled,
+			&user.Department, &user.QuotaPolicy, &modelsJSON, &user.Enabled,
 			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
 		)
 		if err != nil {
 			return nil, err
 		}
+		json.Unmarshal([]byte(modelsJSON), &user.Models)
 		users = append(users, user)
 	}
 	return users, rows.Err()
@@ -195,24 +209,25 @@ func (s *UserStore) List(limit, offset int) ([]*User, error) {
 func (s *UserStore) Update(user *User) error {
 	query := `
 		UPDATE users SET
-			email = $1, name = $2, role = $3, department = $4,
-			quota_policy = $5, models = $6, enabled = $7, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $8`
+			email = ?, name = ?, role = ?, department = ?,
+			quota_policy = ?, models = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`
 
+	modelsJSON, _ := json.Marshal(user.Models)
 	_, err := s.db.Exec(query,
 		user.Email, user.Name, user.Role, user.Department,
-		user.QuotaPolicy, user.Models, user.Enabled, user.ID,
+		user.QuotaPolicy, string(modelsJSON), user.Enabled, user.ID.String(),
 	)
 	return err
 }
 
 func (s *UserStore) UpdateLastLogin(id uuid.UUID) error {
-	_, err := s.db.Exec("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1", id)
+	_, err := s.db.Exec("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", id.String())
 	return err
 }
 
 func (s *UserStore) Delete(id uuid.UUID) error {
-	_, err := s.db.Exec("DELETE FROM users WHERE id = $1", id)
+	_, err := s.db.Exec("DELETE FROM users WHERE id = ?", id.String())
 	return err
 }
 

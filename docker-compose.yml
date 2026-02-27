@@ -1,52 +1,15 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: llmgate-postgres
-    environment:
-      POSTGRES_USER: llmgate
-      POSTGRES_PASSWORD: llmgate_pass
-      POSTGRES_DB: llmgate
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U llmgate"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    container_name: llmgate-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  server:
+  llmgate:
     build: .
-    container_name: llmgate-server
+    container_name: llmgate
     ports:
       - "8080:8080"
     environment:
       - GIN_MODE=release
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - ./data:/app/data
+      - ./logs:/app/logs
     restart: unless-stopped
-
-volumes:
-  postgres_data:
-  redis_data:

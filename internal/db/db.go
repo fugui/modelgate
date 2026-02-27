@@ -5,16 +5,15 @@ import (
 	"fmt"
 	"os"
 
-	_ "github.com/lib/pq"
-	"llmgate/internal/config"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type DB struct {
 	*sql.DB
 }
 
-func New(cfg *config.DatabaseConfig) (*DB, error) {
-	db, err := sql.Open("postgres", cfg.DSN())
+func New(dbPath string) (*DB, error) {
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -23,8 +22,14 @@ func New(cfg *config.DatabaseConfig) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
+	// SQLite optimizations
+	db.SetMaxOpenConns(1) // SQLite only supports one writer at a time
+	db.SetMaxIdleConns(1)
+
+	// Enable foreign keys
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
 
 	return &DB{db}, nil
 }

@@ -1,24 +1,90 @@
 package quota
 
 import (
-	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"llmgate/internal/models"
 )
 
-type Service struct {
-	store  *models.QuotaStore
-	redis  *redis.Client
+// RateCounter 内存速率计数器
+type RateCounter struct {
+	counts    map[string]int
+	windows   map[string]time.Time
+	mu        sync.RWMutex
 }
 
-func NewService(store *models.QuotaStore, redis *redis.Client) *Service {
+func NewRateCounter() *RateCounter {
+	rc := &RateCounter{
+		counts:  make(map[string]int),
+		windows: make(map[string]time.Time),
+	}
+	// 启动每分钟清理任务
+	go rc.cleanupLoop()
+	return rc
+}
+
+// cleanupLoop 每分钟清理过期的计数器
+func (rc *RateCounter) cleanupLoop() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		rc.cleanup()
+	}
+}
+
+// cleanup 清理过期的计数器条目
+func (rc *RateCounter) cleanup() {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+
+	now := time.Now()
+	for key, window := range rc.windows {
+		if now.Sub(window) >= time.Minute {
+			delete(rc.counts, key)
+			delete(rc.windows, key)
+		}
+	}
+}
+
+// Increment 增加计数并返回当前计数
+func (rc *RateCounter) Increment(userID string, window int) int {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+
+	key := fmt.Sprintf("%s:%s", userID, time.Now().Format("2006-01-02-15-04"))
+	
+	// 检查是否需要重置窗口
+	if lastWindow, exists := rc.windows[key]; !exists || time.Since(lastWindow) >= time.Duration(window)*time.Second {
+		rc.counts[key] = 0
+		rc.windows[key] = time.Now()
+	}
+	
+	rc.counts[key]++
+	return rc.counts[key]
+}
+
+// GetCount 获取当前计数
+func (rc *RateCounter) GetCount(userID string) int {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+
+	key := fmt.Sprintf("%s:%s", userID, time.Now().Format("2006-01-02-15-04"))
+	return rc.counts[key]
+}
+
+type Service struct {
+	store  *models.QuotaStore
+	rateCounter *RateCounter
+}
+
+func NewService(store *models.QuotaStore) *Service {
 	return &Service{
-		store:  store,
-		redis:  redis,
+		store:       store,
+		rateCounter: NewRateCounter(),
 	}
 }
 
@@ -29,9 +95,6 @@ func (s *Service) CheckQuota(userID uuid.UUID, modelID string) (*models.QuotaChe
 	}
 
 	// 获取用户配额策略
-	// 这里简化处理，假设用户配额策略已加载
-	// 实际应该根据用户配置获取
-
 	policy, err := s.store.GetPolicy("default")
 	if err != nil {
 		return nil, err
@@ -55,13 +118,7 @@ func (s *Service) CheckQuota(userID uuid.UUID, modelID string) (*models.QuotaChe
 	}
 
 	// 检查速率限制
-	ctx := context.Background()
-	rateKey := fmt.Sprintf("rate:%s:%s", userID.String(), time.Now().Format("YYYY-MM-DD-HH-MM"))
-
-	current, err := s.redis.Get(ctx, rateKey).Int()
-	if err != nil && err != redis.Nil {
-		return nil, err
-	}
+	current := s.rateCounter.GetCount(userID.String())
 
 	if current >= policy.RateLimit {
 		result.Allowed = false
@@ -94,15 +151,8 @@ func (s *Service) CheckQuota(userID uuid.UUID, modelID string) (*models.QuotaChe
 
 // IncrementRate 增加速率计数
 func (s *Service) IncrementRate(userID uuid.UUID, window int) error {
-	ctx := context.Background()
-	rateKey := fmt.Sprintf("rate:%s:%s", userID.String(), time.Now().Format("2006-01-02-15-04"))
-
-	pipe := s.redis.Pipeline()
-	pipe.Incr(ctx, rateKey)
-	pipe.Expire(ctx, rateKey, time.Duration(window)*time.Second)
-
-	_, err := pipe.Exec(ctx)
-	return err
+	s.rateCounter.Increment(userID.String(), window)
+	return nil
 }
 
 // DeductQuota 扣除配额
@@ -132,11 +182,11 @@ func (s *Service) GetQuotaStats(userID uuid.UUID) (map[string]interface{}, error
 	}
 
 	return map[string]interface{}{
-		"daily_tokens_used": dailyTokens,
+		"daily_tokens_used":  dailyTokens,
 		"daily_tokens_limit": policy.TokenQuotaDaily,
-		"rate_limit":          policy.RateLimit,
-		"rate_window":         policy.RateLimitWindow,
-		"models_allowed":      policy.Models,
-		"reset_time":          "00:00",
+		"rate_limit":         policy.RateLimit,
+		"rate_window":        policy.RateLimitWindow,
+		"models_allowed":     policy.Models,
+		"reset_time":         "00:00",
 	}, nil
 }

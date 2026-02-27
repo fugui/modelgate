@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 
 	"llmgate/internal/apikey"
 	"llmgate/internal/auth"
 	"llmgate/internal/config"
 	"llmgate/internal/db"
+	"llmgate/internal/logger"
 	"llmgate/internal/model"
 	"llmgate/internal/models"
 	"llmgate/internal/proxy"
@@ -34,7 +34,7 @@ func main() {
 	gin.SetMode(cfg.Server.Mode)
 
 	// 连接数据库
-	database, err := db.New(&cfg.Database)
+	database, err := db.New(cfg.Database.Path)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -45,13 +45,9 @@ func main() {
 		log.Printf("Migration warning: %v", err)
 	}
 
-	// 连接 Redis
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Addr(),
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
-	defer redisClient.Close()
+	// 初始化日志记录器
+	userLogger := logger.NewUserLogger(cfg.Logs.Path, cfg.Logs.RetentionDays)
+	defer userLogger.Close()
 
 	// 初始化存储层
 	userStore := models.NewUserStore(database.DB)
@@ -64,8 +60,8 @@ func main() {
 
 	// 初始化服务层
 	apiKeyService := apikey.NewService(apiKeyStore)
-	quotaService := quota.NewService(quotaStore, redisClient)
-	usageService := usage.NewService(quotaStore)
+	quotaService := quota.NewService(quotaStore)
+	usageService := usage.NewService(userLogger)
 
 	// 初始化负载均衡器
 	lb := proxy.NewRoundRobinBalancer()

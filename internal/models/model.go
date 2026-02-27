@@ -44,13 +44,13 @@ func NewModelStore(db *sql.DB) *ModelStore {
 func (s *ModelStore) Create(model *Model) error {
 	query := `
 		INSERT INTO models (id, name, backend_url, enabled, weight, description)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO UPDATE SET
-			name = EXCLUDED.name,
-			backend_url = EXCLUDED.backend_url,
-			enabled = EXCLUDED.enabled,
-			weight = EXCLUDED.weight,
-			description = EXCLUDED.description,
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			backend_url = excluded.backend_url,
+			enabled = excluded.enabled,
+			weight = excluded.weight,
+			description = excluded.description,
 			updated_at = CURRENT_TIMESTAMP
 		RETURNING created_at, updated_at`
 
@@ -64,7 +64,7 @@ func (s *ModelStore) GetByID(id string) (*Model, error) {
 	model := &Model{}
 	query := `
 		SELECT id, name, backend_url, enabled, weight, description, created_at, updated_at
-		FROM models WHERE id = $1`
+		FROM models WHERE id = ?`
 
 	err := s.db.QueryRow(query, id).Scan(
 		&model.ID, &model.Name, &model.BackendURL, &model.Enabled,
@@ -105,7 +105,7 @@ func (s *ModelStore) List() ([]*Model, error) {
 func (s *ModelStore) ListEnabled() ([]*Model, error) {
 	query := `
 		SELECT id, name, backend_url, enabled, weight, description, created_at, updated_at
-		FROM models WHERE enabled = true ORDER BY weight DESC`
+		FROM models WHERE enabled = 1 ORDER BY weight DESC`
 
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -131,9 +131,9 @@ func (s *ModelStore) ListEnabled() ([]*Model, error) {
 func (s *ModelStore) Update(model *Model) error {
 	query := `
 		UPDATE models SET
-			name = $1, backend_url = $2, enabled = $3, weight = $4,
-			description = $5, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $6`
+			name = ?, backend_url = ?, enabled = ?, weight = ?,
+			description = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`
 
 	_, err := s.db.Exec(query,
 		model.Name, model.BackendURL, model.Enabled, model.Weight,
@@ -143,6 +143,6 @@ func (s *ModelStore) Update(model *Model) error {
 }
 
 func (s *ModelStore) Delete(id string) error {
-	_, err := s.db.Exec("DELETE FROM models WHERE id = $1", id)
+	_, err := s.db.Exec("DELETE FROM models WHERE id = ?", id)
 	return err
 }

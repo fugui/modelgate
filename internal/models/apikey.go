@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -76,15 +77,17 @@ func NewAPIKeyStore(db *sql.DB) *APIKeyStore {
 }
 
 func (s *APIKeyStore) Create(key *APIKey) error {
+	key.ID = uuid.New()
 	query := `
-		INSERT INTO api_keys (user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window, enabled, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, created_at, updated_at`
+		INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window, enabled, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		RETURNING created_at, updated_at`
 
+	modelsJSON, _ := json.Marshal(key.Models)
 	return s.db.QueryRow(query,
-		key.UserID, key.Name, key.KeyHash, key.KeyPrefix, key.Models,
+		key.ID.String(), key.UserID.String(), key.Name, key.KeyHash, key.KeyPrefix, string(modelsJSON),
 		key.RateLimit, key.RateLimitWindow, key.Enabled, key.ExpiresAt,
-	).Scan(&key.ID, &key.CreatedAt, &key.UpdatedAt)
+	).Scan(&key.CreatedAt, &key.UpdatedAt)
 }
 
 func (s *APIKeyStore) GetByID(id uuid.UUID) (*APIKey, error) {
@@ -92,17 +95,22 @@ func (s *APIKeyStore) GetByID(id uuid.UUID) (*APIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window,
 		       enabled, expires_at, last_used_at, created_at, updated_at
-		FROM api_keys WHERE id = $1`
+		FROM api_keys WHERE id = ?`
 
-	err := s.db.QueryRow(query, id).Scan(
+	var modelsJSON string
+	err := s.db.QueryRow(query, id.String()).Scan(
 		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-		&key.Models, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
+		&modelsJSON, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
 		&key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return key, err
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal([]byte(modelsJSON), &key.Models)
+	return key, nil
 }
 
 func (s *APIKeyStore) GetByHash(hash string) (*APIKey, error) {
@@ -110,17 +118,22 @@ func (s *APIKeyStore) GetByHash(hash string) (*APIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window,
 		       enabled, expires_at, last_used_at, created_at, updated_at
-		FROM api_keys WHERE key_hash = $1 AND enabled = true`
+		FROM api_keys WHERE key_hash = ? AND enabled = 1`
 
+	var modelsJSON string
 	err := s.db.QueryRow(query, hash).Scan(
 		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-		&key.Models, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
+		&modelsJSON, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
 		&key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return key, err
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal([]byte(modelsJSON), &key.Models)
+	return key, nil
 }
 
 func (s *APIKeyStore) GetByKeyPrefix(prefix string) (*APIKey, error) {
@@ -128,26 +141,31 @@ func (s *APIKeyStore) GetByKeyPrefix(prefix string) (*APIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window,
 		       enabled, expires_at, last_used_at, created_at, updated_at
-		FROM api_keys WHERE key_prefix = $1 AND enabled = true`
+		FROM api_keys WHERE key_prefix = ? AND enabled = 1`
 
+	var modelsJSON string
 	err := s.db.QueryRow(query, prefix).Scan(
 		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-		&key.Models, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
+		&modelsJSON, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
 		&key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return key, err
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal([]byte(modelsJSON), &key.Models)
+	return key, nil
 }
 
 func (s *APIKeyStore) ListByUser(userID uuid.UUID) ([]*APIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window,
 		       enabled, expires_at, last_used_at, created_at, updated_at
-		FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`
+		FROM api_keys WHERE user_id = ? ORDER BY created_at DESC`
 
-	rows, err := s.db.Query(query, userID)
+	rows, err := s.db.Query(query, userID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -156,14 +174,16 @@ func (s *APIKeyStore) ListByUser(userID uuid.UUID) ([]*APIKey, error) {
 	var keys []*APIKey
 	for rows.Next() {
 		key := &APIKey{}
+		var modelsJSON string
 		err := rows.Scan(
 			&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-			&key.Models, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
+			&modelsJSON, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
 			&key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
+		json.Unmarshal([]byte(modelsJSON), &key.Models)
 		keys = append(keys, key)
 	}
 	return keys, rows.Err()
@@ -172,29 +192,30 @@ func (s *APIKeyStore) ListByUser(userID uuid.UUID) ([]*APIKey, error) {
 func (s *APIKeyStore) Update(key *APIKey) error {
 	query := `
 		UPDATE api_keys SET
-			name = $1, models = $2, rate_limit = $3, rate_limit_window = $4,
-			enabled = $5, expires_at = $6, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $7`
+			name = ?, models = ?, rate_limit = ?, rate_limit_window = ?,
+			enabled = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`
 
+	modelsJSON, _ := json.Marshal(key.Models)
 	_, err := s.db.Exec(query,
-		key.Name, key.Models, key.RateLimit, key.RateLimitWindow,
-		key.Enabled, key.ExpiresAt, key.ID,
+		key.Name, string(modelsJSON), key.RateLimit, key.RateLimitWindow,
+		key.Enabled, key.ExpiresAt, key.ID.String(),
 	)
 	return err
 }
 
 func (s *APIKeyStore) UpdateLastUsed(id uuid.UUID) error {
-	_, err := s.db.Exec("UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = $1", id)
+	_, err := s.db.Exec("UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?", id.String())
 	return err
 }
 
 func (s *APIKeyStore) Delete(id uuid.UUID) error {
-	_, err := s.db.Exec("DELETE FROM api_keys WHERE id = $1", id)
+	_, err := s.db.Exec("DELETE FROM api_keys WHERE id = ?", id.String())
 	return err
 }
 
 func (s *APIKeyStore) CountByUser(userID uuid.UUID) (int, error) {
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM api_keys WHERE user_id = $1", userID).Scan(&count)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM api_keys WHERE user_id = ?", userID.String()).Scan(&count)
 	return count, err
 }
