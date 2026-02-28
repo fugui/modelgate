@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Input, Button, Select, Card, message, Space, Tag } from 'antd';
-import { SendOutlined, ClearOutlined } from '@ant-design/icons';
+import { Input, Button, Select, Card, message, Space, Tag, Empty, Spin } from 'antd';
+import { SendOutlined, ClearOutlined, StopOutlined, KeyOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
 
 const { TextArea } = Input;
@@ -26,23 +27,32 @@ const Chat: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [models, setModels] = useState<Model[]>([]);
   const [loading, setLoading] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
-  // 获取可用模型列表
+  // 获取可用模型列表和 API Key 状态
   useEffect(() => {
-    const fetchModels = async () => {
+    const fetchData = async () => {
       try {
-        const res = await api.get('/api/v1/user/quota');
-        const modelList = res.data.data?.models || [];
+        // 获取配额信息中的模型列表
+        const quotaRes = await api.get('/api/v1/user/quota');
+        const modelList = quotaRes.data.data?.models_allowed || [];
         setModels(modelList.map((m: string) => ({ id: m, name: m })));
-        if (modelList.length > 0) {
+        if (modelList.length > 0 && !selectedModel) {
           setSelectedModel(modelList[0]);
         }
+
+        // 检查是否有 API Key
+        const keysRes = await api.get('/api/v1/user/keys');
+        const keys = keysRes.data.data || [];
+        setHasApiKey(keys.length > 0);
       } catch (err) {
-        message.error('获取模型列表失败');
+        console.error('Failed to fetch data:', err);
       }
     };
-    fetchModels();
+    fetchData();
   }, []);
 
   // 滚动到底部
@@ -64,24 +74,15 @@ const Chat: React.FC = () => {
     setInput('');
     setLoading(true);
 
+    // 创建 AbortController 用于取消请求
+    abortControllerRef.current = new AbortController();
+
     try {
-      // 获取用户的 API Key
-      const keysRes = await api.get('/api/v1/user/keys');
-      const keys = keysRes.data.data || [];
-      const activeKey = keys.find((k: any) => k.enabled);
-
-      if (!activeKey) {
-        message.error('没有可用的 API Key，请先创建一个');
-        setLoading(false);
-        return;
-      }
-
-      // 调用聊天接口
+      // 调用聊天接口 - 使用代理端点，会自动使用当前用户的身份
       const response = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${activeKey.key_prefix}`,
         },
         body: JSON.stringify({
           model: selectedModel,
@@ -91,10 +92,12 @@ const Chat: React.FC = () => {
           ],
           stream: true,
         }),
+        signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) {
-        throw new Error('请求失败');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `请求失败: ${response.status}`);
       }
 
       // 处理流式响应
@@ -143,8 +146,20 @@ const Chat: React.FC = () => {
         }
       }
     } catch (err: any) {
+      if (err.name === 'AbortError') {
+        // 用户取消，不显示错误
+        return;
+      }
       message.error(err.message || '发送消息失败');
     } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
       setLoading(false);
     }
   };
@@ -160,28 +175,62 @@ const Chat: React.FC = () => {
     }
   };
 
+  // 如果没有 API Key，显示引导
+  if (!hasApiKey) {
+    return (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description={
+          <Space direction="vertical" size="large" style={{ textAlign: 'center' }}>
+            <div>
+              <KeyOutlined style={{ fontSize: 48, color: '#1890ff' }} />
+              <h3 style={{ marginTop: 16 }}>需要 API Key 才能使用聊天功能</h3>
+              <p style={{ color: '#666' }}>请先创建一个 API Key，然后刷新页面</p>
+            </div>
+            <Button type="primary" onClick={() => navigate('/keys')}>
+              去创建 API Key
+            </Button>
+          </Space>
+        }
+      />
+    );
+  }
+
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 500 }}>
-      {/* 模型选择 */}
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* 头部工具栏 */}
+      <div style={{ 
+        marginBottom: 16, 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        padding: '12px 16px',
+        background: '#fff',
+        borderRadius: 8,
+        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+      }}>
         <Space>
-          <span>选择模型：</span>
+          <span style={{ fontWeight: 500 }}>模型：</span>
           <Select
             value={selectedModel}
             onChange={setSelectedModel}
             style={{ width: 200 }}
-            disabled={models.length === 0}
+            disabled={models.length === 0 || loading}
+            placeholder="选择模型"
           >
             {models.map(model => (
               <Option key={model.id} value={model.id}>{model.name}</Option>
             ))}
           </Select>
+          {models.length === 0 && (
+            <Tag color="warning">暂无可用模型</Tag>
+          )}
         </Space>
 
         <Button
           icon={<ClearOutlined />}
           onClick={handleClear}
-          disabled={messages.length === 0}
+          disabled={messages.length === 0 || loading}
         >
           清空对话
         </Button>
@@ -201,12 +250,14 @@ const Chat: React.FC = () => {
           <div style={{
             height: '100%',
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#999',
-            fontSize: 16,
           }}>
-            开始与 AI 助手对话
+            <div style={{ fontSize: 48, marginBottom: 16 }}>💬</div>
+            <div style={{ fontSize: 16, marginBottom: 8 }}>开始与 AI 助手对话</div>
+            <div style={{ fontSize: 14 }}>选择模型后输入消息，按 Enter 发送</div>
           </div>
         ) : (
           messages.map(msg => (
@@ -218,33 +269,67 @@ const Chat: React.FC = () => {
                 justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
               }}
             >
-              <Card
-                size="small"
+              <div
                 style={{
                   maxWidth: '80%',
+                  padding: 12,
+                  borderRadius: 12,
                   background: msg.role === 'user' ? '#1890ff' : '#fff',
                   color: msg.role === 'user' ? '#fff' : 'inherit',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
                 }}
-                bodyStyle={{ padding: 12 }}
               >
-                <div style={{ marginBottom: 4 }}>
+                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Tag color={msg.role === 'user' ? 'blue' : 'green'}>
                     {msg.role === 'user' ? '我' : 'AI'}
                   </Tag>
-                  {msg.model && (
-                    <Tag style={{ marginLeft: 8, fontSize: 12 }}>
+                  {msg.model && msg.role === 'assistant' && (
+                    <Tag size="small" style={{ fontSize: 11 }}>
                       {msg.model}
                     </Tag>
                   )}
+                  <span style={{ fontSize: 11, opacity: 0.6 }}>
+                    {msg.timestamp.toLocaleTimeString()}
+                  </span>
                 </div>
-                <div style={{ fontSize: 14, lineHeight: 1.6 }}>
+                <div style={{ fontSize: 14, lineHeight: 1.7 }}>
                   {msg.role === 'assistant' ? (
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    <div style={{ color: '#333' }}>
+                      <ReactMarkdown 
+                        components={{
+                          code: ({ children }: { children: React.ReactNode }) => (
+                            <code style={{ 
+                              background: '#f0f0f0', 
+                              padding: '2px 6px', 
+                              borderRadius: 4,
+                              fontFamily: 'monospace',
+                            }}>
+                              {children}
+                            </code>
+                          ),
+                          pre: ({ children }: { children: React.ReactNode }) => (
+                            <pre style={{ 
+                              background: '#f5f5f5', 
+                              padding: 12, 
+                              borderRadius: 8,
+                              overflow: 'auto',
+                              fontSize: 13,
+                            }}>
+                              {children}
+                            </pre>
+                          ),
+                        }}
+                      >
+                        {msg.content || (loading && msg.id === messages[messages.length - 1]?.id ? (
+                          <Spin size="small" />
+                        ) : '')}
+                      </ReactMarkdown>
+                    </div>
                   ) : (
                     msg.content
                   )}
                 </div>
-              </Card>
+              </div>
             </div>
           ))
         )}
@@ -252,7 +337,14 @@ const Chat: React.FC = () => {
       </div>
 
       {/* 输入框 */}
-      <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ 
+        display: 'flex', 
+        gap: 12,
+        padding: '12px 16px',
+        background: '#fff',
+        borderRadius: 8,
+        boxShadow: '0 -1px 2px rgba(0,0,0,0.05)',
+      }}>
         <TextArea
           value={input}
           onChange={e => setInput(e.target.value)}
@@ -260,18 +352,28 @@ const Chat: React.FC = () => {
           placeholder="输入消息，按 Enter 发送，Shift+Enter 换行..."
           autoSize={{ minRows: 2, maxRows: 6 }}
           style={{ flex: 1 }}
-          disabled={loading}
+          disabled={loading || !selectedModel}
         />
-        <Button
-          type="primary"
-          icon={<SendOutlined />}
-          onClick={handleSend}
-          loading={loading}
-          disabled={!input.trim() || !selectedModel}
-          style={{ height: 'auto' }}
-        >
-          发送
-        </Button>
+        {loading ? (
+          <Button
+            danger
+            icon={<StopOutlined />}
+            onClick={handleStop}
+            style={{ height: 'auto', minWidth: 80 }}
+          >
+            停止
+          </Button>
+        ) : (
+          <Button
+            type="primary"
+            icon={<SendOutlined />}
+            onClick={handleSend}
+            disabled={!input.trim() || !selectedModel}
+            style={{ height: 'auto', minWidth: 80 }}
+          >
+            发送
+          </Button>
+        )}
       </div>
     </div>
   );
