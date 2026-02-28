@@ -1,3 +1,4 @@
+// Package apikey 提供 API Key 管理相关的 HTTP 接口
 package apikey
 
 import (
@@ -11,14 +12,17 @@ import (
 	"llmgate/internal/models"
 )
 
+// Handler 处理 API Key 管理相关的 HTTP 请求
 type Handler struct {
 	service *Service
 }
 
+// NewHandler 创建 API Key HTTP 处理器
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// RegisterRoutes 注册 API Key 管理路由
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager) {
 	keys := r.Group("/user/keys")
 	keys.Use(middleware.AuthMiddleware(jwtManager))
@@ -29,6 +33,8 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager
 	}
 }
 
+// List 获取当前用户的所有 API Key
+// GET /api/v1/user/keys
 func (h *Handler) List(c *gin.Context) {
 	user := middleware.GetCurrentUser(c)
 	if user == nil {

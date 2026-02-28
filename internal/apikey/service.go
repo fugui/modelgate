@@ -1,3 +1,4 @@
+// Package apikey 提供 API Key 的生成、验证和管理功能
 package apikey
 
 import (
@@ -13,16 +14,18 @@ import (
 )
 
 const (
-	keyPrefix   = "llm-"
-	keyLength   = 32
-	prefixLen   = 12
+	keyPrefix = "llm-"   // API Key 前缀，用于识别
+	keyLength = 32       // 随机部分长度（字节）
+	prefixLen = 12       // 前缀显示长度（含 "llm-"）
 )
 
+// Service 提供 API Key 业务逻辑
 type Service struct {
 	store     *models.APIKeyStore
 	userStore *models.UserStore
 }
 
+// NewService 创建 API Key 服务实例
 func NewService(store *models.APIKeyStore, userStore *models.UserStore) *Service {
 	return &Service{
 		store:     store,
@@ -30,7 +33,8 @@ func NewService(store *models.APIKeyStore, userStore *models.UserStore) *Service
 	}
 }
 
-// GenerateKey 生成新的 API Key
+// GenerateKey 为用户生成新的 API Key
+// 返回包含明文的 API Key（仅创建时可获取）
 func (s *Service) GenerateKey(userID uuid.UUID, req *models.APIKeyCreateRequest) (*models.APIKeyWithSecret, error) {
 	// 生成随机 key
 	randomBytes := make([]byte, keyLength)
@@ -66,7 +70,9 @@ func (s *Service) GenerateKey(userID uuid.UUID, req *models.APIKeyCreateRequest)
 	}, nil
 }
 
-// ValidateKey 验证 API Key
+// ValidateKey 验证 API Key 的有效性
+// 检查：格式、hash、过期时间、启用状态、所属用户状态
+// 返回验证通过的 API Key 和用户信息
 func (s *Service) ValidateKey(plainKey string) (*models.APIKey, *models.User, error) {
 	if !strings.HasPrefix(plainKey, keyPrefix) {
 		return nil, nil, fmt.Errorf("invalid key format")
@@ -111,12 +117,12 @@ func (s *Service) ValidateKey(plainKey string) (*models.APIKey, *models.User, er
 	return key, user, nil
 }
 
-// GetUserKeys 获取用户的所有 API Key
+// GetUserKeys 获取指定用户的所有 API Key
 func (s *Service) GetUserKeys(userID uuid.UUID) ([]*models.APIKey, error) {
 	return s.store.ListByUser(userID)
 }
 
-// DeleteKey 删除 API Key
+// DeleteKey 删除用户自己的 API Key
 func (s *Service) DeleteKey(keyID uuid.UUID, userID uuid.UUID) error {
 	key, err := s.store.GetByID(keyID)
 	if err != nil {
