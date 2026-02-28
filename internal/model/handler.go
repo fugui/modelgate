@@ -8,19 +8,36 @@ import (
 	"llmgate/internal/auth"
 	"llmgate/internal/middleware"
 	"llmgate/internal/models"
+	"llmgate/internal/proxy"
 )
 
-type Handler struct {
-	store *models.ModelStore
+type LoadBalancer interface {
+	GetHealthStatus() map[string]proxy.BackendHealth
+	GetModelBackends(modelID string) []proxy.BackendHealth
 }
 
-func NewHandler(store *models.ModelStore) *Handler {
-	return &Handler{store: store}
+type Handler struct {
+	store        *models.ModelStore
+	loadBalancer LoadBalancer
+}
+
+func NewHandler(store *models.ModelStore, lb LoadBalancer) *Handler {
+	return &Handler{
+		store:        store,
+		loadBalancer: lb,
+	}
 }
 
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager) {
 	// 公开接口 - 列出可用模型（用于 LLM 代理）
 	r.GET("/v1/models", h.ListForProxy)
+
+	// 需要认证的接口
+	auth := r.Group("")
+	auth.Use(middleware.AuthMiddleware(jwtManager))
+	{
+		auth.GET("/admin/models/health", h.GetHealthStatus)
+	}
 
 	// 管理员接口
 	admin := r.Group("/admin/models")
@@ -31,6 +48,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager
 		admin.POST("", h.Create)
 		admin.PUT("/:id", h.Update)
 		admin.DELETE("/:id", h.Delete)
+		admin.GET("/:id/backends", h.GetModelBackends)
 	}
 }
 
@@ -148,6 +166,30 @@ func (h *Handler) Delete(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "model deleted"})
+}
+
+// GetHealthStatus 获取所有后端的健康状态
+func (h *Handler) GetHealthStatus(c *gin.Context) {
+	if h.loadBalancer == nil {
+		c.JSON(http.StatusOK, gin.H{"data": []interface{}{}})
+		return
+	}
+
+	status := h.loadBalancer.GetHealthStatus()
+	c.JSON(http.StatusOK, gin.H{"data": status})
+}
+
+// GetModelBackends 获取指定模型的后端健康状态
+func (h *Handler) GetModelBackends(c *gin.Context) {
+	id := c.Param("id")
+
+	if h.loadBalancer == nil {
+		c.JSON(http.StatusOK, gin.H{"data": []interface{}{}})
+		return
+	}
+
+	backends := h.loadBalancer.GetModelBackends(id)
+	c.JSON(http.StatusOK, gin.H{"data": backends})
 }
 
 // AdminHandler 管理员配额策略管理

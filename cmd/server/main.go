@@ -104,6 +104,10 @@ func main() {
 		}
 	}
 
+	// 启动健康检查（每 30 秒检查一次）
+	lb.StartHealthCheck(30 * time.Second)
+	log.Printf("Health check started with 30s interval")
+
 	// 初始化代理
 	proxyInstance := proxy.NewProxy(lb, quotaService, usageService, modelStore)
 
@@ -128,7 +132,7 @@ func main() {
 	apiKeyHandler := apikey.NewHandler(apiKeyService)
 	apiKeyHandler.RegisterRoutes(api, jwtManager)
 
-	modelHandler := model.NewHandler(modelStore)
+	modelHandler := model.NewHandler(modelStore, lb)
 	modelHandler.RegisterRoutes(api, jwtManager)
 
 	adminHandler := model.NewAdminHandler(quotaStore)
