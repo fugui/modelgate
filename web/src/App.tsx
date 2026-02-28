@@ -1,6 +1,6 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ConfigProvider, theme } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { ConfigProvider, theme, Spin } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import Login from './pages/Login';
 import MainLayout from './components/MainLayout';
@@ -8,6 +8,7 @@ import Chat from './pages/Chat';
 import UsageStats from './pages/UsageStats';
 import APIKeyManage from './pages/APIKeyManage';
 import Admin from './pages/Admin';
+import api from './api';
 import './App.css';
 
 const App: React.FC = () => {
@@ -54,10 +55,50 @@ const App: React.FC = () => {
 };
 
 const PrivateRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
-  const token = localStorage.getItem('token');
-  if (!token) {
+  const [isValidating, setIsValidating] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const validateToken = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setIsAuthenticated(false);
+        setIsValidating(false);
+        return;
+      }
+
+      try {
+        // 验证 token 是否有效
+        await api.get('/api/v1/user/profile');
+        setIsAuthenticated(true);
+      } catch (err: any) {
+        // Token 无效，清除登录状态
+        if (err.response?.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
+        setIsAuthenticated(false);
+      } finally {
+        setIsValidating(false);
+      }
+    };
+
+    validateToken();
+  }, [navigate]);
+
+  if (isValidating) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <Spin size="large" tip="加载中..." />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
+
   return children;
 };
 

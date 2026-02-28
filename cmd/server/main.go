@@ -111,6 +111,9 @@ func main() {
 	// 初始化代理
 	proxyInstance := proxy.NewProxy(lb, quotaService, usageService, modelStore)
 
+	// 初始化配额策略
+	initQuotaPolicies(quotaStore, cfg.Policies)
+
 	// 创建默认管理员
 	createDefaultAdmin(userStore, cfg.Admin.DefaultEmail, cfg.Admin.DefaultPassword)
 
@@ -129,17 +132,17 @@ func main() {
 	userHandler := user.NewHandler(userStore, jwtManager, quotaService, cfg.Frontend.FeedbackURL, cfg.Frontend.DevManualURL)
 	userHandler.RegisterRoutes(api)
 
-	apiKeyHandler := apikey.NewHandler(apiKeyService)
+	apiKeyHandler := apikey.NewHandler(apiKeyService, userStore)
 	apiKeyHandler.RegisterRoutes(api, jwtManager)
 
-	modelHandler := model.NewHandler(modelStore, lb)
+	modelHandler := model.NewHandler(modelStore, lb, userStore)
 	modelHandler.RegisterRoutes(api, jwtManager)
 
-	adminHandler := model.NewAdminHandler(quotaStore)
+	adminHandler := model.NewAdminHandler(quotaStore, userStore)
 	adminHandler.RegisterRoutes(api, jwtManager)
 
 	// OpenAI 兼容代理接口
-	proxyHandler := apikey.NewProxyHandler(apiKeyService, proxyInstance)
+	proxyHandler := apikey.NewProxyHandler(apiKeyService, proxyInstance, jwtManager, userStore)
 	proxyHandler.RegisterRoutes(r)
 
 	// 启动清理任务
@@ -166,6 +169,28 @@ func main() {
 	usageService.Flush()
 
 	log.Println("Server stopped")
+}
+
+func initQuotaPolicies(store *models.QuotaStore, policies []config.PolicyConfig) {
+	if len(policies) == 0 {
+		return
+	}
+
+	for _, p := range policies {
+		policy := &models.QuotaPolicy{
+			Name:            p.Name,
+			RateLimit:       p.RateLimit,
+			RateLimitWindow: p.RateLimitWindow,
+			TokenQuotaDaily: p.TokenQuotaDaily,
+			Models:          p.Models,
+			Description:     p.Description,
+		}
+		if err := store.CreateOrUpdatePolicy(policy); err != nil {
+			log.Printf("Failed to init quota policy %s: %v", p.Name, err)
+		} else {
+			log.Printf("Loaded quota policy: %s", p.Name)
+		}
+	}
 }
 
 func createDefaultAdmin(store *models.UserStore, email, password string) {

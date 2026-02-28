@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS users (
     models TEXT, -- JSON 数组
     enabled BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_login_at DATETIME
 );
 
@@ -59,10 +60,13 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key_hash TEXT UNIQUE NOT NULL,
     key_prefix TEXT NOT NULL,
     models TEXT, -- JSON 数组，null 表示使用用户默认
+    rate_limit INTEGER DEFAULT 0,
+    rate_limit_window INTEGER DEFAULT 60,
     enabled BOOLEAN DEFAULT 1,
     expires_at DATETIME,
     last_used_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -73,7 +77,9 @@ CREATE TABLE IF NOT EXISTS models (
     backend_url TEXT NOT NULL,
     enabled BOOLEAN DEFAULT 1,
     weight INTEGER DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 配额策略表
@@ -84,11 +90,29 @@ CREATE TABLE IF NOT EXISTS quota_policies (
     token_quota_daily INTEGER,
     token_quota_monthly INTEGER,
     models TEXT, -- JSON 数组
-    description TEXT
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 配额使用统计表
+CREATE TABLE IF NOT EXISTS quota_usage_daily (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    date DATE NOT NULL,
+    model_id TEXT NOT NULL,
+    request_count INTEGER DEFAULT 0,
+    token_count INTEGER DEFAULT 0,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    UNIQUE(user_id, date, model_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_quota_usage_user_id ON quota_usage_daily(user_id);
+CREATE INDEX IF NOT EXISTS idx_quota_usage_date ON quota_usage_daily(date);
 `
 
 	_, err := db.Exec(schema)

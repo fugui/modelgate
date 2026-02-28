@@ -40,7 +40,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 
 	// 需要认证的接口
 	auth := r.Group("")
-	auth.Use(middleware.AuthMiddleware(h.jwtManager))
+	auth.Use(middleware.AuthMiddlewareWithUserValidation(h.jwtManager, h.store))
 	{
 		auth.GET("/user/profile", h.Profile)
 		auth.GET("/user/quota", h.GetQuota)
@@ -49,7 +49,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 
 	// 管理员接口
 	admin := r.Group("/admin/users")
-	admin.Use(middleware.AuthMiddleware(h.jwtManager))
+	admin.Use(middleware.AuthMiddlewareWithUserValidation(h.jwtManager, h.store))
 	admin.Use(middleware.AdminRequired())
 	{
 		admin.GET("", h.List)

@@ -18,13 +18,15 @@ type LoadBalancer interface {
 
 type Handler struct {
 	store        *models.ModelStore
+	userStore    *models.UserStore
 	loadBalancer LoadBalancer
 }
 
-func NewHandler(store *models.ModelStore, lb LoadBalancer) *Handler {
+func NewHandler(store *models.ModelStore, lb LoadBalancer, userStore *models.UserStore) *Handler {
 	return &Handler{
 		store:        store,
 		loadBalancer: lb,
+		userStore:    userStore,
 	}
 }
 
@@ -34,14 +36,14 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager
 
 	// 需要认证的接口
 	auth := r.Group("")
-	auth.Use(middleware.AuthMiddleware(jwtManager))
+	auth.Use(middleware.AuthMiddlewareWithUserValidation(jwtManager, h.userStore))
 	{
 		auth.GET("/admin/models/health", h.GetHealthStatus)
 	}
 
 	// 管理员接口
 	admin := r.Group("/admin/models")
-	admin.Use(middleware.AuthMiddleware(jwtManager))
+	admin.Use(middleware.AuthMiddlewareWithUserValidation(jwtManager, h.userStore))
 	admin.Use(middleware.AdminRequired())
 	{
 		admin.GET("", h.List)
@@ -195,15 +197,16 @@ func (h *Handler) GetModelBackends(c *gin.Context) {
 // AdminHandler 管理员配额策略管理
 type AdminHandler struct {
 	quotaStore *models.QuotaStore
+	userStore  *models.UserStore
 }
 
-func NewAdminHandler(quotaStore *models.QuotaStore) *AdminHandler {
-	return &AdminHandler{quotaStore: quotaStore}
+func NewAdminHandler(quotaStore *models.QuotaStore, userStore *models.UserStore) *AdminHandler {
+	return &AdminHandler{quotaStore: quotaStore, userStore: userStore}
 }
 
 func (h *AdminHandler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager) {
 	admin := r.Group("/admin/policies")
-	admin.Use(middleware.AuthMiddleware(jwtManager))
+	admin.Use(middleware.AuthMiddlewareWithUserValidation(jwtManager, h.userStore))
 	admin.Use(middleware.AdminRequired())
 	{
 		admin.GET("", h.ListPolicies)

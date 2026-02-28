@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Input, Button, Select, message, Space, Tag, Empty, Spin } from 'antd';
-import { SendOutlined, ClearOutlined, StopOutlined, KeyOutlined } from '@ant-design/icons';
+import { Input, Button, Select, message, Space, Tag, Spin } from 'antd';
+import { SendOutlined, ClearOutlined, StopOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
-import { useNavigate } from 'react-router-dom';
 import api from '../api';
 
 const { TextArea } = Input;
@@ -27,12 +26,10 @@ const Chat: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [models, setModels] = useState<Model[]>([]);
   const [loading, setLoading] = useState(false);
-  const [hasApiKey, setHasApiKey] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const navigate = useNavigate();
 
-  // 获取可用模型列表和 API Key 状态
+  // 获取可用模型列表
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -43,11 +40,6 @@ const Chat: React.FC = () => {
         if (modelList.length > 0 && !selectedModel) {
           setSelectedModel(modelList[0]);
         }
-
-        // 检查是否有 API Key
-        const keysRes = await api.get('/api/v1/user/keys');
-        const keys = keysRes.data.data || [];
-        setHasApiKey(keys.length > 0);
       } catch (err) {
         console.error('Failed to fetch data:', err);
       }
@@ -78,11 +70,13 @@ const Chat: React.FC = () => {
     abortControllerRef.current = new AbortController();
 
     try {
-      // 调用聊天接口 - 使用代理端点，会自动使用当前用户的身份
+      // 调用聊天接口 - 使用 JWT Token 认证
+      const token = localStorage.getItem('token');
       const response = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
           model: selectedModel,
@@ -174,27 +168,6 @@ const Chat: React.FC = () => {
       handleSend();
     }
   };
-
-  // 如果没有 API Key，显示引导
-  if (!hasApiKey) {
-    return (
-      <Empty
-        image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description={
-          <Space orientation="vertical" size="large" style={{ textAlign: 'center' }}>
-            <div>
-              <KeyOutlined style={{ fontSize: 48, color: '#1890ff' }} />
-              <h3 style={{ marginTop: 16 }}>需要 API Key 才能使用聊天功能</h3>
-              <p style={{ color: '#666' }}>请先创建一个 API Key，然后刷新页面</p>
-            </div>
-            <Button type="primary" onClick={() => navigate('/keys')}>
-              去创建 API Key
-            </Button>
-          </Space>
-        }
-      />
-    );
-  }
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>

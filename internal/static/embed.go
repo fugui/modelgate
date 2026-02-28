@@ -48,6 +48,10 @@ func Serve() gin.HandlerFunc {
 		file, err := staticFS.Open(strings.TrimPrefix(filepath, "/"))
 		if err != nil {
 			// 文件不存在，返回 index.html（支持前端路由）
+			// 禁用缓存，确保前端路由能正确处理鉴权
+			c.Writer.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			c.Writer.Header().Set("Pragma", "no-cache")
+			c.Writer.Header().Set("Expires", "0")
 			c.Request.URL.Path = "/"
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			return
@@ -55,6 +59,12 @@ func Serve() gin.HandlerFunc {
 		file.Close()
 
 		// 文件存在，直接提供
+		// 对 index.html 禁用缓存，确保前端路由能正确处理鉴权
+		if filepath == "/index.html" {
+			c.Writer.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			c.Writer.Header().Set("Pragma", "no-cache")
+			c.Writer.Header().Set("Expires", "0")
+		}
 		fileServer.ServeHTTP(c.Writer, c.Request)
 		c.Abort()
 	}

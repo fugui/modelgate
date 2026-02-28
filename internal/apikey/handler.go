@@ -12,20 +12,37 @@ import (
 	"llmgate/internal/models"
 )
 
+// contextKey 用于在 gin 上下文中存储认证信息
+type contextKey string
+
+const (
+	contextKeyUserID    contextKey = "user_id"
+	contextKeyAPIKeyID  contextKey = "api_key_id"
+	contextKeyAuthType  contextKey = "auth_type"
+)
+
+type authType string
+
+const (
+	authTypeAPIKey authType = "apikey"
+	authTypeJWT    authType = "jwt"
+)
+
 // Handler 处理 API Key 管理相关的 HTTP 请求
 type Handler struct {
-	service *Service
+	service   *Service
+	userStore *models.UserStore
 }
 
 // NewHandler 创建 API Key HTTP 处理器
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, userStore *models.UserStore) *Handler {
+	return &Handler{service: service, userStore: userStore}
 }
 
 // RegisterRoutes 注册 API Key 管理路由
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager) {
 	keys := r.Group("/user/keys")
-	keys.Use(middleware.AuthMiddleware(jwtManager))
+	keys.Use(middleware.AuthMiddlewareWithUserValidation(jwtManager, h.userStore))
 	{
 		keys.GET("", h.List)
 		keys.POST("", h.Create)
@@ -103,7 +120,8 @@ func (h *Handler) Delete(c *gin.Context) {
 type ProxyHandler struct {
 	service    *Service
 	proxy      Proxy
-	jwtManager interface{}
+	jwtManager *auth.JWTManager
+	userStore  *models.UserStore
 }
 
 // Proxy 代理接口
@@ -112,10 +130,12 @@ type Proxy interface {
 	HandleListModels(c *gin.Context)
 }
 
-func NewProxyHandler(service *Service, proxy Proxy) *ProxyHandler {
+func NewProxyHandler(service *Service, proxy Proxy, jwtManager *auth.JWTManager, userStore *models.UserStore) *ProxyHandler {
 	return &ProxyHandler{
-		service: service,
-		proxy:   proxy,
+		service:    service,
+		proxy:      proxy,
+		jwtManager: jwtManager,
+		userStore:  userStore,
 	}
 }
 
@@ -136,22 +156,54 @@ func (h *ProxyHandler) AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// 支持 Bearer 和直接 API Key 格式
-		var apiKey string
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			apiKey = strings.TrimPrefix(authHeader, "Bearer ")
-		} else {
-			apiKey = authHeader
-		}
-
-		key, _, err := h.service.ValidateKey(apiKey)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid api key"})
+		// 支持 Bearer Token 格式
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization header format"})
 			return
 		}
 
-		c.Set("api_key_id", key.ID)
-		c.Set("user_id", key.UserID)
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+
+		// 先尝试作为 API Key 验证
+		key, _, err := h.service.ValidateKey(token)
+		if err == nil {
+			// API Key 验证成功
+			c.Set(string(contextKeyAPIKeyID), key.ID)
+			c.Set(string(contextKeyUserID), key.UserID)
+			c.Set(string(contextKeyAuthType), authTypeAPIKey)
+			c.Next()
+			return
+		}
+
+		// 如果不是有效的 API Key，尝试作为 JWT Token 验证
+		claims, err := h.jwtManager.Validate(token)
+		if err != nil {
+			if err == auth.ErrExpiredToken {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token expired"})
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization"})
+			return
+		}
+
+		// 验证用户是否存在于数据库且未禁用
+		user, err := h.userStore.GetByID(claims.UserID)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to verify user"})
+			return
+		}
+		if user == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+			return
+		}
+		if !user.Enabled {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "user disabled"})
+			return
+		}
+
+		// JWT 验证成功
+		c.Set(string(contextKeyUserID), claims.UserID)
+		c.Set(string(contextKeyAuthType), authTypeJWT)
 		c.Next()
 	}
 }
@@ -161,11 +213,18 @@ func (h *ProxyHandler) ListModels(c *gin.Context) {
 }
 
 func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	apiKeyID, _ := c.Get("api_key_id")
+	userID, _ := c.Get(string(contextKeyUserID))
+	apiKeyID, hasAPIKey := c.Get(string(contextKeyAPIKeyID))
 
 	uid := userID.(uuid.UUID)
-	akid := apiKeyID.(uuid.UUID)
+
+	// 如果是 JWT 认证，apiKeyID 可能为空，使用零值 UUID
+	var akid uuid.UUID
+	if hasAPIKey {
+		akid = apiKeyID.(uuid.UUID)
+	} else {
+		akid = uuid.Nil
+	}
 
 	h.proxy.HandleChatCompletions(c, uid, akid)
 }
