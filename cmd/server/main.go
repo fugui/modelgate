@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,9 +13,11 @@ import (
 
 	"llmgate/internal/apikey"
 	"llmgate/internal/auth"
+	"llmgate/internal/concurrency"
 	"llmgate/internal/config"
 	"llmgate/internal/db"
 	"llmgate/internal/logger"
+	"llmgate/internal/middleware"
 	"llmgate/internal/model"
 	"llmgate/internal/models"
 	"llmgate/internal/proxy"
@@ -152,6 +155,14 @@ func main() {
 	// 初始化代理
 	proxyInstance := proxy.NewProxy(lb, quotaService, usageService, modelStore, backendStore)
 
+	// 初始化并发限制器
+	var concurrencyLimiter *concurrency.Limiter
+	if cfg.Concurrency.GlobalLimit > 0 || cfg.Concurrency.UserLimit > 0 {
+		concurrencyLimiter = concurrency.NewLimiter(cfg.Concurrency.GlobalLimit, cfg.Concurrency.UserLimit)
+		log.Printf("Concurrency limiter enabled: global=%d, user=%d",
+			cfg.Concurrency.GlobalLimit, cfg.Concurrency.UserLimit)
+	}
+
 	// 初始化配额策略
 	initQuotaPolicies(quotaStore, cfg.Policies)
 
@@ -182,9 +193,21 @@ func main() {
 	adminHandler := model.NewAdminHandler(quotaStore, userStore)
 	adminHandler.RegisterRoutes(api, jwtManager)
 
+	// 并发状态管理 API（管理员）
+	if concurrencyLimiter != nil {
+		adminAPI := api.Group("/admin")
+		adminAPI.Use(middleware.AuthMiddlewareWithUserValidation(jwtManager, userStore))
+		adminAPI.Use(middleware.AdminRequired())
+		{
+			adminAPI.GET("/concurrency/stats", func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{"data": concurrencyLimiter.GetStats()})
+			})
+		}
+	}
+
 	// OpenAI 兼容代理接口
 	proxyHandler := apikey.NewProxyHandler(apiKeyService, proxyInstance, jwtManager, userStore)
-	proxyHandler.RegisterRoutes(r)
+	proxyHandler.RegisterRoutes(r, concurrencyLimiter)
 
 	// 启动清理任务
 	go cleanupTask(usageService)

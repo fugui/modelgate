@@ -98,6 +98,11 @@ logs:
   path: "logs"
   retention_days: 7
 
+# 并发控制配置
+concurrency:
+  global_limit: 100  # 全局最大并发请求数
+  user_limit: 10     # 每个用户最大并发请求数
+
 # 前端配置
 frontend:
   feedback_url: "https://feedback.example.com"      # 用户反馈链接

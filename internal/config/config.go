@@ -8,14 +8,15 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	JWT      JWTConfig      `yaml:"jwt"`
-	Models   []ModelConfig  `yaml:"models"`
-	Policies []PolicyConfig `yaml:"quota_policies"`
-	Admin    AdminConfig    `yaml:"admin"`
-	Logs     LogConfig      `yaml:"logs"`
-	Frontend FrontendConfig `yaml:"frontend"`
+	Server      ServerConfig      `yaml:"server"`
+	Database    DatabaseConfig    `yaml:"database"`
+	JWT         JWTConfig         `yaml:"jwt"`
+	Models      []ModelConfig     `yaml:"models"`
+	Policies    []PolicyConfig    `yaml:"quota_policies"`
+	Admin       AdminConfig       `yaml:"admin"`
+	Logs        LogConfig         `yaml:"logs"`
+	Frontend    FrontendConfig    `yaml:"frontend"`
+	Concurrency ConcurrencyConfig `yaml:"concurrency"`
 }
 
 type ServerConfig struct {
@@ -73,6 +74,11 @@ type AdminConfig struct {
 type FrontendConfig struct {
 	FeedbackURL  string `yaml:"feedback_url"`
 	DevManualURL string `yaml:"dev_manual_url"`
+}
+
+type ConcurrencyConfig struct {
+	GlobalLimit int `yaml:"global_limit"` // 全局并发限制，0 表示不限制
+	UserLimit   int `yaml:"user_limit"`   // 每个用户并发限制，0 表示不限制
 }
 
 func Load(path string) (*Config, error) {
