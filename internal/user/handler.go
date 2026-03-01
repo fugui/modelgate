@@ -2,10 +2,12 @@ package user
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"llmgate/internal/auth"
+	"llmgate/internal/cache"
 	"llmgate/internal/middleware"
 	"llmgate/internal/models"
 )
@@ -19,21 +21,28 @@ type QuotaStore interface {
 	GetDailyUsageList(userID uuid.UUID, startDate, endDate time.Time) ([]*models.QuotaUsageDaily, error)
 }
 
+type Cache interface {
+	DeleteUser(userID string)
+	DeleteAPIKeysByUser(userID uuid.UUID)
+}
+
 type Handler struct {
 	store          *models.UserStore
 	jwtManager     *auth.JWTManager
 	quotaService   QuotaService
 	quotaStore     QuotaStore
+	cache          Cache
 	feedbackURL    string
 	devManualURL   string
 }
 
-func NewHandler(store *models.UserStore, jwtManager *auth.JWTManager, quotaService QuotaService, quotaStore QuotaStore, feedbackURL, devManualURL string) *Handler {
+func NewHandler(store *models.UserStore, jwtManager *auth.JWTManager, quotaService QuotaService, quotaStore QuotaStore, c Cache, feedbackURL, devManualURL string) *Handler {
 	return &Handler{
 		store:        store,
 		jwtManager:   jwtManager,
 		quotaService: quotaService,
 		quotaStore:   quotaStore,
+		cache:        c,
 		feedbackURL:  feedbackURL,
 		devManualURL: devManualURL,
 	}
@@ -309,6 +318,12 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
+	// 如果用户被禁用，清除缓存
+	if req.Enabled != nil && !*req.Enabled {
+		h.cache.DeleteUser(id.String())
+		h.cache.DeleteAPIKeysByUser(id)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": user.ToResponse()})
 }
 
@@ -318,6 +333,10 @@ func (h *Handler) Delete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
 		return
 	}
+
+	// 清除用户缓存和 API Key 缓存
+	h.cache.DeleteUser(id.String())
+	h.cache.DeleteAPIKeysByUser(id)
 
 	if err := h.store.Delete(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -365,7 +384,7 @@ func (h *Handler) GetUsage(c *gin.Context) {
 func (h *Handler) GetFrontendConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"feedback_url":  h.feedbackURL,
+			"feedback_url":   h.feedbackURL,
 			"dev_manual_url": h.devManualURL,
 		},
 	})

@@ -13,6 +13,7 @@ import (
 
 	"llmgate/internal/apikey"
 	"llmgate/internal/auth"
+	"llmgate/internal/cache"
 	"llmgate/internal/concurrency"
 	"llmgate/internal/config"
 	"llmgate/internal/db"
@@ -53,6 +54,11 @@ func main() {
 	userLogger := logger.NewUserLogger(cfg.Logs.Path, cfg.Logs.RetentionDays)
 	defer userLogger.Close()
 
+	// 初始化本地缓存
+	localCache := cache.New()
+	defer localCache.Stop()
+	log.Println("Local cache initialized")
+
 	// 初始化存储层
 	userStore := models.NewUserStore(database.DB)
 	apiKeyStore := models.NewAPIKeyStore(database.DB)
@@ -64,7 +70,7 @@ func main() {
 	jwtManager := auth.NewJWTManager(cfg.JWT.Secret, cfg.JWT.ExpireHours)
 
 	// 初始化服务层
-	apiKeyService := apikey.NewService(apiKeyStore, userStore)
+	apiKeyService := apikey.NewService(apiKeyStore, userStore, localCache)
 	quotaService := quota.NewService(quotaStore)
 	usageService := usage.NewService(userLogger)
 
@@ -181,7 +187,7 @@ func main() {
 	api := r.Group("/api/v1")
 
 	// 注册各模块路由
-	userHandler := user.NewHandler(userStore, jwtManager, quotaService, quotaStore, cfg.Frontend.FeedbackURL, cfg.Frontend.DevManualURL)
+	userHandler := user.NewHandler(userStore, jwtManager, quotaService, quotaStore, localCache, cfg.Frontend.FeedbackURL, cfg.Frontend.DevManualURL)
 	userHandler.RegisterRoutes(api)
 
 	apiKeyHandler := apikey.NewHandler(apiKeyService, userStore)
@@ -201,6 +207,9 @@ func main() {
 		{
 			adminAPI.GET("/concurrency/stats", func(c *gin.Context) {
 				c.JSON(http.StatusOK, gin.H{"data": concurrencyLimiter.GetStats()})
+			})
+			adminAPI.GET("/cache/stats", func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{"data": localCache.Stats()})
 			})
 		}
 	}

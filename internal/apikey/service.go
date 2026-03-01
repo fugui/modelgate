@@ -10,26 +10,29 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"llmgate/internal/cache"
 	"llmgate/internal/models"
 )
 
 const (
 	keyPrefix = "llm-"   // API Key 前缀，用于识别
 	keyLength = 32       // 随机部分长度（字节）
-	prefixLen = 12       // 前缀显示长度（含 "llm-"）
+	prefixLen = 12       // 前缀显示长度（含 "llm-")
 )
 
 // Service 提供 API Key 业务逻辑
 type Service struct {
 	store     *models.APIKeyStore
 	userStore *models.UserStore
+	cache     *cache.Cache
 }
 
 // NewService 创建 API Key 服务实例
-func NewService(store *models.APIKeyStore, userStore *models.UserStore) *Service {
+func NewService(store *models.APIKeyStore, userStore *models.UserStore, c *cache.Cache) *Service {
 	return &Service{
 		store:     store,
 		userStore: userStore,
+		cache:     c,
 	}
 }
 
@@ -78,8 +81,32 @@ func (s *Service) ValidateKey(plainKey string) (*models.APIKey, *models.User, er
 		return nil, nil, fmt.Errorf("invalid key format")
 	}
 
-	// 从数据库查找匹配的 key
-	key, err := s.store.GetByKeyPrefix(plainKey[:prefixLen])
+	keyPrefixStr := plainKey[:prefixLen]
+
+	// 1. 尝试从缓存获取
+	if cached := s.cache.GetAPIKey(keyPrefixStr); cached != nil {
+		// 验证 hash
+		if err := bcrypt.CompareHashAndPassword([]byte(cached.KeyHash), []byte(plainKey)); err != nil {
+			return nil, nil, fmt.Errorf("invalid key")
+		}
+		// 检查是否启用
+		if !cached.Enabled {
+			return nil, nil, fmt.Errorf("key disabled")
+		}
+		// 检查用户是否启用
+		if !cached.UserInfo.Enabled {
+			return nil, nil, fmt.Errorf("user disabled")
+		}
+		return &models.APIKey{
+			ID:        cached.KeyID,
+			UserID:    cached.UserID,
+			Enabled:   cached.Enabled,
+			ExpiresAt: cached.ExpiresAt,
+		}, cached.UserInfo, nil
+	}
+
+	// 2. 缓存未命中，从数据库查找
+	key, err := s.store.GetByKeyPrefix(keyPrefixStr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -114,6 +141,9 @@ func (s *Service) ValidateKey(plainKey string) (*models.APIKey, *models.User, er
 		return nil, nil, fmt.Errorf("user disabled")
 	}
 
+	// 3. 写入缓存
+	s.cache.SetAPIKey(keyPrefixStr, key, user)
+
 	return key, user, nil
 }
 
@@ -132,10 +162,22 @@ func (s *Service) DeleteKey(keyID uuid.UUID, userID uuid.UUID) error {
 		return fmt.Errorf("key not found")
 	}
 
+	// 删除缓存
+	s.cache.DeleteAPIKey(key.KeyPrefix)
+
 	return s.store.Delete(keyID)
 }
 
 // DeleteKeyAdmin 管理员删除任意 Key
 func (s *Service) DeleteKeyAdmin(keyID uuid.UUID) error {
+	// 先查询 key 获取 prefix
+	key, err := s.store.GetByID(keyID)
+	if err != nil {
+		return err
+	}
+	if key != nil {
+		s.cache.DeleteAPIKey(key.KeyPrefix)
+	}
+
 	return s.store.Delete(keyID)
 }
