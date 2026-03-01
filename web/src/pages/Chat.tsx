@@ -161,11 +161,9 @@ const Chat: React.FC = () => {
 
             try {
               const parsed = JSON.parse(data);
-              // 处理 delta.content 或 delta.reasoning_content（Kimi 等模型使用）
+              // 只使用 delta.content，忽略 reasoning_content（非 Thinking 模式）
               const delta = parsed.choices?.[0]?.delta || {};
-              const content = delta.content || '';
-              const reasoningContent = delta.reasoning_content || '';
-              const text = content || reasoningContent;
+              const text = delta.content || '';
 
               if (text && streamingRef.current) {
                 streamingRef.current.content += text;
