@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Input, Button, Select, message, Space, Tag, Spin } from 'antd';
 import { SendOutlined, ClearOutlined, StopOutlined } from '@ant-design/icons';
+import ReactMarkdown from 'react-markdown';
 import api from '../api';
 
 const { TextArea } = Input;
@@ -326,9 +327,103 @@ const Chat: React.FC = () => {
                   {msg.role === 'assistant' ? (
                     <div style={{ color: '#333' }}>
                       {/* 流式内容显示区域 - id 用于直接 DOM 更新 */}
-                      <div id={'streaming-content-' + msg.id} style={{whiteSpace: 'pre-wrap', minHeight: 20}}>
-                        {msg.content || ''}
-                      </div>
+                      {loading && msg.id === messages[messages.length - 1]?.id ? (
+                        // 流式输出中：显示纯文本
+                        <div id={'streaming-content-' + msg.id} style={{whiteSpace: 'pre-wrap', minHeight: 20}}>
+                          {msg.content || ''}
+                        </div>
+                      ) : (
+                        // 流式完成后：使用 Markdown 渲染
+                        <div className="markdown-content">
+                          <ReactMarkdown
+                            components={{
+                              code: ({ node, inline, className, children, ...props }: any) => (
+                                inline ? (
+                                  <code style={{
+                                    background: '#f0f0f0',
+                                    padding: '2px 6px',
+                                    borderRadius: 4,
+                                    fontFamily: 'monospace',
+                                    fontSize: '0.9em',
+                                  }} {...props}>
+                                    {children}
+                                  </code>
+                                ) : (
+                                  <pre style={{
+                                    background: '#f5f5f5',
+                                    padding: 12,
+                                    borderRadius: 8,
+                                    overflow: 'auto',
+                                    fontSize: 13,
+                                    border: '1px solid #e8e8e8',
+                                  }}>
+                                    <code style={{ fontFamily: 'monospace' }} {...props}>
+                                      {children}
+                                    </code>
+                                  </pre>
+                                )
+                              ),
+                              p: ({ children }: any) => (
+                                <p style={{ margin: '0.5em 0' }}>{children}</p>
+                              ),
+                              ul: ({ children }: any) => (
+                                <ul style={{ paddingLeft: 20, margin: '0.5em 0' }}>{children}</ul>
+                              ),
+                              ol: ({ children }: any) => (
+                                <ol style={{ paddingLeft: 20, margin: '0.5em 0' }}>{children}</ol>
+                              ),
+                              li: ({ children }: any) => (
+                                <li style={{ margin: '0.25em 0' }}>{children}</li>
+                              ),
+                              h1: ({ children }: any) => (
+                                <h1 style={{ fontSize: 20, margin: '0.5em 0', fontWeight: 600 }}>{children}</h1>
+                              ),
+                              h2: ({ children }: any) => (
+                                <h2 style={{ fontSize: 18, margin: '0.5em 0', fontWeight: 600 }}>{children}</h2>
+                              ),
+                              h3: ({ children }: any) => (
+                                <h3 style={{ fontSize: 16, margin: '0.5em 0', fontWeight: 600 }}>{children}</h3>
+                              ),
+                              blockquote: ({ children }: any) => (
+                                <blockquote style={{
+                                  borderLeft: '4px solid #ddd',
+                                  paddingLeft: 12,
+                                  margin: '0.5em 0',
+                                  color: '#666',
+                                }}>{children}</blockquote>
+                              ),
+                              a: ({ href, children }: any) => (
+                                <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#1890ff' }}>
+                                  {children}
+                                </a>
+                              ),
+                              table: ({ children }: any) => (
+                                <table style={{
+                                  borderCollapse: 'collapse',
+                                  width: '100%',
+                                  margin: '0.5em 0',
+                                }}>{children}</table>
+                              ),
+                              th: ({ children }: any) => (
+                                <th style={{
+                                  border: '1px solid #ddd',
+                                  padding: '8px 12px',
+                                  background: '#f5f5f5',
+                                  fontWeight: 600,
+                                }}>{children}</th>
+                              ),
+                              td: ({ children }: any) => (
+                                <td style={{
+                                  border: '1px solid #ddd',
+                                  padding: '8px 12px',
+                                }}>{children}</td>
+                              ),
+                            }}
+                          >
+                            {msg.content || ''}
+                          </ReactMarkdown>
+                        </div>
+                      )}
                       {loading && msg.id === messages[messages.length - 1]?.id && (
                         <Spin size="small" style={{ marginLeft: 8 }} />
                       )}
