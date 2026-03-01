@@ -2,30 +2,34 @@ package models
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 )
 
 type Model struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Enabled     bool      `json:"enabled"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Enabled     bool                   `json:"enabled"`
+	ModelParams map[string]interface{} `json:"model_params"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
 
 type ModelCreateRequest struct {
-	ID          string               `json:"id" binding:"required"`
-	Name        string               `json:"name" binding:"required"`
-	Description string               `json:"description"`
-	Enabled     bool                 `json:"enabled"`
-	Backends    []BackendCreateInput `json:"backends"`
+	ID          string                 `json:"id" binding:"required"`
+	Name        string                 `json:"name" binding:"required"`
+	Description string                 `json:"description"`
+	Enabled     bool                   `json:"enabled"`
+	ModelParams map[string]interface{} `json:"model_params"`
+	Backends    []BackendCreateInput   `json:"backends"`
 }
 
 type ModelUpdateRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Enabled     *bool  `json:"enabled"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Enabled     *bool                  `json:"enabled"`
+	ModelParams map[string]interface{} `json:"model_params"`
 }
 
 type BackendCreateInput struct {
@@ -49,40 +53,49 @@ func NewModelStore(db *sql.DB) *ModelStore {
 }
 
 func (s *ModelStore) Create(model *Model) error {
+	paramsJSON, _ := json.Marshal(model.ModelParams)
 	query := `
-		INSERT INTO models (id, name, description, enabled)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO models (id, name, description, enabled, model_params)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			description = excluded.description,
 			enabled = excluded.enabled,
+			model_params = excluded.model_params,
 			updated_at = CURRENT_TIMESTAMP
 		RETURNING created_at, updated_at`
 
 	return s.db.QueryRow(query,
-		model.ID, model.Name, model.Description, model.Enabled,
+		model.ID, model.Name, model.Description, model.Enabled, string(paramsJSON),
 	).Scan(&model.CreatedAt, &model.UpdatedAt)
 }
 
 func (s *ModelStore) GetByID(id string) (*Model, error) {
 	model := &Model{}
+	var paramsJSON string
 	query := `
-		SELECT id, name, description, enabled, created_at, updated_at
+		SELECT id, name, description, enabled, model_params, created_at, updated_at
 		FROM models WHERE id = ?`
 
 	err := s.db.QueryRow(query, id).Scan(
-		&model.ID, &model.Name, &model.Description, &model.Enabled,
+		&model.ID, &model.Name, &model.Description, &model.Enabled, &paramsJSON,
 		&model.CreatedAt, &model.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return model, err
+	if err != nil {
+		return nil, err
+	}
+	if paramsJSON != "" {
+		json.Unmarshal([]byte(paramsJSON), &model.ModelParams)
+	}
+	return model, nil
 }
 
 func (s *ModelStore) List() ([]*Model, error) {
 	query := `
-		SELECT id, name, description, enabled, created_at, updated_at
+		SELECT id, name, description, enabled, model_params, created_at, updated_at
 		FROM models ORDER BY created_at`
 
 	rows, err := s.db.Query(query)
@@ -94,12 +107,16 @@ func (s *ModelStore) List() ([]*Model, error) {
 	var models []*Model
 	for rows.Next() {
 		model := &Model{}
+		var paramsJSON string
 		err := rows.Scan(
-			&model.ID, &model.Name, &model.Description, &model.Enabled,
+			&model.ID, &model.Name, &model.Description, &model.Enabled, &paramsJSON,
 			&model.CreatedAt, &model.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
+		}
+		if paramsJSON != "" {
+			json.Unmarshal([]byte(paramsJSON), &model.ModelParams)
 		}
 		models = append(models, model)
 	}
@@ -108,7 +125,7 @@ func (s *ModelStore) List() ([]*Model, error) {
 
 func (s *ModelStore) ListEnabled() ([]*Model, error) {
 	query := `
-		SELECT id, name, description, enabled, created_at, updated_at
+		SELECT id, name, description, enabled, model_params, created_at, updated_at
 		FROM models WHERE enabled = 1 ORDER BY created_at`
 
 	rows, err := s.db.Query(query)
@@ -120,12 +137,16 @@ func (s *ModelStore) ListEnabled() ([]*Model, error) {
 	var models []*Model
 	for rows.Next() {
 		model := &Model{}
+		var paramsJSON string
 		err := rows.Scan(
-			&model.ID, &model.Name, &model.Description, &model.Enabled,
+			&model.ID, &model.Name, &model.Description, &model.Enabled, &paramsJSON,
 			&model.CreatedAt, &model.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
+		}
+		if paramsJSON != "" {
+			json.Unmarshal([]byte(paramsJSON), &model.ModelParams)
 		}
 		models = append(models, model)
 	}
@@ -133,13 +154,14 @@ func (s *ModelStore) ListEnabled() ([]*Model, error) {
 }
 
 func (s *ModelStore) Update(model *Model) error {
+	paramsJSON, _ := json.Marshal(model.ModelParams)
 	query := `
 		UPDATE models SET
-			name = ?, description = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+			name = ?, description = ?, enabled = ?, model_params = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`
 
 	_, err := s.db.Exec(query,
-		model.Name, model.Description, model.Enabled, model.ID,
+		model.Name, model.Description, model.Enabled, string(paramsJSON), model.ID,
 	)
 	return err
 }

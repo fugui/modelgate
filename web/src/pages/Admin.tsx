@@ -11,6 +11,7 @@ interface Model {
   name: string;
   description: string;
   enabled: boolean;
+  model_params?: Record<string, any>;
   created_at: string;
   updated_at: string;
   backend_count?: number;
@@ -171,6 +172,7 @@ const Admin: React.FC = () => {
       name: model.name,
       description: model.description,
       enabled: model.enabled,
+      model_params: model.model_params ? JSON.stringify(model.model_params, null, 2) : '',
     });
     setModelModalVisible(true);
   };
@@ -180,16 +182,29 @@ interface ModelFormValues {
   name: string;
   description: string;
   enabled: boolean;
+  model_params?: string;
 }
 
   const handleModelSubmit = async (values: ModelFormValues) => {
     try {
+      // 解析 model_params JSON
+      let modelParams = undefined;
+      if (values.model_params) {
+        try {
+          modelParams = JSON.parse(values.model_params);
+        } catch {
+          messageApi.error('模型参数 JSON 格式错误');
+          return;
+        }
+      }
+
       if (editingModel) {
         // Update existing model
         await api.put(`/api/v1/admin/models/${editingModel.id}`, {
           name: values.name,
           description: values.description,
           enabled: values.enabled,
+          model_params: modelParams,
         });
         messageApi.success('模型更新成功');
       } else {
@@ -199,6 +214,7 @@ interface ModelFormValues {
           name: values.name,
           description: values.description,
           enabled: values.enabled,
+          model_params: modelParams,
         });
         messageApi.success('模型创建成功');
       }
@@ -554,6 +570,20 @@ interface ModelFormValues {
             valuePropName="checked"
           >
             <Switch />
+          </Form.Item>
+
+          <Form.Item
+            name="model_params"
+            label="模型参数"
+            extra="JSON 格式，如：{&quot;enable_thinking&quot;: false}"
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder={`{
+  "enable_thinking": false,
+  "max_tokens": 4096
+}`}
+            />
           </Form.Item>
         </Form>
       </Modal>

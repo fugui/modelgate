@@ -39,11 +39,12 @@ type LogConfig struct {
 }
 
 type ModelConfig struct {
-	ID          string          `yaml:"id"`
-	Name        string          `yaml:"name"`
-	Description string          `yaml:"description"`
-	Enabled     bool            `yaml:"enabled"`
-	Backends    []BackendConfig `yaml:"backends"`
+	ID          string                 `yaml:"id"`
+	Name        string                 `yaml:"name"`
+	Description string                 `yaml:"description"`
+	Enabled     bool                   `yaml:"enabled"`
+	ModelParams map[string]interface{} `yaml:"model_params"`
+	Backends    []BackendConfig        `yaml:"backends"`
 }
 
 type BackendConfig struct {

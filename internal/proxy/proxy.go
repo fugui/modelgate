@@ -146,6 +146,12 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 		return
 	}
 
+	// 获取模型配置并注入参数
+	modelConfig, _ := p.modelStore.GetByID(modelID)
+	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
+		bodyBytes = injectModelParams(bodyBytes, modelConfig.ModelParams)
+	}
+
 	// 修改请求体以替换 model 名称
 	requestBody := bodyBytes
 	if backend.ModelName != "" {
@@ -172,8 +178,17 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 		proxyReq.Header.Set("Authorization", "Bearer "+backend.APIKey)
 	}
 
-	// 设置 Coding Agent User-Agent（Kimi 后端需要此标识）
-	proxyReq.Header.Set("User-Agent", "claude-cli/2.1.63 (external, cli)")
+	// 注入自定义 header（来自 model_params，覆盖原始值）
+	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
+		for key, value := range modelConfig.ModelParams {
+			if strings.HasPrefix(key, "__") && strings.HasSuffix(key, "__") {
+				headerName := convertHeaderName(key)
+				if strValue, ok := value.(string); ok {
+					proxyReq.Header.Set(headerName, strValue)
+				}
+			}
+		}
+	}
 
 	// 更新 Content-Length
 	proxyReq.ContentLength = int64(len(requestBody))
@@ -423,6 +438,54 @@ func countTokensFromRequest(reqBody []byte, model string) int {
 	totalTokens += 3
 
 	return totalTokens
+}
+
+// injectModelParams 将模型参数注入请求体
+// 注意：不覆盖用户已经传入的参数
+func injectModelParams(reqBody []byte, params map[string]interface{}) []byte {
+	var req map[string]interface{}
+	if err := json.Unmarshal(reqBody, &req); err != nil {
+		// 如果解析失败，返回原始请求体
+		return reqBody
+	}
+
+	// 注入参数（不覆盖用户传入的）
+	for key, value := range params {
+		if _, exists := req[key]; !exists {
+			req[key] = value
+		}
+	}
+
+	// 重新序列化
+	modifiedBody, err := json.Marshal(req)
+	if err != nil {
+		return reqBody
+	}
+
+	return modifiedBody
+}
+
+// convertHeaderName 将 __user_agent__ 转换为 User-Agent
+// 规则：去掉前后的 __，将下划线替换为连字符，每个单词首字母大写
+func convertHeaderName(key string) string {
+	// 去掉前后的 __
+	name := strings.TrimPrefix(key, "__")
+	name = strings.TrimSuffix(name, "__")
+
+	// 如果是 "header_xxx" 格式，提取后半部分
+	if strings.HasPrefix(name, "header_") {
+		name = strings.TrimPrefix(name, "header_")
+	}
+
+	// 将下划线分割的单词转换为首字母大写，然后用连字符连接
+	// user_agent -> User-Agent
+	parts := strings.Split(name, "_")
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:])
+		}
+	}
+	return strings.Join(parts, "-")
 }
 
 // modifyRequestModel modifies the request body to replace the model name
