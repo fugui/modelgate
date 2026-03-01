@@ -19,6 +19,11 @@ type Record struct {
 	InputTokens  int
 	OutputTokens int
 	LatencyMs    int
+	ClientIP     string
+	UserAgent    string
+	StatusCode   int
+	Error        string
+	BackendID    string
 }
 
 // NewService 创建使用记录服务
@@ -31,6 +36,22 @@ func NewService(logger *logger.UserLogger) *Service {
 // RecordUsage 记录使用
 func (s *Service) RecordUsage(userID uuid.UUID, modelID string, inputTokens, outputTokens, latencyMs int) {
 	s.logger.LogUsage(userID.String(), modelID, inputTokens, outputTokens, latencyMs)
+}
+
+// RecordUsageDetailed 记录详细的使用信息
+func (s *Service) RecordUsageDetailed(record *Record) {
+	s.logger.LogUsageWithDetails(record.UserID.String(), logger.UsageLogEntry{
+		Time:         time.Now().Format(time.RFC3339),
+		Model:        record.ModelID,
+		InputTokens:  record.InputTokens,
+		OutputTokens: record.OutputTokens,
+		LatencyMs:    record.LatencyMs,
+		ClientIP:     record.ClientIP,
+		UserAgent:    record.UserAgent,
+		StatusCode:   record.StatusCode,
+		Error:        record.Error,
+		BackendID:    record.BackendID,
+	})
 }
 
 // RecordUsageFromStruct 从结构体记录使用

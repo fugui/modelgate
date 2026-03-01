@@ -16,6 +16,11 @@ type UsageLogEntry struct {
 	InputTokens  int    `json:"input_tokens"`
 	OutputTokens int    `json:"output_tokens"`
 	LatencyMs    int    `json:"latency_ms"`
+	ClientIP     string `json:"client_ip,omitempty"`
+	UserAgent    string `json:"user_agent,omitempty"`
+	StatusCode   int    `json:"status_code,omitempty"`
+	Error        string `json:"error,omitempty"`
+	BackendID    string `json:"backend_id,omitempty"`
 }
 
 // UserLogger 按用户分文件的日志记录器
@@ -87,14 +92,21 @@ func (l *UserLogger) getWriter(userID string, date time.Time) (*os.File, error) 
 	return writer, nil
 }
 
-// LogUsage 记录用户使用日志
+// LogUsage 记录用户使用日志（兼容旧接口）
 func (l *UserLogger) LogUsage(userID string, model string, inputTokens, outputTokens, latencyMs int) error {
-	entry := UsageLogEntry{
+	return l.LogUsageWithDetails(userID, UsageLogEntry{
 		Time:         time.Now().Format(time.RFC3339),
 		Model:        model,
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
 		LatencyMs:    latencyMs,
+	})
+}
+
+// LogUsageWithDetails 记录详细的使用日志
+func (l *UserLogger) LogUsageWithDetails(userID string, entry UsageLogEntry) error {
+	if entry.Time == "" {
+		entry.Time = time.Now().Format(time.RFC3339)
 	}
 
 	data, err := json.Marshal(entry)

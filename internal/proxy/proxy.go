@@ -17,6 +17,7 @@ import (
 	"llmgate/internal/models"
 	"llmgate/internal/quota"
 	"llmgate/internal/usage"
+	"llmgate/internal/usage"
 )
 
 // Proxy LLM 代理
@@ -127,9 +128,22 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 		return
 	}
 
+	// 获取客户端信息
+	clientIP := c.ClientIP()
+	userAgent := c.Request.UserAgent()
+
 	// 选择后端
 	backend, ok := p.lb.Next(modelID)
 	if !ok {
+		// 记录失败日志
+		p.usageService.RecordUsageDetailed(&usage.Record{
+			UserID:     userID,
+			ModelID:    modelID,
+			ClientIP:   clientIP,
+			UserAgent:  userAgent,
+			StatusCode: http.StatusServiceUnavailable,
+			Error:      "no backend available",
+		})
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no backend available for model: " + modelID})
 		return
 	}
@@ -191,17 +205,27 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 
 	// 根据是否流式响应选择处理方式
 	if req.Stream {
-		p.handleStreamResponse(c, resp, userID, modelID, user.QuotaPolicy, startTime, bodyBytes)
+		p.handleStreamResponse(c, resp, userID, modelID, user.QuotaPolicy, startTime, bodyBytes, clientIP, userAgent, backend.ID)
 	} else {
-		p.handleNormalResponse(c, resp, userID, modelID, user.QuotaPolicy, startTime, bodyBytes)
+		p.handleNormalResponse(c, resp, userID, modelID, user.QuotaPolicy, startTime, bodyBytes, clientIP, userAgent, backend.ID)
 	}
 }
 
 // handleNormalResponse 处理非流式响应
-func (p *Proxy) handleNormalResponse(c *gin.Context, resp *http.Response, userID uuid.UUID, modelID string, quotaPolicy string, startTime time.Time, reqBody []byte) {
+func (p *Proxy) handleNormalResponse(c *gin.Context, resp *http.Response, userID uuid.UUID, modelID string, quotaPolicy string, startTime time.Time, reqBody []byte, clientIP, userAgent, backendID string) {
 	// 读取响应
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		// 记录失败日志
+		p.usageService.RecordUsageDetailed(&usage.Record{
+			UserID:     userID,
+			ModelID:    modelID,
+			ClientIP:   clientIP,
+			UserAgent:  userAgent,
+			BackendID:  backendID,
+			StatusCode: http.StatusBadGateway,
+			Error:      "failed to read backend response",
+		})
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read backend response"})
 		return
 	}
@@ -224,8 +248,18 @@ func (p *Proxy) handleNormalResponse(c *gin.Context, resp *http.Response, userID
 
 	latency := int(time.Since(startTime).Milliseconds())
 
-	// 记录使用
-	p.usageService.RecordUsage(userID, modelID, inputTokens, outputTokens, latency)
+	// 记录详细使用日志
+	p.usageService.RecordUsageDetailed(&usage.Record{
+		UserID:       userID,
+		ModelID:      modelID,
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+		LatencyMs:    latency,
+		ClientIP:     clientIP,
+		UserAgent:    userAgent,
+		BackendID:    backendID,
+		StatusCode:   resp.StatusCode,
+	})
 
 	// 扣除配额
 	_ = p.quotaService.DeductQuota(userID, quotaPolicy, modelID, inputTokens, outputTokens)
@@ -235,7 +269,7 @@ func (p *Proxy) handleNormalResponse(c *gin.Context, resp *http.Response, userID
 }
 
 // handleStreamResponse 处理流式响应（SSE）
-func (p *Proxy) handleStreamResponse(c *gin.Context, resp *http.Response, userID uuid.UUID, modelID string, quotaPolicy string, startTime time.Time, reqBody []byte) {
+func (p *Proxy) handleStreamResponse(c *gin.Context, resp *http.Response, userID uuid.UUID, modelID string, quotaPolicy string, startTime time.Time, reqBody []byte, clientIP, userAgent, backendID string) {
 	// 设置 SSE 响应头
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -297,8 +331,19 @@ func (p *Proxy) handleStreamResponse(c *gin.Context, resp *http.Response, userID
 
 	latency := int(time.Since(startTime).Milliseconds())
 
-	// 记录使用
-	p.usageService.RecordUsage(userID, modelID, inputTokens, outputTokens, latency)
+	// 记录详细使用日志
+	p.usageService.RecordUsageDetailed(
+		&usage.Record{
+			UserID:       userID,
+			ModelID:      modelID,
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+			LatencyMs:    latency,
+			ClientIP:     clientIP,
+			UserAgent:    userAgent,
+			BackendID:    backendID,
+			StatusCode:   resp.StatusCode,
+		})
 
 	// 扣除配额
 	_ = p.quotaService.DeductQuota(userID, quotaPolicy, modelID, inputTokens, outputTokens)
