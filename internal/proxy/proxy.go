@@ -26,9 +26,10 @@ type Proxy struct {
 	httpClient   *http.Client
 	modelStore   *models.ModelStore
 	backendStore *models.BackendStore
+	userStore    *models.UserStore
 }
 
-func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService *usage.Service, modelStore *models.ModelStore, backendStore *models.BackendStore) *Proxy {
+func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService *usage.Service, modelStore *models.ModelStore, backendStore *models.BackendStore, userStore *models.UserStore) *Proxy {
 	return &Proxy{
 		lb:           lb,
 		quotaService: quotaService,
@@ -36,6 +37,7 @@ func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService 
 		httpClient:   &http.Client{Timeout: 300 * time.Second},
 		modelStore:   modelStore,
 		backendStore: backendStore,
+		userStore:    userStore,
 	}
 }
 
@@ -98,8 +100,19 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 		return
 	}
 
+	// 获取用户信息
+	user, err := p.userStore.GetByID(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get user info"})
+		return
+	}
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return
+	}
+
 	// 检查配额
-	quotaResult, err := p.quotaService.CheckQuota(userID, modelID)
+	quotaResult, err := p.quotaService.CheckQuota(userID, user.QuotaPolicy, modelID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "quota check failed"})
 		return

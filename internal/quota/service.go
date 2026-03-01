@@ -89,18 +89,23 @@ func NewService(store *models.QuotaStore) *Service {
 }
 
 // CheckQuota 检查用户配额
-func (s *Service) CheckQuota(userID uuid.UUID, modelID string) (*models.QuotaCheckResult, error) {
+func (s *Service) CheckQuota(userID uuid.UUID, policyName string, modelID string) (*models.QuotaCheckResult, error) {
 	result := &models.QuotaCheckResult{
 		Allowed: true,
 	}
 
+	// 如果未指定策略，使用 default
+	if policyName == "" {
+		policyName = "default"
+	}
+
 	// 获取用户配额策略
-	policy, err := s.store.GetPolicy("default")
+	policy, err := s.store.GetPolicy(policyName)
 	if err != nil {
 		return nil, err
 	}
 	if policy == nil {
-		return nil, fmt.Errorf("policy not found")
+		return nil, fmt.Errorf("policy not found: %s", policyName)
 	}
 
 	// 检查模型权限
@@ -167,13 +172,18 @@ func (s *Service) DeductQuota(userID uuid.UUID, modelID string, inputTokens, out
 }
 
 // GetQuotaStats 获取配额统计
-func (s *Service) GetQuotaStats(userID uuid.UUID) (map[string]interface{}, error) {
-	policy, err := s.store.GetPolicy("default")
+func (s *Service) GetQuotaStats(userID uuid.UUID, policyName string) (map[string]interface{}, error) {
+	// 如果未指定策略，使用 default
+	if policyName == "" {
+		policyName = "default"
+	}
+
+	policy, err := s.store.GetPolicy(policyName)
 	if err != nil {
 		return nil, err
 	}
 	if policy == nil {
-		return nil, fmt.Errorf("policy not found")
+		return nil, fmt.Errorf("policy not found: %s", policyName)
 	}
 
 	dailyTokens, err := s.store.GetDailyUsage(userID, time.Now())

@@ -159,7 +159,7 @@ func main() {
 	log.Printf("Health check started with 30s interval")
 
 	// 初始化代理
-	proxyInstance := proxy.NewProxy(lb, quotaService, usageService, modelStore, backendStore)
+	proxyInstance := proxy.NewProxy(lb, quotaService, usageService, modelStore, backendStore, userStore)
 
 	// 初始化并发限制器
 	var concurrencyLimiter *concurrency.Limiter

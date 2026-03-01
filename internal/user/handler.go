@@ -13,7 +13,7 @@ import (
 )
 
 type QuotaService interface {
-	GetQuotaStats(userID uuid.UUID) (map[string]interface{}, error)
+	GetQuotaStats(userID uuid.UUID, policyName string) (map[string]interface{}, error)
 }
 
 type QuotaStore interface {
@@ -347,13 +347,24 @@ func (h *Handler) Delete(c *gin.Context) {
 }
 
 func (h *Handler) GetQuota(c *gin.Context) {
-	user := middleware.GetCurrentUser(c)
-	if user == nil {
+	currentUser := middleware.GetCurrentUser(c)
+	if currentUser == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
 
-	stats, err := h.quotaService.GetQuotaStats(user.UserID)
+	// 获取完整用户信息（包含 quota_policy）
+	user, err := h.store.GetByID(currentUser.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	stats, err := h.quotaService.GetQuotaStats(currentUser.UserID, user.QuotaPolicy)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
