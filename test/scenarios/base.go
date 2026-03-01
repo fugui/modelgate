@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"llmgate/internal/apikey"
 	"llmgate/internal/auth"
+	"llmgate/internal/cache"
 	"llmgate/internal/models"
 	"llmgate/internal/quota"
 
@@ -18,8 +19,10 @@ type TestScenario struct {
 	DB           *sql.DB
 	UserStore    *models.UserStore
 	APIKeyStore  *models.APIKeyStore
+	ModelStore   *models.ModelStore
 	QuotaStore   *models.QuotaStore
 	JWTManager   *auth.JWTManager
+	Cache        *cache.Cache
 	APIKeySvc    *apikey.Service
 	QuotaSvc     *quota.Service
 }
@@ -74,6 +77,32 @@ CREATE TABLE quota_policies (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE models (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    enabled INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE backends (
+    id TEXT PRIMARY KEY,
+    model_id TEXT NOT NULL,
+    name TEXT,
+    base_url TEXT NOT NULL,
+    api_key TEXT,
+    model_name TEXT,
+    weight INTEGER DEFAULT 1,
+    region TEXT,
+    enabled INTEGER DEFAULT 1,
+    healthy INTEGER DEFAULT 1,
+    last_check_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (model_id) REFERENCES models(id)
+);
+
 CREATE TABLE quota_usage_daily (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -100,15 +129,17 @@ CREATE TABLE quota_usage_daily (
 		DB:          db,
 		UserStore:   models.NewUserStore(db),
 		APIKeyStore: models.NewAPIKeyStore(db),
+		ModelStore:  models.NewModelStore(db),
 		QuotaStore:  models.NewQuotaStore(db),
 		JWTManager:  auth.NewJWTManager("test-secret", 24),
+		Cache:       cache.New(),
 	}
 }
 
 // InitServices 初始化服务（必须在 SetupTestDB 之后调用）
 func (s *TestScenario) InitServices() {
-	s.APIKeySvc = apikey.NewService(s.APIKeyStore, s.UserStore)
-	s.QuotaSvc = quota.NewService(s.QuotaStore)
+	s.APIKeySvc = apikey.NewService(s.APIKeyStore, s.UserStore, s.Cache)
+	s.QuotaSvc = quota.NewService(s.QuotaStore, s.ModelStore)
 }
 
 // CreateUser 辅助方法：创建测试用户
@@ -130,5 +161,6 @@ func (s *TestScenario) CreateUser(t *testing.T, email, name string, role models.
 
 // Cleanup 清理资源
 func (s *TestScenario) Cleanup() {
+	s.Cache.Stop()
 	s.DB.Close()
 }

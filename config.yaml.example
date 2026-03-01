@@ -10,7 +10,7 @@ jwt:
   expire_hours: 24
 
 models:
-  # GLM4.7 - 单实例部署
+  # GLM4.7 - 单实例部署示例
   - id: "glm4.7"
     name: "GLM 4.7"
     description: "智谱 GLM4.7 模型"
@@ -19,12 +19,12 @@ models:
       - id: "glm4.7-prod-01"
         name: "北京节点-01"
         base_url: "http://glm4-7.internal:8000"
-        api_key: "glm-api-key-xxx"
+        api_key: "your-glm-api-key-here"
         model_name: "glm4"
         weight: 10
         region: "beijing"
 
-  # Kimi2.5 - 多实例部署
+  # Kimi2.5 - 多实例部署示例
   - id: "kimi2.5"
     name: "Kimi 2.5"
     description: "Moonshot Kimi 2.5"
@@ -32,27 +32,13 @@ models:
     backends:
       - id: "kimi2.5-gz-01"
         name: "广州节点-01"
-        base_url: "http://kimi25-gz-01.internal:8000"
-        api_key: "moonshot-key-gz"
-        model_name: "kimi2.5_guangzhou"
+        base_url: "https://api.kimi.com/coding/"
+        api_key: "your-kimi-api-key-here"
+        model_name: "Sonnet"
         weight: 20
         region: "guangzhou"
-      - id: "kimi2.5-gz-02"
-        name: "广州节点-02"
-        base_url: "http://kimi25-gz-02.internal:8000"
-        api_key: "moonshot-key-gz"
-        model_name: "kimi2.5_guangzhou"
-        weight: 20
-        region: "guangzhou"
-      - id: "kimi2.5-bj-01"
-        name: "北京节点-01"
-        base_url: "http://kimi25-bj-01.internal:8000"
-        api_key: "moonshot-key-bj"
-        model_name: "kimi2.5_beijing"
-        weight: 15
-        region: "beijing"
 
-  # Qwen 模型
+  # Qwen 模型示例
   - id: "qwen3.5-397b"
     name: "Qwen 3.5 397B"
     description: "通义千问 3.5 397B"
@@ -61,16 +47,6 @@ models:
       - id: "qwen3.5-397b-prod"
         base_url: "http://qwen35-397b.internal:8000"
         model_name: "qwen3.5-397b-instruct"
-        weight: 10
-
-  - id: "qwen3.5-122b"
-    name: "Qwen 3.5 122B"
-    description: "通义千问 3.5 122B"
-    enabled: true
-    backends:
-      - id: "qwen3.5-122b-prod"
-        base_url: "http://qwen35-122b.internal:8000"
-        model_name: "qwen3.5-122b-instruct"
         weight: 10
 
 quota_policies:
@@ -82,7 +58,6 @@ quota_policies:
       - "glm4.7"
       - "kimi2.5"
       - "qwen3.5-397b"
-      - "qwen3.5-122b"
   - name: "vip"
     rate_limit: 300
     rate_limit_window: 60
@@ -92,7 +67,7 @@ quota_policies:
 
 admin:
   default_email: "admin@llmgate.local"
-  default_password: "admin123"
+  default_password: "change-this-password"
 
 logs:
   path: "logs"

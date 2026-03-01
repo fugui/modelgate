@@ -7,7 +7,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"llmgate/internal/auth"
-	"llmgate/internal/cache"
 	"llmgate/internal/middleware"
 	"llmgate/internal/models"
 )

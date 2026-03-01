@@ -17,7 +17,7 @@ type Backend struct {
 	Region      string    `json:"region"`
 	Enabled     bool      `json:"enabled"`
 	Healthy     bool      `json:"healthy"`
-	LastCheckAt time.Time `json:"last_check_at"`
+	LastCheckAt sql.NullTime `json:"last_check_at"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

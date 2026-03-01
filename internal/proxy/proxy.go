@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -173,6 +172,9 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 		proxyReq.Header.Set("Authorization", "Bearer "+backend.APIKey)
 	}
 
+	// 设置 Coding Agent User-Agent（Kimi 后端需要此标识）
+	proxyReq.Header.Set("User-Agent", "claude-cli/2.1.63 (external, cli)")
+
 	// 更新 Content-Length
 	proxyReq.ContentLength = int64(len(requestBody))
 
@@ -197,6 +199,13 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 	// 如果后端返回 429，直接透传
 	if resp.StatusCode == http.StatusTooManyRequests {
 		// 读取响应体并透传
+		respBody, _ := io.ReadAll(resp.Body)
+		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
+		return
+	}
+
+	// 如果后端返回非 200 状态码，透传错误
+	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 		return

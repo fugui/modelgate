@@ -89,9 +89,10 @@ func (rc *RateCounter) GetCount(userID string, window int) int {
 }
 
 type Service struct {
-	store            *models.QuotaStore
-	rateCounter      *RateCounter
-	dailyUsageCache  *DailyUsageCounter
+	store           *models.QuotaStore
+	modelStore      *models.ModelStore
+	rateCounter     *RateCounter
+	dailyUsageCache *DailyUsageCounter
 }
 
 // DailyUsageCounter 每日用量内存计数器
@@ -149,9 +150,10 @@ func (c *DailyUsageCounter) CleanupExpired() {
 	}
 }
 
-func NewService(store *models.QuotaStore) *Service {
+func NewService(store *models.QuotaStore, modelStore *models.ModelStore) *Service {
 	s := &Service{
 		store:           store,
+		modelStore:      modelStore,
 		rateCounter:     NewRateCounter(),
 		dailyUsageCache: NewDailyUsageCounter(),
 	}
@@ -318,12 +320,27 @@ func (s *Service) GetQuotaStats(userID uuid.UUID, policyName string) (map[string
 		return nil, err
 	}
 
+	// 处理 models_allowed：如果包含 *，返回所有模型名称列表
+	var modelsAllowed []string
+	if len(policy.Models) == 1 && policy.Models[0] == "*" {
+		// 获取所有启用的模型
+		models, err := s.modelStore.ListEnabled()
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range models {
+			modelsAllowed = append(modelsAllowed, m.ID)
+		}
+	} else {
+		modelsAllowed = policy.Models
+	}
+
 	return map[string]interface{}{
 		"daily_tokens_used":  dailyTokens,
 		"daily_tokens_limit": policy.TokenQuotaDaily,
 		"rate_limit":         policy.RateLimit,
 		"rate_window":        policy.RateLimitWindow,
-		"models_allowed":     policy.Models,
+		"models_allowed":     modelsAllowed,
 		"reset_time":         "00:00",
 	}, nil
 }

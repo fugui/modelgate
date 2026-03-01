@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Input, Button, Select, message, Space, Tag, Spin } from 'antd';
 import { SendOutlined, ClearOutlined, StopOutlined } from '@ant-design/icons';
-import ReactMarkdown from 'react-markdown';
 import api from '../api';
 
 const { TextArea } = Input;
@@ -28,6 +27,8 @@ const Chat: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // 使用 ref 存储当前流式输出的内容和消息 ID，避免闭包问题
+  const streamingRef = useRef<{ id: string; content: string } | null>(null);
 
   // 获取可用模型列表
   useEffect(() => {
@@ -97,48 +98,104 @@ const Chat: React.FC = () => {
       // 处理流式响应
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let assistantContent = '';
 
+      const assistantMessageId = (Date.now() + 1).toString();
       const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: assistantMessageId,
         role: 'assistant',
         content: '',
         timestamp: new Date(),
         model: selectedModel,
       };
 
+      // 初始化 streamingRef
+      streamingRef.current = { id: assistantMessageId, content: '' };
+
       setMessages(prev => [...prev, assistantMessage]);
+
+      // 用于累积不完整的 SSE 行
+      let buffer = '';
+
+      // 批量更新：每 50ms 更新一次 UI
+      let pendingUpdate = false;
+      const scheduleUpdate = () => {
+        if (pendingUpdate) return;
+        pendingUpdate = true;
+        setTimeout(() => {
+          pendingUpdate = false;
+          const current = streamingRef.current;
+          if (current) {
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === current.id
+                  ? { ...m, content: current.content }
+                  : m
+              )
+            );
+          }
+        }, 50);
+      };
 
       while (reader) {
         const { done, value } = await reader.read();
         if (done) break;
 
         const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
+        // 累积到 buffer
+        buffer += chunk;
+
+        // 处理完整的行 (SSE 格式: data: {...}\n\n)
+        let lineEnd;
+        while ((lineEnd = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.substring(0, lineEnd);
+          buffer = buffer.substring(lineEnd + 1);
+
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+
+          if (trimmedLine.startsWith('data:')) {
+            const data = trimmedLine.slice(5).trim();
             if (data === '[DONE]') continue;
 
             try {
               const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content || '';
-              assistantContent += content;
+              // 处理 delta.content 或 delta.reasoning_content（Kimi 等模型使用）
+              const delta = parsed.choices?.[0]?.delta || {};
+              const content = delta.content || '';
+              const reasoningContent = delta.reasoning_content || '';
+              const text = content || reasoningContent;
 
-              setMessages(prev =>
-                prev.map(m =>
-                  m.id === assistantMessage.id
-                    ? { ...m, content: assistantContent }
-                    : m
-                )
-              );
-            } catch (e) {
+              if (text && streamingRef.current) {
+                streamingRef.current.content += text;
+                scheduleUpdate();
+                // 直接更新 DOM 绕过 React
+                const contentEl = document.getElementById('streaming-content-' + assistantMessageId);
+                if (contentEl) {
+                  contentEl.textContent = streamingRef.current.content;
+                }
+              }
+            } catch {
               // 忽略解析错误
             }
           }
         }
       }
+
+      // 确保最后的内容被更新
+      const final = streamingRef.current;
+      if (final) {
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === final.id
+              ? { ...m, content: final.content }
+              : m
+          )
+        );
+      }
+
+      // 清理 ref
+      streamingRef.current = null;
     } catch (err: any) {
       if (err.name === 'AbortError') {
         // 用户取消，不显示错误
@@ -268,33 +325,10 @@ const Chat: React.FC = () => {
                 <div style={{ fontSize: 14, lineHeight: 1.7 }}>
                   {msg.role === 'assistant' ? (
                     <div style={{ color: '#333' }}>
-                      <ReactMarkdown
-                        components={{
-                          code: ({ children }: { children?: React.ReactNode }) => (
-                            <code style={{
-                              background: '#f0f0f0',
-                              padding: '2px 6px',
-                              borderRadius: 4,
-                              fontFamily: 'monospace',
-                            }}>
-                              {children}
-                            </code>
-                          ),
-                          pre: ({ children }: { children?: React.ReactNode }) => (
-                            <pre style={{
-                              background: '#f5f5f5',
-                              padding: 12,
-                              borderRadius: 8,
-                              overflow: 'auto',
-                              fontSize: 13,
-                            }}>
-                              {children}
-                            </pre>
-                          ),
-                        }}
-                      >
+                      {/* 流式内容显示区域 - id 用于直接 DOM 更新 */}
+                      <div id={'streaming-content-' + msg.id} style={{whiteSpace: 'pre-wrap', minHeight: 20}}>
                         {msg.content || ''}
-                      </ReactMarkdown>
+                      </div>
                       {loading && msg.id === messages[messages.length - 1]?.id && (
                         <Spin size="small" style={{ marginLeft: 8 }} />
                       )}

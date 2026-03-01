@@ -71,7 +71,7 @@ func main() {
 
 	// 初始化服务层
 	apiKeyService := apikey.NewService(apiKeyStore, userStore, localCache)
-	quotaService := quota.NewService(quotaStore)
+	quotaService := quota.NewService(quotaStore, modelStore)
 	usageService := usage.NewService(userLogger)
 
 	// 初始化负载均衡器

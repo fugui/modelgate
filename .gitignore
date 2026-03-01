@@ -44,9 +44,10 @@ server.log
 .env
 .env.local
 
-# Config files with secrets (uncomment if needed)
-# config.local.yaml
-# config.prod.yaml
+# Config files with secrets
+config.yaml
+config.local.yaml
+config.prod.yaml
 
 # Embedded frontend files (generated during build)
 internal/static/dist/
