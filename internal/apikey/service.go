@@ -86,23 +86,18 @@ func (s *Service) ValidateKey(plainKey string) (*models.APIKey, *models.User, er
 	// 1. 尝试从缓存获取
 	if cached := s.cache.GetAPIKey(keyPrefixStr); cached != nil {
 		// 验证 hash
-		if err := bcrypt.CompareHashAndPassword([]byte(cached.KeyHash), []byte(plainKey)); err != nil {
+		if err := bcrypt.CompareHashAndPassword([]byte(cached.Key.KeyHash), []byte(plainKey)); err != nil {
 			return nil, nil, fmt.Errorf("invalid key")
 		}
 		// 检查是否启用
-		if !cached.Enabled {
+		if !cached.Key.Enabled {
 			return nil, nil, fmt.Errorf("key disabled")
 		}
 		// 检查用户是否启用
 		if !cached.UserInfo.Enabled {
 			return nil, nil, fmt.Errorf("user disabled")
 		}
-		return &models.APIKey{
-			ID:        cached.KeyID,
-			UserID:    cached.UserID,
-			Enabled:   cached.Enabled,
-			ExpiresAt: cached.ExpiresAt,
-		}, cached.UserInfo, nil
+		return cached.Key, cached.UserInfo, nil
 	}
 
 	// 2. 缓存未命中，从数据库查找

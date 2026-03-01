@@ -19,13 +19,9 @@ type Cache struct {
 
 // APIKeyCacheItem API Key 缓存项
 type APIKeyCacheItem struct {
-	KeyID       uuid.UUID
-	UserID      uuid.UUID
-	KeyHash     string
-	Enabled     bool
-	ExpiresAt   *time.Time
-	UserInfo    *models.User  // 嵌入用户信息，减少二次查询
-	CachedAt    time.Time
+	Key      *models.APIKey  // 完整的 API Key 对象
+	UserInfo *models.User    // 嵌入用户信息，减少二次查询
+	CachedAt time.Time
 }
 
 // UserCacheItem 用户缓存项
@@ -69,7 +65,7 @@ func (c *Cache) GetAPIKey(keyPrefix string) *APIKeyCacheItem {
 	}
 	
 	// 检查 API Key 是否过期
-	if item.ExpiresAt != nil && item.ExpiresAt.Before(time.Now()) {
+	if item.Key.ExpiresAt != nil && item.Key.ExpiresAt.Before(time.Now()) {
 		return nil
 	}
 	
@@ -82,13 +78,9 @@ func (c *Cache) SetAPIKey(keyPrefix string, key *models.APIKey, user *models.Use
 	defer c.mu.Unlock()
 	
 	c.apiKeys[keyPrefix] = &APIKeyCacheItem{
-		KeyID:     key.ID,
-		UserID:    key.UserID,
-		KeyHash:   key.KeyHash,
-		Enabled:   key.Enabled,
-		ExpiresAt: key.ExpiresAt,
-		UserInfo:  user,
-		CachedAt:  time.Now(),
+		Key:      key,
+		UserInfo: user,
+		CachedAt: time.Now(),
 	}
 }
 
@@ -105,7 +97,7 @@ func (c *Cache) DeleteAPIKeysByUser(userID uuid.UUID) {
 	defer c.mu.Unlock()
 	
 	for prefix, item := range c.apiKeys {
-		if item.UserID == userID {
+		if item.Key.UserID == userID {
 			delete(c.apiKeys, prefix)
 		}
 	}
