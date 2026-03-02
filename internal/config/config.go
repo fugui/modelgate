@@ -60,12 +60,12 @@ type BackendConfig struct {
 }
 
 type PolicyConfig struct {
-	Name            string   `yaml:"name"`
-	RateLimit       int      `yaml:"rate_limit"`
-	RateLimitWindow int      `yaml:"rate_limit_window"`
-	TokenQuotaDaily int64    `yaml:"token_quota_daily"`
-	Models          []string `yaml:"models"`
-	Description     string   `yaml:"description"`
+	Name              string   `yaml:"name"`
+	RateLimit         int      `yaml:"rate_limit"`
+	RateLimitWindow   int      `yaml:"rate_limit_window"`
+	RequestQuotaDaily int      `yaml:"request_quota_daily"`
+	Models            []string `yaml:"models"`
+	Description       string   `yaml:"description"`
 }
 
 type AdminConfig struct {

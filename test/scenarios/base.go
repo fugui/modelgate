@@ -16,15 +16,15 @@ import (
 
 // TestScenario 测试场景基座
 type TestScenario struct {
-	DB           *sql.DB
-	UserStore    *models.UserStore
-	APIKeyStore  *models.APIKeyStore
-	ModelStore   *models.ModelStore
-	QuotaStore   *models.QuotaStore
-	JWTManager   *auth.JWTManager
-	Cache        *cache.Cache
-	APIKeySvc    *apikey.Service
-	QuotaSvc     *quota.Service
+	DB          *sql.DB
+	UserStore   *models.UserStore
+	APIKeyStore *models.APIKeyStore
+	ModelStore  *models.ModelStore
+	QuotaStore  *models.QuotaStore
+	JWTManager  *auth.JWTManager
+	Cache       *cache.Cache
+	APIKeySvc   *apikey.Service
+	QuotaSvc    *quota.Service
 }
 
 // SetupTestDB 创建内存测试数据库
@@ -43,6 +43,7 @@ CREATE TABLE users (
     department TEXT,
     quota_policy TEXT,
     models TEXT,
+    auth_source TEXT DEFAULT 'local',
     enabled INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -70,7 +71,7 @@ CREATE TABLE quota_policies (
     name TEXT PRIMARY KEY,
     rate_limit INTEGER NOT NULL,
     rate_limit_window INTEGER NOT NULL,
-    token_quota_daily INTEGER NOT NULL,
+    request_quota_daily INTEGER DEFAULT 1000,
     models TEXT,
     description TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -109,9 +110,6 @@ CREATE TABLE quota_usage_daily (
     date DATE NOT NULL,
     model_id TEXT NOT NULL,
     request_count INTEGER DEFAULT 0,
-    token_count INTEGER DEFAULT 0,
-    input_tokens INTEGER DEFAULT 0,
-    output_tokens INTEGER DEFAULT 0,
     UNIQUE(user_id, date, model_id)
 );
 `
@@ -120,7 +118,7 @@ CREATE TABLE quota_usage_daily (
 
 	// 创建默认配额策略
 	_, err = db.Exec(`
-		INSERT INTO quota_policies (name, rate_limit, rate_limit_window, token_quota_daily, models)
+		INSERT INTO quota_policies (name, rate_limit, rate_limit_window, request_quota_daily, models)
 		VALUES ('default', 60, 60, 1000, '["*"]')
 	`)
 	require.NoError(t, err)

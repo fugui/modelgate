@@ -108,8 +108,7 @@ CREATE TABLE IF NOT EXISTS quota_policies (
     name TEXT PRIMARY KEY,
     rate_limit INTEGER NOT NULL,
     rate_limit_window INTEGER NOT NULL,
-    token_quota_daily INTEGER,
-    token_quota_monthly INTEGER,
+    request_quota_daily INTEGER DEFAULT 1000, -- 每日请求配额，默认1000
     models TEXT, -- JSON 数组
     description TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -123,9 +122,6 @@ CREATE TABLE IF NOT EXISTS quota_usage_daily (
     date DATE NOT NULL,
     model_id TEXT NOT NULL,
     request_count INTEGER DEFAULT 0,
-    token_count INTEGER DEFAULT 0,
-    input_tokens INTEGER DEFAULT 0,
-    output_tokens INTEGER DEFAULT 0,
     UNIQUE(user_id, date, model_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );

@@ -408,8 +408,8 @@ func (h *AdminHandler) UpdatePolicy(c *gin.Context) {
 	if req.RateLimitWindow > 0 {
 		policy.RateLimitWindow = req.RateLimitWindow
 	}
-	if req.TokenQuotaDaily > 0 {
-		policy.TokenQuotaDaily = req.TokenQuotaDaily
+	if req.RequestQuotaDaily > 0 {
+		policy.RequestQuotaDaily = req.RequestQuotaDaily
 	}
 	if req.Models != nil {
 		policy.Models = req.Models

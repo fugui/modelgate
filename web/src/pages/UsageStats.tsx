@@ -31,7 +31,6 @@ const UsageStats: React.FC = () => {
         return {
           date: weekdays[date.getDay()],
           requests: record.requests,
-          tokens: record.tokens,
         };
       }).reverse(); // 按时间正序
       setWeeklyData(chartData);
@@ -56,32 +55,13 @@ const UsageStats: React.FC = () => {
     },
     {
       title: '请求数',
-      dataIndex: 'requests',
-      key: 'requests',
-    },
-    {
-      title: '输入 Token',
-      dataIndex: 'input_tokens',
-      key: 'input_tokens',
-    },
-    {
-      title: '输出 Token',
-      dataIndex: 'output_tokens',
-      key: 'output_tokens',
-    },
-    {
-      title: '总 Token',
-      dataIndex: 'tokens',
-      key: 'tokens',
+      dataIndex: 'request_count',
+      key: 'request_count',
     },
   ];
 
-  const tokenUsagePercent = quota.token_limit
-    ? Math.round((quota.token_used / quota.token_limit) * 100)
-    : 0;
-
-  const requestUsagePercent = quota.rate_limit
-    ? Math.round(((quota.requests_used || 0) / quota.rate_limit) * 100)
+  const requestUsagePercent = quota.daily_requests_limit
+    ? Math.round((quota.daily_requests_used / quota.daily_requests_limit) * 100)
     : 0;
 
   return (
@@ -90,26 +70,12 @@ const UsageStats: React.FC = () => {
 
       {/* 配额概览 */}
       <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="今日 Token 使用量"
-              value={quota.token_used || 0}
-              suffix={`/ ${quota.token_limit || 0}`}
-            />
-            <Progress
-              percent={tokenUsagePercent}
-              status={tokenUsagePercent > 90 ? 'exception' : 'active'}
-              style={{ marginTop: 8 }}
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
+        <Col span={12}>
           <Card>
             <Statistic
               title="今日请求次数"
-              value={quota.requests_used || 0}
-              suffix={`/ ${quota.rate_limit || 0}`}
+              value={quota.daily_requests_used || 0}
+              suffix={`/ ${quota.daily_requests_limit || 0}`}
             />
             <Progress
               percent={requestUsagePercent}
@@ -118,15 +84,15 @@ const UsageStats: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col span={8}>
+        <Col span={12}>
           <Card>
             <Statistic
               title="可用模型数"
-              value={quota.models?.length || 0}
+              value={quota.models_allowed?.length || 0}
               suffix="个"
             />
             <div style={{ marginTop: 8 }}>
-              {quota.models?.map((model: string) => (
+              {quota.models_allowed?.map((model: string) => (
                 <Tag key={model} style={{ margin: '0 4px 4px 0' }}>
                   {model}
                 </Tag>
@@ -140,13 +106,10 @@ const UsageStats: React.FC = () => {
       <Card title="配额详情" style={{ marginBottom: 24 }}>
         <Descriptions bordered column={2}>
           <Descriptions.Item label="速率限制">
-            {quota.rate_limit} 请求/分钟
+            {quota.rate_limit} 请求/{quota.rate_window || 60}秒
           </Descriptions.Item>
-          <Descriptions.Item label="Token 日限额">
-            {quota.token_quota_daily?.toLocaleString() || '无限制'}
-          </Descriptions.Item>
-          <Descriptions.Item label="Token 月限额">
-            {quota.token_quota_monthly?.toLocaleString() || '无限制'}
+          <Descriptions.Item label="每日请求限额">
+            {quota.daily_requests_limit?.toLocaleString() || '无限制'}
           </Descriptions.Item>
           <Descriptions.Item label="重置时间">
             {quota.reset_time || '每日 00:00'}
@@ -160,11 +123,9 @@ const UsageStats: React.FC = () => {
           <BarChart data={weeklyData}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="date" />
-            <YAxis yAxisId="left" />
-            <YAxis yAxisId="right" orientation="right" />
+            <YAxis />
             <Tooltip />
-            <Bar yAxisId="left" dataKey="requests" name="请求数" fill="#1890ff" />
-            <Bar yAxisId="right" dataKey="tokens" name="Token 数" fill="#52c41a" />
+            <Bar dataKey="requests" name="请求数" fill="#1890ff" />
           </BarChart>
         </ResponsiveContainer>
       </Card>

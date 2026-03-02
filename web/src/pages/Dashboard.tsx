@@ -119,7 +119,7 @@ const Dashboard: React.FC = () => {
         <Card title="配额使用情况" style={{ marginBottom: 24 }}>
           <Descriptions>
             <Descriptions.Item label="速率限制">{quota.rate_limit} 请求/分钟</Descriptions.Item>
-            <Descriptions.Item label="Token 配额">{quota.token_used} / {quota.token_limit}</Descriptions.Item>
+            <Descriptions.Item label="请求配额">{quota.daily_requests_used} / {quota.daily_requests_limit}</Descriptions.Item>
             <Descriptions.Item label="可用模型">{quota.models?.join(', ')}</Descriptions.Item>
           </Descriptions>
         </Card>

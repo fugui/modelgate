@@ -9,43 +9,37 @@ import (
 )
 
 type QuotaPolicy struct {
-	Name            string      `json:"name"`
-	RateLimit       int         `json:"rate_limit"`
-	RateLimitWindow int         `json:"rate_limit_window"`
-	TokenQuotaDaily int64       `json:"token_quota_daily"`
-	Models          StringArray `json:"models"`
-	Description     string      `json:"description"`
-	CreatedAt       time.Time   `json:"created_at"`
-	UpdatedAt       time.Time   `json:"updated_at"`
+	Name              string      `json:"name"`
+	RateLimit         int         `json:"rate_limit"`
+	RateLimitWindow   int         `json:"rate_limit_window"`
+	RequestQuotaDaily int         `json:"request_quota_daily"`
+	Models            StringArray `json:"models"`
+	Description       string      `json:"description"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdatedAt         time.Time   `json:"updated_at"`
 }
 
 type QuotaUsageDaily struct {
-	ID           uuid.UUID `json:"id"`
-	UserID       uuid.UUID `json:"user_id"`
-	Date         time.Time `json:"date"`
-	ModelID      string    `json:"model_id"`
-	RequestCount int       `json:"request_count"`
-	TokenCount   int64     `json:"token_count"`
-	InputTokens  int64     `json:"input_tokens"`
-	OutputTokens int64     `json:"output_tokens"`
+	ID            uuid.UUID `json:"id"`
+	UserID        uuid.UUID `json:"user_id"`
+	Date          time.Time `json:"date"`
+	ModelID       string    `json:"model_id"`
+	RequestCount  int       `json:"request_count"`
 }
 
 type QuotaCheckResult struct {
-	Allowed       bool   `json:"allowed"`
-	Reason        string `json:"reason,omitempty"`
-	DailyTokens   int64  `json:"daily_tokens"`
-	DailyLimit    int64  `json:"daily_limit"`
-	RateRemaining int    `json:"rate_remaining"`
-	RateLimit     int    `json:"rate_limit"`
+	Allowed           bool   `json:"allowed"`
+	Reason            string `json:"reason,omitempty"`
+	DailyRequests     int    `json:"daily_requests"`
+	DailyRequestLimit int    `json:"daily_request_limit"`
+	RateRemaining     int    `json:"rate_remaining"`
+	RateLimit         int    `json:"rate_limit"`
 }
 
 type UsageStats struct {
-	TotalRequests int   `json:"total_requests"`
-	TotalTokens   int64 `json:"total_tokens"`
-	InputTokens   int64 `json:"input_tokens"`
-	OutputTokens  int64 `json:"output_tokens"`
-	AvgLatencyMs  int   `json:"avg_latency_ms"`
-	ErrorCount    int   `json:"error_count"`
+	TotalRequests int `json:"total_requests"`
+	AvgLatencyMs  int `json:"avg_latency_ms"`
+	ErrorCount    int `json:"error_count"`
 }
 
 // QuotaStore 配额数据访问层
@@ -60,13 +54,13 @@ func NewQuotaStore(db *sql.DB) *QuotaStore {
 func (s *QuotaStore) GetPolicy(name string) (*QuotaPolicy, error) {
 	policy := &QuotaPolicy{}
 	query := `
-		SELECT name, rate_limit, rate_limit_window, token_quota_daily, models, description, created_at, updated_at
+		SELECT name, rate_limit, rate_limit_window, request_quota_daily, models, description, created_at, updated_at
 		FROM quota_policies WHERE name = ?`
 
 	var modelsJSON string
 	err := s.db.QueryRow(query, name).Scan(
 		&policy.Name, &policy.RateLimit, &policy.RateLimitWindow,
-		&policy.TokenQuotaDaily, &modelsJSON, &policy.Description,
+		&policy.RequestQuotaDaily, &modelsJSON, &policy.Description,
 		&policy.CreatedAt, &policy.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -81,7 +75,7 @@ func (s *QuotaStore) GetPolicy(name string) (*QuotaPolicy, error) {
 
 func (s *QuotaStore) ListPolicies() ([]*QuotaPolicy, error) {
 	query := `
-		SELECT name, rate_limit, rate_limit_window, token_quota_daily, models, description, created_at, updated_at
+		SELECT name, rate_limit, rate_limit_window, request_quota_daily, models, description, created_at, updated_at
 		FROM quota_policies ORDER BY name`
 
 	rows, err := s.db.Query(query)
@@ -96,7 +90,7 @@ func (s *QuotaStore) ListPolicies() ([]*QuotaPolicy, error) {
 		var modelsJSON string
 		err := rows.Scan(
 			&policy.Name, &policy.RateLimit, &policy.RateLimitWindow,
-			&policy.TokenQuotaDaily, &modelsJSON, &policy.Description,
+			&policy.RequestQuotaDaily, &modelsJSON, &policy.Description,
 			&policy.CreatedAt, &policy.UpdatedAt,
 		)
 		if err != nil {
@@ -110,12 +104,12 @@ func (s *QuotaStore) ListPolicies() ([]*QuotaPolicy, error) {
 
 func (s *QuotaStore) CreateOrUpdatePolicy(policy *QuotaPolicy) error {
 	query := `
-		INSERT INTO quota_policies (name, rate_limit, rate_limit_window, token_quota_daily, models, description)
+		INSERT INTO quota_policies (name, rate_limit, rate_limit_window, request_quota_daily, models, description)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			rate_limit = excluded.rate_limit,
 			rate_limit_window = excluded.rate_limit_window,
-			token_quota_daily = excluded.token_quota_daily,
+			request_quota_daily = excluded.request_quota_daily,
 			models = excluded.models,
 			description = excluded.description,
 			updated_at = CURRENT_TIMESTAMP
@@ -124,7 +118,7 @@ func (s *QuotaStore) CreateOrUpdatePolicy(policy *QuotaPolicy) error {
 	modelsJSON, _ := json.Marshal(policy.Models)
 	return s.db.QueryRow(query,
 		policy.Name, policy.RateLimit, policy.RateLimitWindow,
-		policy.TokenQuotaDaily, string(modelsJSON), policy.Description,
+		policy.RequestQuotaDaily, string(modelsJSON), policy.Description,
 	).Scan(&policy.CreatedAt, &policy.UpdatedAt)
 }
 
@@ -133,11 +127,11 @@ func (s *QuotaStore) DeletePolicy(name string) error {
 	return err
 }
 
-// GetDailyUsage 获取用户当天的 Token 使用量
-func (s *QuotaStore) GetDailyUsage(userID uuid.UUID, date time.Time) (int64, error) {
-	var total int64
+// GetDailyRequestCount 获取用户当天的请求次数
+func (s *QuotaStore) GetDailyRequestCount(userID uuid.UUID, date time.Time) (int, error) {
+	var total int
 	query := `
-		SELECT COALESCE(SUM(token_count), 0)
+		SELECT COALESCE(SUM(request_count), 0)
 		FROM quota_usage_daily
 		WHERE user_id = ? AND date = ?`
 
@@ -145,20 +139,16 @@ func (s *QuotaStore) GetDailyUsage(userID uuid.UUID, date time.Time) (int64, err
 	return total, err
 }
 
-// IncrementUsage 增加使用统计
-func (s *QuotaStore) IncrementUsage(userID uuid.UUID, modelID string, inputTokens, outputTokens int) error {
+// IncrementRequestCount 增加请求计数
+func (s *QuotaStore) IncrementRequestCount(userID uuid.UUID, modelID string) error {
 	query := `
-		INSERT INTO quota_usage_daily (id, user_id, date, model_id, request_count, token_count, input_tokens, output_tokens)
-		VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+		INSERT INTO quota_usage_daily (id, user_id, date, model_id, request_count)
+		VALUES (?, ?, ?, ?, 1)
 		ON CONFLICT(user_id, date, model_id) DO UPDATE SET
-			request_count = request_count + 1,
-			token_count = token_count + excluded.token_count,
-			input_tokens = input_tokens + excluded.input_tokens,
-			output_tokens = output_tokens + excluded.output_tokens`
+			request_count = request_count + 1`
 
 	id := uuid.New().String()
-	totalTokens := inputTokens + outputTokens
-	_, err := s.db.Exec(query, id, userID.String(), time.Now().Format("2006-01-02"), modelID, totalTokens, inputTokens, outputTokens)
+	_, err := s.db.Exec(query, id, userID.String(), time.Now().Format("2006-01-02"), modelID)
 	return err
 }
 
@@ -167,15 +157,12 @@ func (s *QuotaStore) GetUsageStats(userID uuid.UUID, startDate, endDate time.Tim
 	stats := &UsageStats{}
 	query := `
 		SELECT
-			COALESCE(SUM(request_count), 0),
-			COALESCE(SUM(token_count), 0),
-			COALESCE(SUM(input_tokens), 0),
-			COALESCE(SUM(output_tokens), 0)
+			COALESCE(SUM(request_count), 0)
 		FROM quota_usage_daily
 		WHERE user_id = ? AND date BETWEEN ? AND ?`
 
 	err := s.db.QueryRow(query, userID.String(), startDate.Format("2006-01-02"), endDate.Format("2006-01-02")).Scan(
-		&stats.TotalRequests, &stats.TotalTokens, &stats.InputTokens, &stats.OutputTokens,
+		&stats.TotalRequests,
 	)
 	return stats, err
 }
@@ -183,7 +170,7 @@ func (s *QuotaStore) GetUsageStats(userID uuid.UUID, startDate, endDate time.Tim
 // GetDailyUsageList 获取用户指定日期范围内的每日使用列表
 func (s *QuotaStore) GetDailyUsageList(userID uuid.UUID, startDate, endDate time.Time) ([]*QuotaUsageDaily, error) {
 	query := `
-		SELECT id, user_id, date, model_id, request_count, token_count, input_tokens, output_tokens
+		SELECT id, user_id, date, model_id, request_count
 		FROM quota_usage_daily
 		WHERE user_id = ? AND date BETWEEN ? AND ?
 		ORDER BY date DESC, model_id`
@@ -200,7 +187,7 @@ func (s *QuotaStore) GetDailyUsageList(userID uuid.UUID, startDate, endDate time
 		var idStr, userIDStr string
 		err := rows.Scan(
 			&idStr, &userIDStr, &usage.Date, &usage.ModelID,
-			&usage.RequestCount, &usage.TokenCount, &usage.InputTokens, &usage.OutputTokens,
+			&usage.RequestCount,
 		)
 		if err != nil {
 			return nil, err
@@ -220,10 +207,7 @@ func (s *QuotaStore) GetRecentUsageRecords(userID uuid.UUID, days int) ([]map[st
 	query := `
 		SELECT 
 			date,
-			COALESCE(SUM(request_count), 0) as requests,
-			COALESCE(SUM(token_count), 0) as tokens,
-			COALESCE(SUM(input_tokens), 0) as input_tokens,
-			COALESCE(SUM(output_tokens), 0) as output_tokens
+			COALESCE(SUM(request_count), 0) as requests
 		FROM quota_usage_daily
 		WHERE user_id = ? AND date >= ?
 		GROUP BY date
@@ -239,17 +223,13 @@ func (s *QuotaStore) GetRecentUsageRecords(userID uuid.UUID, days int) ([]map[st
 	for rows.Next() {
 		var date time.Time
 		var requests int
-		var tokens, inputTokens, outputTokens int64
-		err := rows.Scan(&date, &requests, &tokens, &inputTokens, &outputTokens)
+		err := rows.Scan(&date, &requests)
 		if err != nil {
 			return nil, err
 		}
 		records = append(records, map[string]interface{}{
-			"date":          date.Format("2006-01-02"),
-			"requests":      requests,
-			"tokens":        tokens,
-			"input_tokens":  inputTokens,
-			"output_tokens": outputTokens,
+			"date":     date.Format("2006-01-02"),
+			"requests": requests,
 		})
 	}
 	return records, rows.Err()

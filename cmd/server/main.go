@@ -261,12 +261,12 @@ func initQuotaPolicies(store *models.QuotaStore, policies []config.PolicyConfig)
 
 	for _, p := range policies {
 		policy := &models.QuotaPolicy{
-			Name:            p.Name,
-			RateLimit:       p.RateLimit,
-			RateLimitWindow: p.RateLimitWindow,
-			TokenQuotaDaily: p.TokenQuotaDaily,
-			Models:          p.Models,
-			Description:     p.Description,
+			Name:              p.Name,
+			RateLimit:         p.RateLimit,
+			RateLimitWindow:   p.RateLimitWindow,
+			RequestQuotaDaily: p.RequestQuotaDaily,
+			Models:            p.Models,
+			Description:       p.Description,
 		}
 		if err := store.CreateOrUpdatePolicy(policy); err != nil {
 			log.Printf("Failed to init quota policy %s: %v", p.Name, err)

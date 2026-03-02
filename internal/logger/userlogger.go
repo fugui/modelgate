@@ -11,24 +11,22 @@ import (
 
 // UsageLogEntry 使用日志条目
 type UsageLogEntry struct {
-	Time         string `json:"time"`
-	Model        string `json:"model"`
-	InputTokens  int    `json:"input_tokens"`
-	OutputTokens int    `json:"output_tokens"`
-	LatencyMs    int    `json:"latency_ms"`
-	ClientIP     string `json:"client_ip,omitempty"`
-	UserAgent    string `json:"user_agent,omitempty"`
-	StatusCode   int    `json:"status_code,omitempty"`
-	Error        string `json:"error,omitempty"`
-	BackendID    string `json:"backend_id,omitempty"`
+	Time      string `json:"time"`
+	Model     string `json:"model"`
+	LatencyMs int    `json:"latency_ms"`
+	ClientIP  string `json:"client_ip,omitempty"`
+	UserAgent string `json:"user_agent,omitempty"`
+	StatusCode int   `json:"status_code,omitempty"`
+	Error     string `json:"error,omitempty"`
+	BackendID string `json:"backend_id,omitempty"`
 }
 
 // UserLogger 按用户分文件的日志记录器
 type UserLogger struct {
-	basePath       string
-	retentionDays  int
-	writers        map[string]*os.File
-	mu             sync.RWMutex
+	basePath      string
+	retentionDays int
+	writers       map[string]*os.File
+	mu            sync.RWMutex
 }
 
 // NewUserLogger 创建用户日志记录器
@@ -38,13 +36,13 @@ func NewUserLogger(basePath string, retentionDays int) *UserLogger {
 		retentionDays: retentionDays,
 		writers:       make(map[string]*os.File),
 	}
-	
+
 	// 确保日志目录存在
 	os.MkdirAll(basePath, 0755)
-	
+
 	// 启动清理任务
 	go logger.cleanupLoop()
-	
+
 	return logger
 }
 
@@ -90,17 +88,6 @@ func (l *UserLogger) getWriter(userID string, date time.Time) (*os.File, error) 
 
 	l.writers[key] = writer
 	return writer, nil
-}
-
-// LogUsage 记录用户使用日志（兼容旧接口）
-func (l *UserLogger) LogUsage(userID string, model string, inputTokens, outputTokens, latencyMs int) error {
-	return l.LogUsageWithDetails(userID, UsageLogEntry{
-		Time:         time.Now().Format(time.RFC3339),
-		Model:        model,
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
-		LatencyMs:    latencyMs,
-	})
 }
 
 // LogUsageWithDetails 记录详细的使用日志
