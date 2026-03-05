@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"llmgate/internal/anthropic"
 	"llmgate/internal/apikey"
 	"llmgate/internal/auth"
 	"llmgate/internal/cache"
@@ -227,6 +228,12 @@ func main() {
 	// OpenAI 兼容代理接口
 	proxyHandler := apikey.NewProxyHandler(apiKeyService, proxyInstance, jwtManager, userStore)
 	proxyHandler.RegisterRoutes(r, concurrencyLimiter)
+
+	// Anthropic 兼容代理接口
+	anthropicHandler := anthropic.NewHandler(proxyInstance)
+	anthropicHandler.RegisterRoutes(r, proxyHandler.AuthMiddleware())
+
+	log.Println("Anthropic API support enabled at /v1/messages")
 
 	// 启动清理任务
 	go cleanupTask(usageService)

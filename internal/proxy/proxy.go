@@ -272,6 +272,260 @@ func (p *Proxy) handleNormalResponse(c *gin.Context, resp *http.Response, userID
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 }
 
+// BackendRequest 后端请求参数
+type BackendRequest struct {
+	ModelID     string
+	UserID      uuid.UUID
+	RequestBody []byte
+	IsStream    bool
+	ClientIP    string
+	UserAgent   string
+}
+
+// BackendResponse 后端响应
+type BackendResponse struct {
+	Body       io.ReadCloser
+	StatusCode int
+	BackendID  string
+}
+
+// ExecuteCoreWorkflow 执行核心代理工作流（复用逻辑）
+// 支持请求/响应转换，用于实现多协议支持
+func (p *Proxy) ExecuteCoreWorkflow(
+	c *gin.Context,
+	req *BackendRequest,
+	responseConverter func([]byte) ([]byte, error),
+	streamLineConverter func(string) (string, error),
+) {
+	startTime := time.Now()
+
+	// 获取用户信息
+	user, err := p.userStore.GetByID(req.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get user info"})
+		return
+	}
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return
+	}
+
+	// 检查配额
+	quotaResult, err := p.quotaService.CheckQuota(req.UserID, user.QuotaPolicy, req.ModelID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "quota check failed"})
+		return
+	}
+
+	if !quotaResult.Allowed {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"error": quotaResult.Reason,
+			"quota": quotaResult,
+		})
+		return
+	}
+
+	// 选择后端
+	backend, ok := p.lb.Next(req.ModelID)
+	if !ok {
+		p.usageService.RecordUsageDetailed(&usage.Record{
+			UserID:     req.UserID,
+			ModelID:    req.ModelID,
+			ClientIP:   req.ClientIP,
+			UserAgent:  req.UserAgent,
+			StatusCode: http.StatusServiceUnavailable,
+			Error:      "no backend available",
+		})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no backend available for model: " + req.ModelID})
+		return
+	}
+
+	// 获取模型配置并注入参数
+	modelConfig, _ := p.modelStore.GetByID(req.ModelID)
+	requestBody := req.RequestBody
+	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
+		requestBody = injectModelParams(requestBody, modelConfig.ModelParams)
+	}
+
+	// 修改请求体以替换 model 名称
+	if backend.ModelName != "" {
+		requestBody = modifyRequestModel(requestBody, backend.ModelName)
+	}
+
+	// 转发请求
+	url := strings.TrimSuffix(backend.URL, "/") + "/v1/chat/completions"
+	proxyReq, err := http.NewRequest(c.Request.Method, url, bytes.NewReader(requestBody))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
+		return
+	}
+
+	// 复制请求头
+	for key, values := range c.Request.Header {
+		for _, value := range values {
+			proxyReq.Header.Add(key, value)
+		}
+	}
+
+	// 添加后端认证
+	if backend.APIKey != "" {
+		proxyReq.Header.Set("Authorization", "Bearer "+backend.APIKey)
+	}
+
+	// 注入自定义 header
+	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
+		for key, value := range modelConfig.ModelParams {
+			if strings.HasPrefix(key, "__") && strings.HasSuffix(key, "__") {
+				headerName := convertHeaderName(key)
+				if strValue, ok := value.(string); ok {
+					proxyReq.Header.Set(headerName, strValue)
+				}
+			}
+		}
+	}
+
+	proxyReq.ContentLength = int64(len(requestBody))
+
+	// 发送请求
+	resp, err := p.httpClient.Do(proxyReq)
+	if err != nil {
+		p.lb.MarkFailed(backend.ID)
+		if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "backend request timeout"})
+		} else {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "backend unavailable: " + err.Error()})
+		}
+		return
+	}
+	defer resp.Body.Close()
+
+	p.lb.MarkSuccess(backend.ID)
+
+	// 透传非 200 状态码
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
+		return
+	}
+
+	// 根据是否流式响应选择处理方式
+	if req.IsStream {
+		p.handleConvertedStreamResponse(c, resp, req, backend.ID, startTime, streamLineConverter)
+	} else {
+		p.handleConvertedNormalResponse(c, resp, req, backend.ID, startTime, responseConverter)
+	}
+}
+
+// handleConvertedNormalResponse 处理非流式响应（带转换）
+func (p *Proxy) handleConvertedNormalResponse(
+	c *gin.Context,
+	resp *http.Response,
+	req *BackendRequest,
+	backendID string,
+	startTime time.Time,
+	converter func([]byte) ([]byte, error),
+) {
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		p.usageService.RecordUsageDetailed(&usage.Record{
+			UserID:     req.UserID,
+			ModelID:    req.ModelID,
+			ClientIP:   req.ClientIP,
+			UserAgent:  req.UserAgent,
+			BackendID:  backendID,
+			StatusCode: http.StatusBadGateway,
+			Error:      "failed to read backend response",
+		})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read backend response"})
+		return
+	}
+
+	latency := int(time.Since(startTime).Milliseconds())
+
+	// 记录使用日志
+	p.usageService.RecordUsageDetailed(&usage.Record{
+		UserID:     req.UserID,
+		ModelID:    req.ModelID,
+		LatencyMs:  latency,
+		ClientIP:   req.ClientIP,
+		UserAgent:  req.UserAgent,
+		BackendID:  backendID,
+		StatusCode: resp.StatusCode,
+	})
+
+	// 记录请求
+	_ = p.quotaService.RecordRequest(req.UserID, req.ModelID)
+
+	// 转换响应
+	if converter != nil {
+		converted, err := converter(respBody)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert response: " + err.Error()})
+			return
+		}
+		c.Data(resp.StatusCode, "application/json", converted)
+		return
+	}
+
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
+}
+
+// handleConvertedStreamResponse 处理流式响应（带转换）
+func (p *Proxy) handleConvertedStreamResponse(
+	c *gin.Context,
+	resp *http.Response,
+	req *BackendRequest,
+	backendID string,
+	startTime time.Time,
+	lineConverter func(string) (string, error),
+) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Status(resp.StatusCode)
+
+	reader := bufio.NewReader(resp.Body)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			fmt.Printf("Error reading stream: %v\n", err)
+			break
+		}
+
+		// 转换每一行
+		if lineConverter != nil {
+			converted, err := lineConverter(line)
+			if err != nil {
+				// 转换失败时透传原始行
+				c.Writer.WriteString(line)
+			} else {
+				c.Writer.WriteString(converted)
+			}
+		} else {
+			c.Writer.WriteString(line)
+		}
+		c.Writer.Flush()
+	}
+
+	latency := int(time.Since(startTime).Milliseconds())
+
+	p.usageService.RecordUsageDetailed(&usage.Record{
+		UserID:     req.UserID,
+		ModelID:    req.ModelID,
+		LatencyMs:  latency,
+		ClientIP:   req.ClientIP,
+		UserAgent:  req.UserAgent,
+		BackendID:  backendID,
+		StatusCode: resp.StatusCode,
+	})
+
+	_ = p.quotaService.RecordRequest(req.UserID, req.ModelID)
+}
+
 // handleStreamResponse 处理流式响应（SSE）
 func (p *Proxy) handleStreamResponse(c *gin.Context, resp *http.Response, userID uuid.UUID, modelID string, quotaPolicy string, startTime time.Time, clientIP, userAgent, backendID string) {
 	// 设置 SSE 响应头
