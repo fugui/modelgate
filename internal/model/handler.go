@@ -14,6 +14,7 @@ import (
 type LoadBalancer interface {
 	GetHealthStatus() map[string]proxy.BackendHealth
 	GetModelBackends(modelID string) []proxy.BackendHealth
+	String() string
 }
 
 type Handler struct {
@@ -41,6 +42,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager
 	auth.Use(middleware.AuthMiddlewareWithUserValidation(jwtManager, h.userStore))
 	{
 		auth.GET("/admin/models/health", h.GetHealthStatus)
+		auth.GET("/admin/loadbalancer/status", h.GetLoadBalancerStatus)
 	}
 
 	// 管理员接口
@@ -329,6 +331,28 @@ func (h *Handler) DeleteBackend(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "backend deleted"})
+}
+
+// GetLoadBalancerStatus 获取负载均衡器状态（调试用）
+func (h *Handler) GetLoadBalancerStatus(c *gin.Context) {
+	if h.loadBalancer == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"error": "load balancer not initialized",
+		})
+		return
+	}
+
+	// 获取健康状态
+	healthStatus := h.loadBalancer.GetHealthStatus()
+
+	// 按模型分组
+	modelStats := make(map[string]interface{})
+
+	c.JSON(http.StatusOK, gin.H{
+		"load_balancer": h.loadBalancer.String(),
+		"health_status": healthStatus,
+		"models":        modelStats,
+	})
 }
 
 // AdminHandler 管理员配额策略管理
