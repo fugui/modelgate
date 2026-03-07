@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"llmgate/internal/proxy"
+	"modelgate/internal/proxy"
 )
 
 // Handler 处理 Anthropic API 请求

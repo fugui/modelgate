@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"llmgate/internal/models"
+	"modelgate/internal/models"
 )
 
 // RateCounter 内存速率计数器

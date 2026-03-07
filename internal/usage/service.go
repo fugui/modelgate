@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"llmgate/internal/logger"
+	"modelgate/internal/logger"
 )
 
 // Service 使用记录服务

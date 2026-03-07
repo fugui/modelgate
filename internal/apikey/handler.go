@@ -7,10 +7,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"llmgate/internal/auth"
-	"llmgate/internal/concurrency"
-	"llmgate/internal/middleware"
-	"llmgate/internal/models"
+	"modelgate/internal/auth"
+	"modelgate/internal/concurrency"
+	"modelgate/internal/middleware"
+	"modelgate/internal/models"
 )
 
 // contextKey 用于在 gin 上下文中存储认证信息

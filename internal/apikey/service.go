@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
-	"llmgate/internal/cache"
-	"llmgate/internal/models"
+	"modelgate/internal/cache"
+	"modelgate/internal/models"
 )
 
 const (

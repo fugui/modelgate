@@ -12,9 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"llmgate/internal/models"
-	"llmgate/internal/quota"
-	"llmgate/internal/usage"
+	"modelgate/internal/models"
+	"modelgate/internal/quota"
+	"modelgate/internal/usage"
 )
 
 // Proxy LLM 代理
@@ -584,7 +584,7 @@ func (p *Proxy) HandleListModels(c *gin.Context) {
 			"id":       m.ID,
 			"object":   "model",
 			"created":  m.CreatedAt.Unix(),
-			"owned_by": "llmgate",
+			"owned_by": "modelgate",
 		})
 	}
 

@@ -1,7 +1,7 @@
 .PHONY: build run test clean lint fmt deps web-build embed release
 
 # 变量
-BINARY_NAME=llmgate
+BINARY_NAME=modelgate
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_TIME=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")

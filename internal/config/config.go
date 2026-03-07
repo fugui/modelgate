@@ -135,7 +135,7 @@ func Load(path string) (*Config, error) {
 		cfg.JWT.ExpireHours = 24
 	}
 	if cfg.Database.Path == "" {
-		cfg.Database.Path = "llmgate.db"
+		cfg.Database.Path = "modelgate.db"
 	}
 	if cfg.Logs.Path == "" {
 		cfg.Logs.Path = "logs"

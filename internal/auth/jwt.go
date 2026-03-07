@@ -7,7 +7,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"llmgate/internal/models"
+	"modelgate/internal/models"
 )
 
 var (
@@ -49,7 +49,7 @@ func (m *JWTManager) Generate(user *models.User) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(m.expireHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
-			Issuer:    "llmgate",
+			Issuer:    "modelgate",
 			Subject:   user.ID.String(),
 		},
 	}

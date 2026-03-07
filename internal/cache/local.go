@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"llmgate/internal/models"
+	"modelgate/internal/models"
 )
 
 // Cache 简单的内存缓存

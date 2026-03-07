@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"llmgate/internal/apikey"
-	"llmgate/internal/auth"
-	"llmgate/internal/cache"
-	"llmgate/internal/models"
-	"llmgate/internal/quota"
+	"modelgate/internal/apikey"
+	"modelgate/internal/auth"
+	"modelgate/internal/cache"
+	"modelgate/internal/models"
+	"modelgate/internal/quota"
 
 	_ "github.com/mattn/go-sqlite3"
 )

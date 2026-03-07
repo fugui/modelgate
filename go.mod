@@ -1,4 +1,4 @@
-module llmgate
+module modelgate
 
 go 1.21
 

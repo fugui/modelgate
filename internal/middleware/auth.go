@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"llmgate/internal/auth"
-	"llmgate/internal/models"
+	"modelgate/internal/auth"
+	"modelgate/internal/models"
 )
 
 const ContextKeyUser = "currentUser"

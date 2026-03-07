@@ -13,10 +13,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"llmgate/internal/auth"
-	"llmgate/internal/config"
-	"llmgate/internal/middleware"
-	"llmgate/internal/models"
+	"modelgate/internal/auth"
+	"modelgate/internal/config"
+	"modelgate/internal/middleware"
+	"modelgate/internal/models"
 )
 
 type QuotaService interface {

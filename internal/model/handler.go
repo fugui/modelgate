@@ -5,10 +5,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"llmgate/internal/auth"
-	"llmgate/internal/middleware"
-	"llmgate/internal/models"
-	"llmgate/internal/proxy"
+	"modelgate/internal/auth"
+	"modelgate/internal/middleware"
+	"modelgate/internal/models"
+	"modelgate/internal/proxy"
 )
 
 type LoadBalancer interface {
@@ -83,7 +83,7 @@ func (h *Handler) ListForProxy(c *gin.Context) {
 			"id":       m.ID,
 			"object":   "model",
 			"created":  m.CreatedAt.Unix(),
-			"owned_by": "llmgate",
+			"owned_by": "modelgate",
 		})
 	}
 
