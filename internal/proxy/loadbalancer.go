@@ -87,24 +87,32 @@ func (lb *RoundRobinBalancer) Next(modelID string) (*Backend, bool) {
 	defer lb.mu.RUnlock()
 
 	backends, exists := lb.backends[modelID]
-	if !exists || len(backends) == 0 {
+	if !exists {
+		log.Printf("Next: no backends found for model %s (not in map)", modelID)
+		return nil, false
+	}
+	if len(backends) == 0 {
+		log.Printf("Next: backend list empty for model %s", modelID)
 		return nil, false
 	}
 
 	// 找到健康的后端
 	counter := lb.counters[modelID]
 	attempts := len(backends)
+	healthyCount := 0
 
 	for i := 0; i < attempts; i++ {
 		idx := atomic.AddUint32(counter, 1) % uint32(len(backends))
 		backend := backends[idx]
 
 		if health, ok := lb.health[backend.ID]; ok && health.Healthy {
+			healthyCount++
 			return &backend, true
 		}
 	}
 
 	// 所有后端都不健康，返回第一个（降级）
+	log.Printf("Next: all %d backends for model %s are unhealthy, using fallback", len(backends), modelID)
 	return &backends[0], true
 }
 
@@ -303,6 +311,8 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
+	log.Printf("ReloadConfig: loading %d models", len(models))
+
 	// 1. 构建新的后端映射
 	newBackends := make(map[string][]Backend)
 	newCounters := make(map[string]*uint32)
@@ -313,6 +323,7 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 
 		// 跳过禁用的模型
 		if !modelConfig.Enabled {
+			log.Printf("ReloadConfig: skipping disabled model %s", modelID)
 			continue
 		}
 
@@ -321,6 +332,7 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 		for _, backendConfig := range modelConfig.Backends {
 			// 跳过禁用的后端
 			if !backendConfig.Enabled {
+				log.Printf("ReloadConfig: model %s - skipping disabled backend %s", modelID, backendConfig.ID)
 				continue
 			}
 
@@ -337,6 +349,7 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 			}
 
 			modelBackends = append(modelBackends, backend)
+			log.Printf("ReloadConfig: model %s - added backend %s (url=%s)", modelID, backend.ID, backend.URL)
 
 			// 4. 保留现有健康状态或初始化新的
 			if _, exists := lb.health[backend.ID]; !exists {
@@ -365,6 +378,9 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 				var counter uint32
 				newCounters[modelID] = &counter
 			}
+			log.Printf("ReloadConfig: model %s registered with %d backends", modelID, len(modelBackends))
+		} else {
+			log.Printf("ReloadConfig: WARNING - model %s has no enabled backends!", modelID)
 		}
 	}
 
@@ -386,5 +402,8 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 	lb.backends = newBackends
 	lb.counters = newCounters
 
-	log.Printf("LoadBalancer config reloaded: %d models configured", len(newBackends))
+	log.Printf("LoadBalancer config reloaded: %d models configured with backends", len(newBackends))
+	for modelID, backends := range newBackends {
+		log.Printf("  - %s: %d backends", modelID, len(backends))
+	}
 }
