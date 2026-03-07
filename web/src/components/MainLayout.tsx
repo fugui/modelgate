@@ -182,8 +182,38 @@ const MainLayout: React.FC = () => {
             flexShrink: 0,
           }}
         >
-          <div style={{ fontSize: 16, fontWeight: 500 }}>
-            模界（Model Gate）， 让 AI 触手可及， 使能效率倍增新时代
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+          }}>
+            <div style={{
+              fontSize: '20px',
+              fontWeight: 700,
+              background: 'linear-gradient(135deg, #1890ff 0%, #52c41a 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              letterSpacing: '0.5px',
+            }}>
+              模界 Model Gate
+            </div>
+            <div style={{
+              width: '1px',
+              height: '20px',
+              background: '#d9d9d9',
+              margin: '0 4px',
+            }} />
+            <div style={{
+              fontSize: '14px',
+              fontWeight: 400,
+              color: '#666',
+              letterSpacing: '0.3px',
+            }}>
+              <span style={{ color: '#1890ff', fontWeight: 500 }}>让 AI 触手可及</span>
+              <span style={{ margin: '0 8px', color: '#d9d9d9' }}>·</span>
+              <span style={{ color: '#52c41a', fontWeight: 500 }}>使能效率倍增新时代</span>
+            </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
