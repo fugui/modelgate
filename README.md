@@ -1,9 +1,9 @@
-# LLMGate - 企业内部 LLM 管理平台
+# 模界（Model Gate）- 企业大模型管理平台
 
 [![Go Version](https://img.shields.io/badge/Go-1.22+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-LLMGate 是一个为企业内部提供统一 LLM 服务入口的管理平台，实现用户管理、权限控制、配额计费、多后端负载均衡和审计追踪。
+模界（Model Gate）是一个为企业内部提供统一大模型服务入口的管理平台，实现用户管理、权限控制、配额计费、多后端负载均衡和审计追踪。
 
 ## 核心功能
 
@@ -44,14 +44,14 @@ make release
 ```
 
 构建产物：
-- `llmgate` - 单个可执行文件（包含前端资源，约 12MB）
+- `modelgate` - 单个可执行文件（包含前端资源，约 12MB）
 - `config.yaml` - 配置文件
 
 ### 部署
 
 ```bash
 # 仅需两个文件即可部署
-./llmgate
+./modelgate
 ```
 
 访问 http://localhost:8080 即可使用 Web 管理界面。
@@ -68,7 +68,7 @@ make dev
 
 ### 默认管理员账号
 
-- **邮箱**: admin@llmgate.local
+- **邮箱**: admin@modelgate.local
 - **密码**: admin123
 
 **注意**：首次登录后请立即修改默认密码。
@@ -83,7 +83,7 @@ server:
   mode: "release"         # debug 或 release
 
 database:
-  path: "llmgate.db"      # SQLite 数据库文件路径
+  path: "modelgate.db"      # SQLite 数据库文件路径
 
 logs:
   path: "./logs"          # 日志目录
@@ -94,7 +94,7 @@ jwt:
   expire_hours: 24
 
 admin:
-  default_email: "admin@llmgate.local"
+  default_email: "admin@modelgate.local"
   default_password: "admin123"
 
 # LLM 后端配置 - 支持多后端架构
@@ -330,7 +330,7 @@ interface Backend {
 ## 项目结构
 
 ```
-llmgate/
+modelgate/
 ├── cmd/
 │   └── server/              # 主程序入口
 ├── internal/                # 内部包
@@ -357,7 +357,7 @@ llmgate/
 
 ### 负载均衡策略
 
-LLMGate 采用**权重轮询**算法进行负载均衡：
+模界（Model Gate）采用**权重轮询**算法进行负载均衡：
 
 1. 根据后端 `weight` 值计算选择概率
 2. 优先选择健康（`healthy=true`）的后端
@@ -410,10 +410,10 @@ go test ./test/scenarios/... -cover
 
 ```bash
 # 1. 复制两个文件到服务器
-scp llmgate config.yaml user@server:/opt/llmgate/
+scp modelgate config.yaml user@server:/opt/modelgate/
 
 # 2. 使用 systemd 管理服务
-sudo systemctl enable --now llmgate
+sudo systemctl enable --now modelgate
 ```
 
 ### 使用 Nginx 反向代理
@@ -452,7 +452,7 @@ server {
            ┌───────────────┼───────────────┐
            │               │               │
       ┌────┴────┐     ┌────┴────┐     ┌────┴────┐
-      │LLMGate  │     │LLMGate  │     │LLMGate  │
+      │Model Gate│     │Model Gate│     │Model Gate│
       │Instance1│     │Instance2│     │Instance3│
       └────┬────┘     └────┬────┘     └────┬────┘
            │               │               │
@@ -474,7 +474,7 @@ server {
 4. **API Key 保护**：不要将 API Key 硬编码在客户端代码中
 5. **定期备份**：备份 SQLite 数据库文件
 6. **日志审计**：定期检查日志目录的访问记录
-7. **网络隔离**：LLM 后端服务应部署在内网，通过 LLMGate 统一暴露
+7. **网络隔离**：LLM 后端服务应部署在内网，通过 Model Gate 统一暴露
 
 ## 版本历史
 
