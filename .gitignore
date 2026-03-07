@@ -59,3 +59,12 @@ releases/
 tmp/
 temp/
 *.tmp
+
+# Configuration files with sensitive data
+config.yaml
+*.yaml.backup
+*.yaml.tmp
+
+# Local database files
+*.db
+*.db.backup
