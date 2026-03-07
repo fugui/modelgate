@@ -8,6 +8,7 @@ import (
 	"modelgate/internal/apikey"
 	"modelgate/internal/auth"
 	"modelgate/internal/cache"
+	"modelgate/internal/config"
 	"modelgate/internal/models"
 	"modelgate/internal/quota"
 
@@ -16,23 +17,24 @@ import (
 
 // TestScenario 测试场景基座
 type TestScenario struct {
-	DB          *sql.DB
-	UserStore   *models.UserStore
-	APIKeyStore *models.APIKeyStore
-	ModelStore  *models.ModelStore
-	QuotaStore  *models.QuotaStore
-	JWTManager  *auth.JWTManager
-	Cache       *cache.Cache
-	APIKeySvc   *apikey.Service
-	QuotaSvc    *quota.Service
+	DB           *sql.DB
+	CfgManager   *config.ConfigManager
+	UserStore    *models.UserStore
+	APIKeyStore  *models.APIKeyStore
+	ModelStore   *models.ModelStore
+	QuotaStore   *models.QuotaStore
+	JWTManager   *auth.JWTManager
+	Cache        *cache.Cache
+	APIKeySvc    *apikey.Service
+	QuotaSvc     *quota.Service
 }
 
-// SetupTestDB 创建内存测试数据库
+// SetupTestDB 创建内存测试数据库和配置
 func SetupTestDB(t *testing.T) *TestScenario {
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
 
-	// 创建表结构
+	// 创建核心数据表（不再包含 models, backends, quota_policies）
 	schema := `
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -67,43 +69,6 @@ CREATE TABLE api_keys (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
-CREATE TABLE quota_policies (
-    name TEXT PRIMARY KEY,
-    rate_limit INTEGER NOT NULL,
-    rate_limit_window INTEGER NOT NULL,
-    request_quota_daily INTEGER DEFAULT 1000,
-    models TEXT,
-    description TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE models (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    enabled INTEGER DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE backends (
-    id TEXT PRIMARY KEY,
-    model_id TEXT NOT NULL,
-    name TEXT,
-    base_url TEXT NOT NULL,
-    api_key TEXT,
-    model_name TEXT,
-    weight INTEGER DEFAULT 1,
-    region TEXT,
-    enabled INTEGER DEFAULT 1,
-    healthy INTEGER DEFAULT 1,
-    last_check_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (model_id) REFERENCES models(id)
-);
-
 CREATE TABLE quota_usage_daily (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -116,21 +81,49 @@ CREATE TABLE quota_usage_daily (
 	_, err = db.Exec(schema)
 	require.NoError(t, err)
 
-	// 创建默认配额策略
-	_, err = db.Exec(`
-		INSERT INTO quota_policies (name, rate_limit, rate_limit_window, request_quota_daily, models)
-		VALUES ('default', 60, 60, 1000, '["*"]')
-	`)
-	require.NoError(t, err)
+	// 创建测试配置
+	testCfg := &config.Config{
+		Models: []config.ModelConfig{
+			{
+				ID:          "gpt-4",
+				Name:        "GPT-4",
+				Description: "Test model",
+				Enabled:     true,
+				Backends: []config.BackendConfig{
+					{
+						ID:        "backend-1",
+						Name:      "Test Backend",
+						BaseURL:   "http://localhost:8080",
+						ModelName: "gpt-4",
+						Weight:    1,
+						Enabled:   true,
+					},
+				},
+			},
+		},
+		Policies: []config.PolicyConfig{
+			{
+				Name:              "default",
+				RateLimit:         60,
+				RateLimitWindow:   60,
+				RequestQuotaDaily: 1000,
+				Models:            []string{"*"},
+			},
+		},
+	}
+
+	// 创建 ConfigManager（使用临时路径）
+	cfgManager := config.NewManager(testCfg, "/tmp/test-config.yaml")
 
 	return &TestScenario{
-		DB:          db,
-		UserStore:   models.NewUserStore(db),
-		APIKeyStore: models.NewAPIKeyStore(db),
-		ModelStore:  models.NewModelStore(db),
-		QuotaStore:  models.NewQuotaStore(db),
-		JWTManager:  auth.NewJWTManager("test-secret", 24),
-		Cache:       cache.New(),
+		DB:           db,
+		CfgManager:   cfgManager,
+		UserStore:    models.NewUserStore(db),
+		APIKeyStore:  models.NewAPIKeyStore(db),
+		ModelStore:   models.NewModelStore(cfgManager),
+		QuotaStore:   models.NewQuotaStore(cfgManager, db),
+		JWTManager:   auth.NewJWTManager("test-secret", 24),
+		Cache:        cache.New(),
 	}
 }
 
@@ -149,7 +142,6 @@ func (s *TestScenario) CreateUser(t *testing.T, email, name string, role models.
 		Role:         role,
 		Department:   "test",
 		QuotaPolicy:  "default",
-		Models:       []string{"*"},
 		Enabled:      true,
 	}
 	err := s.UserStore.Create(user)

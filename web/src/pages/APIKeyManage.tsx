@@ -11,7 +11,6 @@ interface APIKey {
   created_at: string;
   last_used_at?: string;
   enabled: boolean;
-  models?: string[];
   expires_at?: string;
 }
 

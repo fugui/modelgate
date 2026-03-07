@@ -46,7 +46,6 @@ interface User {
   name: string;
   role: string;
   department: string;
-  quota_policy: string;
 }
 
 interface Policy {
@@ -387,11 +386,6 @@ const Admin: React.FC = () => {
     { title: '姓名', dataIndex: 'name' },
     { title: '角色', dataIndex: 'role' },
     { title: '部门', dataIndex: 'department' },
-    {
-      title: '配额策略',
-      dataIndex: 'quota_policy',
-      render: (v: string) => <Tag>{v}</Tag>,
-    },
     {
       title: '操作',
       render: () => (
@@ -736,16 +730,16 @@ const Admin: React.FC = () => {
       {/* Backend Management Drawer */}
       <Drawer
         title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <Button
+              type="text"
               icon={<ArrowLeftOutlined />}
               onClick={handleCloseBackendDrawer}
-            >
-              返回
-            </Button>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 500 }}>后端管理</div>
-              <div style={{ color: '#666', fontSize: 12 }}>
+              style={{ padding: '4px 8px', marginLeft: -8 }}
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.4 }}>后端管理</div>
+              <div style={{ color: '#8c8c8c', fontSize: 12, lineHeight: 1.4 }}>
                 模型: {selectedModelName || selectedModelId}
               </div>
             </div>
@@ -755,7 +749,8 @@ const Admin: React.FC = () => {
         width={1000}
         onClose={handleCloseBackendDrawer}
         open={backendDrawerVisible}
-        bodyStyle={{ padding: 24 }}
+        styles={{ body: { padding: 24, paddingTop: 16 } }}
+        closeIcon={null}
       >
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
           <div>

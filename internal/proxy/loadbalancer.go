@@ -3,11 +3,14 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"modelgate/internal/config"
 )
 
 // LoadBalancer 负载均衡器接口
@@ -293,4 +296,95 @@ func (lb *RoundRobinBalancer) String() string {
 
 	return fmt.Sprintf("LoadBalancer[models=%v, healthy=%d, unhealthy=%d]",
 		models, healthy, unhealthy)
+}
+
+// ReloadConfig 热重载配置 - 在运行时更新后端配置
+func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	// 1. 构建新的后端映射
+	newBackends := make(map[string][]Backend)
+	newCounters := make(map[string]*uint32)
+
+	// 2. 遍历所有模型配置
+	for _, modelConfig := range models {
+		modelID := modelConfig.ID
+
+		// 跳过禁用的模型
+		if !modelConfig.Enabled {
+			continue
+		}
+
+		// 3. 处理该模型的后端
+		var modelBackends []Backend
+		for _, backendConfig := range modelConfig.Backends {
+			// 跳过禁用的后端
+			if !backendConfig.Enabled {
+				continue
+			}
+
+			backend := Backend{
+				ID:        backendConfig.ID,
+				URL:       backendConfig.BaseURL,
+				Weight:    backendConfig.Weight,
+				ModelName: backendConfig.ModelName,
+				APIKey:    backendConfig.APIKey,
+			}
+
+			if backend.Weight == 0 {
+				backend.Weight = 1
+			}
+
+			modelBackends = append(modelBackends, backend)
+
+			// 4. 保留现有健康状态或初始化新的
+			if _, exists := lb.health[backend.ID]; !exists {
+				lb.health[backend.ID] = &BackendHealth{
+					BackendID: backend.ID,
+					URL:       backend.URL,
+					ModelName: backend.ModelName,
+					Healthy:   true,
+					LastCheck: time.Now(),
+				}
+			} else {
+				// 更新URL和ModelName（可能已更改）
+				lb.health[backend.ID].URL = backend.URL
+				lb.health[backend.ID].ModelName = backend.ModelName
+			}
+		}
+
+		// 5. 只添加有后端的模型
+		if len(modelBackends) > 0 {
+			newBackends[modelID] = modelBackends
+
+			// 6. 保留现有的计数器或创建新的
+			if existingCounter, exists := lb.counters[modelID]; exists {
+				newCounters[modelID] = existingCounter
+			} else {
+				var counter uint32
+				newCounters[modelID] = &counter
+			}
+		}
+	}
+
+	// 7. 清理已删除后端的健康状态
+	existingBackendIDs := make(map[string]bool)
+	for _, backends := range newBackends {
+		for _, backend := range backends {
+			existingBackendIDs[backend.ID] = true
+		}
+	}
+
+	for id := range lb.health {
+		if !existingBackendIDs[id] {
+			delete(lb.health, id)
+		}
+	}
+
+	// 8. 更新后端映射
+	lb.backends = newBackends
+	lb.counters = newCounters
+
+	log.Printf("LoadBalancer config reloaded: %d models configured", len(newBackends))
 }

@@ -1,9 +1,9 @@
 package models
 
 import (
-	"database/sql"
-	"encoding/json"
 	"time"
+
+	"modelgate/internal/config"
 )
 
 type Model struct {
@@ -43,130 +43,100 @@ type BackendCreateInput struct {
 	Enabled   bool   `json:"enabled"`
 }
 
-// ModelStore 模型配置数据访问层
+// ModelStore 模型配置数据访问层 - 现在从 ConfigManager 读取
 type ModelStore struct {
-	db *sql.DB
+	cm *config.ConfigManager
 }
 
-func NewModelStore(db *sql.DB) *ModelStore {
-	return &ModelStore{db: db}
+func NewModelStore(cm *config.ConfigManager) *ModelStore {
+	return &ModelStore{cm: cm}
+}
+
+// configToModel 将配置模型转换为数据模型
+func (s *ModelStore) configToModel(cm config.ModelConfig) *Model {
+	return &Model{
+		ID:          cm.ID,
+		Name:        cm.Name,
+		Description: cm.Description,
+		Enabled:     cm.Enabled,
+		ModelParams: cm.ModelParams,
+		CreatedAt:   time.Now(), // 配置中无时间信息，使用当前时间
+		UpdatedAt:   time.Now(),
+	}
+}
+
+// modelToConfig 将数据模型转换为配置模型
+func (s *ModelStore) modelToConfig(m *Model) config.ModelConfig {
+	return config.ModelConfig{
+		ID:          m.ID,
+		Name:        m.Name,
+		Description: m.Description,
+		Enabled:     m.Enabled,
+		ModelParams: m.ModelParams,
+	}
 }
 
 func (s *ModelStore) Create(model *Model) error {
-	paramsJSON, _ := json.Marshal(model.ModelParams)
-	query := `
-		INSERT INTO models (id, name, description, enabled, model_params)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			name = excluded.name,
-			description = excluded.description,
-			enabled = excluded.enabled,
-			model_params = excluded.model_params,
-			updated_at = CURRENT_TIMESTAMP
-		RETURNING created_at, updated_at`
+	cfg := s.modelToConfig(model)
+	if err := s.cm.AddModel(cfg); err != nil {
+		return err
+	}
 
-	return s.db.QueryRow(query,
-		model.ID, model.Name, model.Description, model.Enabled, string(paramsJSON),
-	).Scan(&model.CreatedAt, &model.UpdatedAt)
+	// 更新时间戳
+	model.CreatedAt = time.Now()
+	model.UpdatedAt = time.Now()
+	return nil
 }
 
 func (s *ModelStore) GetByID(id string) (*Model, error) {
-	model := &Model{}
-	var paramsJSON string
-	query := `
-		SELECT id, name, description, enabled, model_params, created_at, updated_at
-		FROM models WHERE id = ?`
-
-	err := s.db.QueryRow(query, id).Scan(
-		&model.ID, &model.Name, &model.Description, &model.Enabled, &paramsJSON,
-		&model.CreatedAt, &model.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
+	cfg := s.cm.GetModelByID(id)
+	if cfg == nil {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	if paramsJSON != "" {
-		json.Unmarshal([]byte(paramsJSON), &model.ModelParams)
-	}
-	return model, nil
+
+	return s.configToModel(*cfg), nil
 }
 
 func (s *ModelStore) List() ([]*Model, error) {
-	query := `
-		SELECT id, name, description, enabled, model_params, created_at, updated_at
-		FROM models ORDER BY created_at`
-
-	rows, err := s.db.Query(query)
-	if err != nil {
-		return nil, err
+	models := s.cm.GetModels()
+	result := make([]*Model, len(models))
+	for i, m := range models {
+		model := s.configToModel(m)
+		result[i] = model
 	}
-	defer rows.Close()
-
-	var models []*Model
-	for rows.Next() {
-		model := &Model{}
-		var paramsJSON string
-		err := rows.Scan(
-			&model.ID, &model.Name, &model.Description, &model.Enabled, &paramsJSON,
-			&model.CreatedAt, &model.UpdatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		if paramsJSON != "" {
-			json.Unmarshal([]byte(paramsJSON), &model.ModelParams)
-		}
-		models = append(models, model)
-	}
-	return models, rows.Err()
+	return result, nil
 }
 
 func (s *ModelStore) ListEnabled() ([]*Model, error) {
-	query := `
-		SELECT id, name, description, enabled, model_params, created_at, updated_at
-		FROM models WHERE enabled = 1 ORDER BY created_at`
-
-	rows, err := s.db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var models []*Model
-	for rows.Next() {
-		model := &Model{}
-		var paramsJSON string
-		err := rows.Scan(
-			&model.ID, &model.Name, &model.Description, &model.Enabled, &paramsJSON,
-			&model.CreatedAt, &model.UpdatedAt,
-		)
-		if err != nil {
-			return nil, err
+	models := s.cm.GetModels()
+	var result []*Model
+	for _, m := range models {
+		if m.Enabled {
+			model := s.configToModel(m)
+			result = append(result, model)
 		}
-		if paramsJSON != "" {
-			json.Unmarshal([]byte(paramsJSON), &model.ModelParams)
-		}
-		models = append(models, model)
 	}
-	return models, rows.Err()
+	return result, nil
 }
 
 func (s *ModelStore) Update(model *Model) error {
-	paramsJSON, _ := json.Marshal(model.ModelParams)
-	query := `
-		UPDATE models SET
-			name = ?, description = ?, enabled = ?, model_params = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`
+	// 先获取现有配置以保留 backends
+	existing := s.cm.GetModelByID(model.ID)
+	if existing == nil {
+		return nil
+	}
 
-	_, err := s.db.Exec(query,
-		model.Name, model.Description, model.Enabled, string(paramsJSON), model.ID,
-	)
-	return err
+	cfg := s.modelToConfig(model)
+	cfg.Backends = existing.Backends // 保留后端配置
+
+	if err := s.cm.UpdateModel(cfg); err != nil {
+		return err
+	}
+
+	model.UpdatedAt = time.Now()
+	return nil
 }
 
 func (s *ModelStore) Delete(id string) error {
-	_, err := s.db.Exec("DELETE FROM models WHERE id = ?", id)
-	return err
+	return s.cm.DeleteModel(id)
 }

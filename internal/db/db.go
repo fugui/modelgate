@@ -35,6 +35,8 @@ func New(dbPath string) (*DB, error) {
 
 func (db *DB) Migrate() error {
 	// 内嵌的数据库 schema，无需外部 migrations 目录
+	// 注意：模型配置、后端配置、配额策略 已迁移到 config.yaml
+	// 保留的表：users, api_keys, quota_usage_daily（运行时数据）
 	schema := `
 -- 用户表
 CREATE TABLE IF NOT EXISTS users (
@@ -45,7 +47,6 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'user',
     department TEXT,
     quota_policy TEXT DEFAULT 'default',
-    models TEXT, -- JSON 数组
     auth_source TEXT DEFAULT 'local', -- 用户来源: local, sso
     enabled BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -60,9 +61,6 @@ CREATE TABLE IF NOT EXISTS api_keys (
     name TEXT NOT NULL,
     key_hash TEXT UNIQUE NOT NULL,
     key_prefix TEXT NOT NULL,
-    models TEXT, -- JSON 数组，null 表示使用用户默认
-    rate_limit INTEGER DEFAULT 0,
-    rate_limit_window INTEGER DEFAULT 60,
     enabled BOOLEAN DEFAULT 1,
     expires_at DATETIME,
     last_used_at DATETIME,
@@ -71,51 +69,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- 模型配置表
-CREATE TABLE IF NOT EXISTS models (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    model_params TEXT, -- JSON 格式，存储模型特定参数
-    enabled BOOLEAN DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- 后端配置表
-CREATE TABLE IF NOT EXISTS backends (
-    id TEXT PRIMARY KEY,
-    model_id TEXT NOT NULL,
-    name TEXT,
-    base_url TEXT NOT NULL,
-    api_key TEXT,
-    model_name TEXT,
-    weight INTEGER DEFAULT 1,
-    region TEXT,
-    enabled BOOLEAN DEFAULT 1,
-    healthy BOOLEAN DEFAULT 1,
-    last_check_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_backends_model_id ON backends(model_id);
-CREATE INDEX IF NOT EXISTS idx_backends_enabled ON backends(enabled);
-
--- 配额策略表
-CREATE TABLE IF NOT EXISTS quota_policies (
-    name TEXT PRIMARY KEY,
-    rate_limit INTEGER NOT NULL,
-    rate_limit_window INTEGER NOT NULL,
-    request_quota_daily INTEGER DEFAULT 1000, -- 每日请求配额，默认1000
-    models TEXT, -- JSON 数组
-    description TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- 配额使用统计表
+-- 配额使用统计表（运行时数据，保留在数据库中）
 CREATE TABLE IF NOT EXISTS quota_usage_daily (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -130,6 +84,12 @@ CREATE TABLE IF NOT EXISTS quota_usage_daily (
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_quota_usage_user_id ON quota_usage_daily(user_id);
 CREATE INDEX IF NOT EXISTS idx_quota_usage_date ON quota_usage_daily(date);
+
+-- 注意：以下表已弃用，配置数据现在存储在 config.yaml 中
+-- 保留这些注释以便于理解数据库演进历史
+-- DEPRECATED: models 表 -> 迁移到 config.yaml
+-- DEPRECATED: backends 表 -> 迁移到 config.yaml
+-- DEPRECATED: quota_policies 表 -> 迁移到 config.yaml
 `
 
 	_, err := db.Exec(schema)
@@ -137,32 +97,8 @@ CREATE INDEX IF NOT EXISTS idx_quota_usage_date ON quota_usage_daily(date);
 		return fmt.Errorf("failed to execute schema: %w", err)
 	}
 
-	// 迁移：添加 request_quota_daily 列（如果不存在）
-	if err := addColumnIfNotExists(db.DB, "quota_policies", "request_quota_daily", "INTEGER DEFAULT 1000"); err != nil {
-		return fmt.Errorf("failed to add request_quota_daily column: %w", err)
-	}
-
-	return nil
-}
-
-// addColumnIfNotExists 添加列（如果不存在）
-func addColumnIfNotExists(db *sql.DB, table, column, definition string) error {
-	// 检查列是否存在
-	var count int
-	query := `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`
-	err := db.QueryRow(query, table, column).Scan(&count)
-	if err != nil {
-		return err
-	}
-
-	// 列不存在则添加
-	if count == 0 {
-		alterSQL := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition)
-		_, err := db.Exec(alterSQL)
-		if err != nil {
-			return err
-		}
-	}
+	// 注意：quota_policies 表已弃用，相关迁移代码已移除
+	// 配置数据现在存储在 config.yaml 中
 
 	return nil
 }

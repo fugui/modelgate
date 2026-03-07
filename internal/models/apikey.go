@@ -2,48 +2,38 @@ package models
 
 import (
 	"database/sql"
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 type APIKey struct {
-	ID              uuid.UUID   `json:"id"`
-	UserID          uuid.UUID   `json:"user_id"`
-	Name            string      `json:"name"`
-	KeyHash         string      `json:"-"`
-	KeyPrefix       string      `json:"key_prefix"`
-	Models          StringArray `json:"models"`
-	RateLimit       int         `json:"rate_limit"`
-	RateLimitWindow int         `json:"rate_limit_window"`
-	Enabled         bool        `json:"enabled"`
-	ExpiresAt       *time.Time  `json:"expires_at,omitempty"`
-	LastUsedAt      *time.Time  `json:"last_used_at,omitempty"`
-	CreatedAt       time.Time   `json:"created_at"`
-	UpdatedAt       time.Time   `json:"updated_at"`
+	ID         uuid.UUID  `json:"id"`
+	UserID     uuid.UUID  `json:"user_id"`
+	Name       string     `json:"name"`
+	KeyHash    string     `json:"-"`
+	KeyPrefix  string     `json:"key_prefix"`
+	Enabled    bool       `json:"enabled"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 type APIKeyCreateRequest struct {
-	Name            string     `json:"name" binding:"required"`
-	Models          []string   `json:"models"`
-	RateLimit       int        `json:"rate_limit"`
-	RateLimitWindow int        `json:"rate_limit_window"`
-	ExpiresAt       *time.Time `json:"expires_at"`
+	Name      string     `json:"name" binding:"required"`
+	ExpiresAt *time.Time `json:"expires_at"`
 }
 
 type APIKeyResponse struct {
-	ID              uuid.UUID   `json:"id"`
-	UserID          uuid.UUID   `json:"user_id"`
-	Name            string      `json:"name"`
-	KeyPrefix       string      `json:"key_prefix"`
-	Models          StringArray `json:"models"`
-	RateLimit       int         `json:"rate_limit"`
-	RateLimitWindow int         `json:"rate_limit_window"`
-	Enabled         bool        `json:"enabled"`
-	ExpiresAt       *time.Time  `json:"expires_at,omitempty"`
-	LastUsedAt      *time.Time  `json:"last_used_at,omitempty"`
-	CreatedAt       time.Time   `json:"created_at"`
+	ID         uuid.UUID  `json:"id"`
+	UserID     uuid.UUID  `json:"user_id"`
+	Name       string     `json:"name"`
+	KeyPrefix  string     `json:"key_prefix"`
+	Enabled    bool       `json:"enabled"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type APIKeyWithSecret struct {
@@ -53,17 +43,14 @@ type APIKeyWithSecret struct {
 
 func (k *APIKey) ToResponse() APIKeyResponse {
 	return APIKeyResponse{
-		ID:              k.ID,
-		UserID:          k.UserID,
-		Name:            k.Name,
-		KeyPrefix:       k.KeyPrefix,
-		Models:          k.Models,
-		RateLimit:       k.RateLimit,
-		RateLimitWindow: k.RateLimitWindow,
-		Enabled:         k.Enabled,
-		ExpiresAt:       k.ExpiresAt,
-		LastUsedAt:      k.LastUsedAt,
-		CreatedAt:       k.CreatedAt,
+		ID:         k.ID,
+		UserID:     k.UserID,
+		Name:       k.Name,
+		KeyPrefix:  k.KeyPrefix,
+		Enabled:    k.Enabled,
+		ExpiresAt:  k.ExpiresAt,
+		LastUsedAt: k.LastUsedAt,
+		CreatedAt:  k.CreatedAt,
 	}
 }
 
@@ -79,29 +66,26 @@ func NewAPIKeyStore(db *sql.DB) *APIKeyStore {
 func (s *APIKeyStore) Create(key *APIKey) error {
 	key.ID = uuid.New()
 	query := `
-		INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window, enabled, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, enabled, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		RETURNING created_at, updated_at`
 
-	modelsJSON, _ := json.Marshal(key.Models)
 	return s.db.QueryRow(query,
-		key.ID.String(), key.UserID.String(), key.Name, key.KeyHash, key.KeyPrefix, string(modelsJSON),
-		key.RateLimit, key.RateLimitWindow, key.Enabled, key.ExpiresAt,
+		key.ID.String(), key.UserID.String(), key.Name, key.KeyHash, key.KeyPrefix,
+		key.Enabled, key.ExpiresAt,
 	).Scan(&key.CreatedAt, &key.UpdatedAt)
 }
 
 func (s *APIKeyStore) GetByID(id uuid.UUID) (*APIKey, error) {
 	key := &APIKey{}
 	query := `
-		SELECT id, user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window,
+		SELECT id, user_id, name, key_hash, key_prefix,
 		       enabled, expires_at, last_used_at, created_at, updated_at
 		FROM api_keys WHERE id = ?`
 
-	var modelsJSON string
 	err := s.db.QueryRow(query, id.String()).Scan(
 		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-		&modelsJSON, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
-		&key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
+		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -109,22 +93,19 @@ func (s *APIKeyStore) GetByID(id uuid.UUID) (*APIKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(modelsJSON), &key.Models)
 	return key, nil
 }
 
 func (s *APIKeyStore) GetByHash(hash string) (*APIKey, error) {
 	key := &APIKey{}
 	query := `
-		SELECT id, user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window,
+		SELECT id, user_id, name, key_hash, key_prefix,
 		       enabled, expires_at, last_used_at, created_at, updated_at
 		FROM api_keys WHERE key_hash = ? AND enabled = 1`
 
-	var modelsJSON string
 	err := s.db.QueryRow(query, hash).Scan(
 		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-		&modelsJSON, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
-		&key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
+		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -132,22 +113,19 @@ func (s *APIKeyStore) GetByHash(hash string) (*APIKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(modelsJSON), &key.Models)
 	return key, nil
 }
 
 func (s *APIKeyStore) GetByKeyPrefix(prefix string) (*APIKey, error) {
 	key := &APIKey{}
 	query := `
-		SELECT id, user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window,
+		SELECT id, user_id, name, key_hash, key_prefix,
 		       enabled, expires_at, last_used_at, created_at, updated_at
 		FROM api_keys WHERE key_prefix = ? AND enabled = 1`
 
-	var modelsJSON string
 	err := s.db.QueryRow(query, prefix).Scan(
 		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-		&modelsJSON, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
-		&key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
+		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -155,13 +133,12 @@ func (s *APIKeyStore) GetByKeyPrefix(prefix string) (*APIKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(modelsJSON), &key.Models)
 	return key, nil
 }
 
 func (s *APIKeyStore) ListByUser(userID uuid.UUID) ([]*APIKey, error) {
 	query := `
-		SELECT id, user_id, name, key_hash, key_prefix, models, rate_limit, rate_limit_window,
+		SELECT id, user_id, name, key_hash, key_prefix,
 		       enabled, expires_at, last_used_at, created_at, updated_at
 		FROM api_keys WHERE user_id = ? ORDER BY created_at DESC`
 
@@ -174,16 +151,13 @@ func (s *APIKeyStore) ListByUser(userID uuid.UUID) ([]*APIKey, error) {
 	var keys []*APIKey
 	for rows.Next() {
 		key := &APIKey{}
-		var modelsJSON string
 		err := rows.Scan(
 			&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-			&modelsJSON, &key.RateLimit, &key.RateLimitWindow, &key.Enabled,
-			&key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
+			&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
-		json.Unmarshal([]byte(modelsJSON), &key.Models)
 		keys = append(keys, key)
 	}
 	return keys, rows.Err()
@@ -192,14 +166,11 @@ func (s *APIKeyStore) ListByUser(userID uuid.UUID) ([]*APIKey, error) {
 func (s *APIKeyStore) Update(key *APIKey) error {
 	query := `
 		UPDATE api_keys SET
-			name = ?, models = ?, rate_limit = ?, rate_limit_window = ?,
-			enabled = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+			name = ?, enabled = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`
 
-	modelsJSON, _ := json.Marshal(key.Models)
 	_, err := s.db.Exec(query,
-		key.Name, string(modelsJSON), key.RateLimit, key.RateLimitWindow,
-		key.Enabled, key.ExpiresAt, key.ID.String(),
+		key.Name, key.Enabled, key.ExpiresAt, key.ID.String(),
 	)
 	return err
 }

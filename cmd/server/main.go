@@ -39,6 +39,10 @@ func main() {
 	// 设置 gin 模式
 	gin.SetMode(cfg.Server.Mode)
 
+	// 创建 ConfigManager
+	cfgManager := config.NewManager(cfg, "config.yaml")
+	log.Println("ConfigManager initialized with hot-reload support")
+
 	// 连接数据库
 	database, err := db.New(cfg.Database.Path)
 	if err != nil {
@@ -50,6 +54,7 @@ func main() {
 	if err := database.Migrate(); err != nil {
 		log.Printf("Migration warning: %v", err)
 	}
+	log.Println("Database migrated (quota usage tables only)")
 
 	// 初始化日志记录器
 	userLogger := logger.NewUserLogger(cfg.Logs.Path, cfg.Logs.RetentionDays)
@@ -63,9 +68,10 @@ func main() {
 	// 初始化存储层
 	userStore := models.NewUserStore(database.DB)
 	apiKeyStore := models.NewAPIKeyStore(database.DB)
-	modelStore := models.NewModelStore(database.DB)
-	backendStore := models.NewBackendStore(database.DB)
-	quotaStore := models.NewQuotaStore(database.DB)
+	// 新的 ConfigManager-based 存储
+	modelStore := models.NewModelStore(cfgManager)
+	backendStore := models.NewBackendStore(cfgManager)
+	quotaStore := models.NewQuotaStore(cfgManager, database.DB) // 需要 CM 和 DB
 
 	// 初始化 JWT 管理器
 	jwtManager := auth.NewJWTManager(cfg.JWT.Secret, cfg.JWT.ExpireHours)
@@ -78,83 +84,9 @@ func main() {
 	// 初始化负载均衡器
 	lb := proxy.NewRoundRobinBalancer()
 
-	// 从数据库加载模型和后端配置
-	modelList, err := modelStore.List()
-	if err != nil {
-		log.Fatalf("Failed to load models: %v", err)
-	}
-
-	// 如果数据库中有模型，加载它们及其后端
-	if len(modelList) > 0 {
-		for _, m := range modelList {
-			// 加载该模型的所有后端
-			backends, err := backendStore.ListByModel(m.ID)
-			if err != nil {
-				log.Printf("Failed to load backends for model %s: %v", m.ID, err)
-				continue
-			}
-
-			for _, b := range backends {
-				lb.AddBackend(m.ID, proxy.Backend{
-					ID:        b.ID,
-					URL:       b.BaseURL,
-					Weight:    b.Weight,
-					ModelName: b.ModelName,
-					APIKey:    b.APIKey,
-				})
-				log.Printf("Loaded backend: %s -> %s (model: %s)", m.ID, b.BaseURL, b.ModelName)
-			}
-		}
-	} else {
-		// 从配置文件加载
-		for _, m := range cfg.Models {
-			// 创建模型
-			model := &models.Model{
-				ID:          m.ID,
-				Name:        m.Name,
-				Description: m.Description,
-				Enabled:     m.Enabled,
-				ModelParams: m.ModelParams,
-			}
-			if err := modelStore.Create(model); err != nil {
-				log.Printf("Failed to create model %s: %v", m.ID, err)
-				continue
-			}
-			log.Printf("Created model: %s", m.ID)
-
-			// 创建后端
-			for _, b := range m.Backends {
-				backend := &models.Backend{
-					ID:        b.ID,
-					ModelID:   m.ID,
-					Name:      b.Name,
-					BaseURL:   b.BaseURL,
-					APIKey:    b.APIKey,
-					ModelName: b.ModelName,
-					Weight:    b.Weight,
-					Region:    b.Region,
-					Enabled:   b.Enabled,
-				}
-				if backend.Weight == 0 {
-					backend.Weight = 1
-				}
-				if err := backendStore.Create(backend); err != nil {
-					log.Printf("Failed to create backend %s: %v", b.ID, err)
-					continue
-				}
-
-				// 添加到负载均衡器
-				lb.AddBackend(m.ID, proxy.Backend{
-					ID:        b.ID,
-					URL:       b.BaseURL,
-					Weight:    b.Weight,
-					ModelName: b.ModelName,
-					APIKey:    b.APIKey,
-				})
-				log.Printf("Loaded backend from config: %s -> %s (model: %s)", m.ID, b.BaseURL, b.ModelName)
-			}
-		}
-	}
+	// 从 ConfigManager 加载模型和后端配置
+	lb.ReloadConfig(cfgManager.GetModels())
+	log.Printf("Loaded %d models from config", len(cfgManager.GetModels()))
 
 	// 启动健康检查（每 30 秒检查一次）
 	lb.StartHealthCheck(30 * time.Second)
@@ -162,6 +94,20 @@ func main() {
 
 	// 初始化代理
 	proxyInstance := proxy.NewProxy(lb, quotaService, usageService, modelStore, backendStore, userStore)
+
+	// 设置配置变更监听 - 热重载支持
+	configChanges := cfgManager.Subscribe()
+	go func() {
+		for event := range configChanges {
+			switch event.Type {
+			case "models", "all":
+				log.Println("Config reload detected: updating load balancer")
+				lb.ReloadConfig(cfgManager.GetModels())
+				log.Printf("Load balancer updated with %d models", len(cfgManager.GetModels()))
+			}
+		}
+	}()
+	log.Println("Config hot-reload listener started")
 
 	// 初始化并发限制器
 	var concurrencyLimiter *concurrency.Limiter
@@ -171,8 +117,8 @@ func main() {
 			cfg.Concurrency.GlobalLimit, cfg.Concurrency.UserLimit)
 	}
 
-	// 初始化配额策略
-	initQuotaPolicies(quotaStore, cfg.Policies)
+	// 注意：配额策略现在直接从 config.yaml 读取，无需初始化到数据库
+	log.Printf("Loaded %d quota policies from config", len(cfgManager.GetPolicies()))
 
 	// 创建默认管理员
 	createDefaultAdmin(userStore, cfg.Admin.DefaultEmail, cfg.Admin.DefaultPassword)
@@ -259,28 +205,6 @@ func main() {
 	usageService.Flush()
 
 	log.Println("Server stopped")
-}
-
-func initQuotaPolicies(store *models.QuotaStore, policies []config.PolicyConfig) {
-	if len(policies) == 0 {
-		return
-	}
-
-	for _, p := range policies {
-		policy := &models.QuotaPolicy{
-			Name:              p.Name,
-			RateLimit:         p.RateLimit,
-			RateLimitWindow:   p.RateLimitWindow,
-			RequestQuotaDaily: p.RequestQuotaDaily,
-			Models:            p.Models,
-			Description:       p.Description,
-		}
-		if err := store.CreateOrUpdatePolicy(policy); err != nil {
-			log.Printf("Failed to init quota policy %s: %v", p.Name, err)
-		} else {
-			log.Printf("Loaded quota policy: %s", p.Name)
-		}
-	}
 }
 
 func createDefaultAdmin(store *models.UserStore, email, password string) {

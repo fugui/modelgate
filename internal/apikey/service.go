@@ -52,15 +52,12 @@ func (s *Service) GenerateKey(userID uuid.UUID, req *models.APIKeyCreateRequest)
 	}
 
 	key := &models.APIKey{
-		UserID:          userID,
-		Name:            req.Name,
-		KeyHash:         string(keyHash),
-		KeyPrefix:       plainKey[:prefixLen],
-		Models:          req.Models,
-		RateLimit:       req.RateLimit,
-		RateLimitWindow: req.RateLimitWindow,
-		Enabled:         true,
-		ExpiresAt:       req.ExpiresAt,
+		UserID:    userID,
+		Name:      req.Name,
+		KeyHash:   string(keyHash),
+		KeyPrefix: plainKey[:prefixLen],
+		Enabled:   true,
+		ExpiresAt: req.ExpiresAt,
 	}
 
 	if err := s.store.Create(key); err != nil {

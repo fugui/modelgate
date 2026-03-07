@@ -181,7 +181,6 @@ func (h *Handler) Register(c *gin.Context) {
 		Role:         req.Role,
 		Department:   req.Department,
 		QuotaPolicy:  req.QuotaPolicy,
-		Models:       req.Models,
 		Enabled:      true,
 	}
 
@@ -282,7 +281,6 @@ func (h *Handler) Create(c *gin.Context) {
 		Role:         req.Role,
 		Department:   req.Department,
 		QuotaPolicy:  req.QuotaPolicy,
-		Models:       req.Models,
 		Enabled:      true,
 	}
 
@@ -332,9 +330,6 @@ func (h *Handler) Update(c *gin.Context) {
 	}
 	if req.QuotaPolicy != "" {
 		user.QuotaPolicy = req.QuotaPolicy
-	}
-	if req.Models != nil {
-		user.Models = req.Models
 	}
 	if req.Enabled != nil {
 		user.Enabled = *req.Enabled

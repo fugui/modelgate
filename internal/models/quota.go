@@ -2,10 +2,10 @@ package models
 
 import (
 	"database/sql"
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
+	"modelgate/internal/config"
 )
 
 type QuotaPolicy struct {
@@ -43,88 +43,90 @@ type UsageStats struct {
 }
 
 // QuotaStore 配额数据访问层
+// 策略配置从 ConfigManager 读取
+// 使用统计从数据库读取
 type QuotaStore struct {
+	cm *config.ConfigManager
 	db *sql.DB
 }
 
-func NewQuotaStore(db *sql.DB) *QuotaStore {
-	return &QuotaStore{db: db}
+func NewQuotaStore(cm *config.ConfigManager, db *sql.DB) *QuotaStore {
+	return &QuotaStore{cm: cm, db: db}
 }
 
-func (s *QuotaStore) GetPolicy(name string) (*QuotaPolicy, error) {
-	policy := &QuotaPolicy{}
-	query := `
-		SELECT name, rate_limit, rate_limit_window, request_quota_daily, models, description, created_at, updated_at
-		FROM quota_policies WHERE name = ?`
+// configToPolicy 将配置策略转换为数据策略
+func (s *QuotaStore) configToPolicy(cfg config.PolicyConfig) *QuotaPolicy {
+	return &QuotaPolicy{
+		Name:              cfg.Name,
+		RateLimit:         cfg.RateLimit,
+		RateLimitWindow:   cfg.RateLimitWindow,
+		RequestQuotaDaily: cfg.RequestQuotaDaily,
+		Models:            cfg.Models,
+		Description:       cfg.Description,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+}
 
-	var modelsJSON string
-	err := s.db.QueryRow(query, name).Scan(
-		&policy.Name, &policy.RateLimit, &policy.RateLimitWindow,
-		&policy.RequestQuotaDaily, &modelsJSON, &policy.Description,
-		&policy.CreatedAt, &policy.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
+// policyToConfig 将数据策略转换为配置策略
+func (s *QuotaStore) policyToConfig(policy *QuotaPolicy) config.PolicyConfig {
+	return config.PolicyConfig{
+		Name:              policy.Name,
+		RateLimit:         policy.RateLimit,
+		RateLimitWindow:   policy.RateLimitWindow,
+		RequestQuotaDaily: policy.RequestQuotaDaily,
+		Models:            policy.Models,
+		Description:       policy.Description,
+	}
+}
+
+// GetPolicy retrieves a policy by name from config
+func (s *QuotaStore) GetPolicy(name string) (*QuotaPolicy, error) {
+	cfg := s.cm.GetPolicyByName(name)
+	if cfg == nil {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	json.Unmarshal([]byte(modelsJSON), &policy.Models)
-	return policy, nil
+	return s.configToPolicy(*cfg), nil
 }
 
+// ListPolicies retrieves all policies from config
 func (s *QuotaStore) ListPolicies() ([]*QuotaPolicy, error) {
-	query := `
-		SELECT name, rate_limit, rate_limit_window, request_quota_daily, models, description, created_at, updated_at
-		FROM quota_policies ORDER BY name`
-
-	rows, err := s.db.Query(query)
-	if err != nil {
-		return nil, err
+	configs := s.cm.GetPolicies()
+	policies := make([]*QuotaPolicy, len(configs))
+	for i, cfg := range configs {
+		policies[i] = s.configToPolicy(cfg)
 	}
-	defer rows.Close()
-
-	var policies []*QuotaPolicy
-	for rows.Next() {
-		policy := &QuotaPolicy{}
-		var modelsJSON string
-		err := rows.Scan(
-			&policy.Name, &policy.RateLimit, &policy.RateLimitWindow,
-			&policy.RequestQuotaDaily, &modelsJSON, &policy.Description,
-			&policy.CreatedAt, &policy.UpdatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		json.Unmarshal([]byte(modelsJSON), &policy.Models)
-		policies = append(policies, policy)
-	}
-	return policies, rows.Err()
+	return policies, nil
 }
 
+// CreateOrUpdatePolicy creates or updates a policy in config
 func (s *QuotaStore) CreateOrUpdatePolicy(policy *QuotaPolicy) error {
-	query := `
-		INSERT INTO quota_policies (name, rate_limit, rate_limit_window, request_quota_daily, models, description)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(name) DO UPDATE SET
-			rate_limit = excluded.rate_limit,
-			rate_limit_window = excluded.rate_limit_window,
-			request_quota_daily = excluded.request_quota_daily,
-			models = excluded.models,
-			description = excluded.description,
-			updated_at = CURRENT_TIMESTAMP
-		RETURNING created_at, updated_at`
+	cfg := s.policyToConfig(policy)
 
-	modelsJSON, _ := json.Marshal(policy.Models)
-	return s.db.QueryRow(query,
-		policy.Name, policy.RateLimit, policy.RateLimitWindow,
-		policy.RequestQuotaDaily, string(modelsJSON), policy.Description,
-	).Scan(&policy.CreatedAt, &policy.UpdatedAt)
+	// Check if exists
+	existing := s.cm.GetPolicyByName(policy.Name)
+	if existing == nil {
+		// Create
+		if err := s.cm.AddPolicy(cfg); err != nil {
+			return err
+		}
+	} else {
+		// Update
+		if err := s.cm.UpdatePolicy(cfg); err != nil {
+			return err
+		}
+	}
+
+	policy.UpdatedAt = time.Now()
+	if existing == nil {
+		policy.CreatedAt = time.Now()
+	}
+	return nil
 }
 
+// DeletePolicy deletes a policy from config
 func (s *QuotaStore) DeletePolicy(name string) error {
-	_, err := s.db.Exec("DELETE FROM quota_policies WHERE name = ?", name)
-	return err
+	return s.cm.DeletePolicy(name)
 }
 
 // GetDailyRequestCount 获取用户当天的请求次数
@@ -205,7 +207,7 @@ func (s *QuotaStore) GetRecentUsageRecords(userID uuid.UUID, days int) ([]map[st
 	startDate := endDate.AddDate(0, 0, -days+1)
 
 	query := `
-		SELECT 
+		SELECT
 			date,
 			COALESCE(SUM(request_count), 0) as requests
 		FROM quota_usage_daily
