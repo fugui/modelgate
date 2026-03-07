@@ -207,10 +207,10 @@ func (s *Service) CheckQuota(userID uuid.UUID, policyName string, modelID string
 		return result, nil
 	}
 
-	// 检查速率限制
+	// 检查速率限制（0 表示无限制）
 	current := s.rateCounter.GetCount(userID.String(), policy.RateLimitWindow)
 
-	if current >= policy.RateLimit {
+	if policy.RateLimit > 0 && current >= policy.RateLimit {
 		result.Allowed = false
 		result.Reason = "rate limit exceeded"
 		result.RateLimit = policy.RateLimit
@@ -231,7 +231,8 @@ func (s *Service) CheckQuota(userID uuid.UUID, policyName string, modelID string
 	result.DailyRequests = dailyRequests
 	result.DailyRequestLimit = policy.RequestQuotaDaily
 
-	if dailyRequests >= policy.RequestQuotaDaily {
+	// 如果 RequestQuotaDaily 为 0，表示无限制（防止配置错误导致无法使用）
+	if policy.RequestQuotaDaily > 0 && dailyRequests >= policy.RequestQuotaDaily {
 		result.Allowed = false
 		result.Reason = "daily request quota exceeded"
 		return result, nil
