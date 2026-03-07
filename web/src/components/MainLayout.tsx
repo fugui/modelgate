@@ -13,7 +13,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import api from '../api';
-import logo from '../assets/model-gate.png';
+import logo from '../assets/modelgate.png';
 
 const { Header, Content } = Layout;
 
@@ -145,7 +145,7 @@ const MainLayout: React.FC = () => {
           justifyContent: 'center',
           borderBottom: '1px solid #f0f0f0',
         }}>
-          <img src={logo} alt="ModelGate" style={{ height: 55 }} />
+          <img src={logo} alt="Model Gate" style={{ height: 55 }} />
         </div>
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
@@ -183,7 +183,7 @@ const MainLayout: React.FC = () => {
           }}
         >
           <div style={{ fontSize: 16, fontWeight: 500 }}>
-            我的大模型门户， 让 AI 触手可及， 使能效率倍增新时代
+            模界（Model Gate）， 让 AI 触手可及， 使能效率倍增新时代
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
