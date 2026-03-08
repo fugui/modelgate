@@ -140,6 +140,7 @@ func main() {
 		JWTManager:   jwtManager,
 		QuotaService: quotaService,
 		QuotaStore:   quotaStore,
+		UsageService: usageService,
 		Cache:        localCache,
 		SSOConfig:    cfg.SSO,
 		FeedbackURL:  cfg.Frontend.FeedbackURL,
@@ -172,11 +173,11 @@ func main() {
 	}
 
 	// OpenAI 兼容代理接口
-	proxyHandler := apikey.NewProxyHandler(apiKeyService, proxyInstance, jwtManager, userStore)
+	proxyHandler := apikey.NewProxyHandler(apiKeyService, proxyInstance, jwtManager, userStore, usageService)
 	proxyHandler.RegisterRoutes(r, concurrencyLimiter)
 
 	// Anthropic 兼容代理接口
-	anthropicHandler := anthropic.NewHandler(proxyInstance)
+	anthropicHandler := anthropic.NewHandler(proxyInstance, usageService)
 	anthropicHandler.RegisterRoutes(r, proxyHandler.AuthMiddleware())
 
 	log.Println("Anthropic API support enabled at /v1/messages")

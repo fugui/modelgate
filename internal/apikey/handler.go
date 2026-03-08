@@ -119,10 +119,17 @@ func (h *Handler) Delete(c *gin.Context) {
 
 // ProxyHandler 用于代理接口的 API Key 验证
 type ProxyHandler struct {
-	service    *Service
-	proxy      Proxy
-	jwtManager *auth.JWTManager
-	userStore  *models.UserStore
+	service      *Service
+	proxy        Proxy
+	jwtManager   *auth.JWTManager
+	userStore    *models.UserStore
+	usageService UsageService
+}
+
+// UsageService 访问日志服务接口
+type UsageService interface {
+	RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64)
+	RecordAccessDetailed(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, requestHeaders map[string]string, requestBody string, responseHeaders map[string]string, responseBody string)
 }
 
 // Proxy 代理接口
@@ -131,12 +138,13 @@ type Proxy interface {
 	HandleListModels(c *gin.Context)
 }
 
-func NewProxyHandler(service *Service, proxy Proxy, jwtManager *auth.JWTManager, userStore *models.UserStore) *ProxyHandler {
+func NewProxyHandler(service *Service, proxy Proxy, jwtManager *auth.JWTManager, userStore *models.UserStore, usageService UsageService) *ProxyHandler {
 	return &ProxyHandler{
-		service:    service,
-		proxy:      proxy,
-		jwtManager: jwtManager,
-		userStore:  userStore,
+		service:      service,
+		proxy:        proxy,
+		jwtManager:   jwtManager,
+		userStore:    userStore,
+		usageService: usageService,
 	}
 }
 
@@ -144,8 +152,8 @@ func (h *ProxyHandler) RegisterRoutes(r *gin.Engine, concurrencyLimiter *concurr
 	// OpenAI 兼容接口
 	v1 := r.Group("/v1")
 	{
-		v1.GET("/models", h.AuthMiddleware(), h.ListModels)
-		v1.POST("/chat/completions", h.AuthMiddleware(), h.ChatCompletionsMiddleware(concurrencyLimiter), h.ChatCompletions)
+		v1.GET("/models", h.AuthMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.ListModels)
+		v1.POST("/chat/completions", h.AuthMiddleware(), h.ChatCompletionsMiddleware(concurrencyLimiter), middleware.AccessLogMiddleware(h.usageService), h.ChatCompletions)
 	}
 }
 

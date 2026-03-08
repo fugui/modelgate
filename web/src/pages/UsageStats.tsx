@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Descriptions, Table, Tag, Statistic, Row, Col, Progress } from 'antd';
+import { Card, Descriptions, Table, Tag, Statistic, Row, Col, Progress, Modal, Button } from 'antd';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { EyeOutlined } from '@ant-design/icons';
 import api from '../api';
 
 const UsageStats: React.FC = () => {
   const [quota, setQuota] = useState<any>({});
   const [usageRecords, setUsageRecords] = useState<any[]>([]);
   const [weeklyData, setWeeklyData] = useState<any[]>([]);
+  const [accessLogs, setAccessLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [selectedLog, setSelectedLog] = useState<any>(null);
 
   useEffect(() => {
     fetchData();
@@ -15,15 +19,16 @@ const UsageStats: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      const [quotaRes, usageRes] = await Promise.all([
+      const [quotaRes, usageRes, logsRes] = await Promise.all([
         api.get('/api/v1/user/quota'),
         api.get('/api/v1/user/usage'),
+        api.get('/api/v1/user/access-logs?detailed=true'),
       ]);
 
       setQuota(quotaRes.data.data || {});
       const records = usageRes.data.data || [];
       setUsageRecords(records);
-      
+
       // 转换数据为图表格式
       const chartData = records.map((record: any) => {
         const date = new Date(record.date);
@@ -34,11 +39,60 @@ const UsageStats: React.FC = () => {
         };
       }).reverse(); // 按时间正序
       setWeeklyData(chartData);
+
+      // 设置访问日志
+      setAccessLogs(logsRes.data.data || []);
     } catch (err) {
       console.error('Failed to fetch usage data:', err);
     } finally {
       setLoading(false);
     }
+  };
+
+  // 格式化字节数为可读格式
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  // 获取HTTP方法对应的颜色
+  const getMethodColor = (method: string): string => {
+    const colorMap: { [key: string]: string } = {
+      'GET': 'blue',
+      'POST': 'green',
+      'PUT': 'orange',
+      'DELETE': 'red',
+      'PATCH': 'purple',
+    };
+    return colorMap[method.toUpperCase()] || 'default';
+  };
+
+  // 获取状态码对应的颜色
+  const getStatusColor = (status: number): string => {
+    if (status >= 200 && status < 300) return 'success';
+    if (status >= 400) return 'error';
+    return 'warning';
+  };
+
+  // JSON 格式化辅助函数
+  const formatJSON = (jsonString: string): string => {
+    if (!jsonString) return '';
+    try {
+      const parsed = JSON.parse(jsonString);
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return jsonString;
+    }
+  };
+
+  // HTML 转义函数 - 仅转义 XSS 危险字符，保留 JSON 格式
+  const escapeHtml = (unsafe: string): string => {
+    return unsafe
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
   };
 
   const columns = [
@@ -57,6 +111,80 @@ const UsageStats: React.FC = () => {
       title: '请求数',
       dataIndex: 'request_count',
       key: 'request_count',
+    },
+  ];
+
+  // 访问日志表格列定义
+  const accessLogColumns = [
+    {
+      title: '时间',
+      dataIndex: 'timestamp',
+      key: 'timestamp',
+      width: 180,
+      render: (timestamp: string) => {
+        const date = new Date(timestamp);
+        return date.toLocaleString('zh-CN');
+      },
+    },
+    {
+      title: '方法',
+      dataIndex: 'method',
+      key: 'method',
+      width: 100,
+      render: (method: string) => (
+        <Tag color={getMethodColor(method)}>{method.toUpperCase()}</Tag>
+      ),
+    },
+    {
+      title: '路径',
+      dataIndex: 'path',
+      key: 'path',
+      ellipsis: true,
+    },
+    {
+      title: '流量',
+      key: 'traffic',
+      width: 150,
+      render: (_: any, record: any) => (
+        <span>
+          <span style={{ color: '#52c41a' }}>↑{formatBytes(record.request_bytes || 0)}</span>
+          <span style={{ margin: '0 4px' }}>/</span>
+          <span style={{ color: '#1890ff' }}>↓{formatBytes(record.response_bytes || 0)}</span>
+        </span>
+      ),
+    },
+    {
+      title: 'IP地址',
+      dataIndex: 'client_ip',
+      key: 'client_ip',
+      width: 130,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status_code',
+      key: 'status_code',
+      width: 100,
+      render: (status: number) => (
+        <Tag color={getStatusColor(status)}>{status}</Tag>
+      ),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 100,
+      render: (_: any, record: any) => (
+        <Button
+          type="link"
+          size="small"
+          icon={<EyeOutlined />}
+          onClick={() => {
+            setSelectedLog(record);
+            setDetailModalVisible(true);
+          }}
+        >
+          详情
+        </Button>
+      ),
     },
   ];
 
@@ -117,6 +245,19 @@ const UsageStats: React.FC = () => {
         </Descriptions>
       </Card>
 
+      {/* 最近访问记录 */}
+      <Card title="最近20次访问" style={{ marginBottom: 24 }}>
+        <Table
+          dataSource={accessLogs}
+          columns={accessLogColumns}
+          rowKey={(record: any) => `${record.timestamp}-${record.path}`}
+          loading={loading}
+          pagination={false}
+          scroll={{ y: 400 }}
+          size="small"
+        />
+      </Card>
+
       {/* 使用趋势图 */}
       <Card title="最近7天使用趋势" style={{ marginBottom: 24 }}>
         <ResponsiveContainer width="100%" height={300}>
@@ -140,6 +281,91 @@ const UsageStats: React.FC = () => {
           pagination={false}
         />
       </Card>
+
+      {/* 详情弹窗 */}
+      <Modal
+        title="请求/响应详情"
+        open={detailModalVisible}
+        onCancel={() => setDetailModalVisible(false)}
+        width={900}
+        footer={null}
+      >
+        {selectedLog && (
+          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+            <Card title="请求信息" size="small" style={{ marginBottom: 16 }}>
+              <Descriptions column={1} size="small">
+                <Descriptions.Item label="Method">{selectedLog.method}</Descriptions.Item>
+                <Descriptions.Item label="Path">{selectedLog.path}</Descriptions.Item>
+                <Descriptions.Item label="Client IP">{selectedLog.client_ip}</Descriptions.Item>
+                <Descriptions.Item label="User Agent" style={{ wordBreak: 'break-all' }}>
+                  {selectedLog.user_agent}
+                </Descriptions.Item>
+                <Descriptions.Item label="Headers">
+                  <pre style={{
+                    maxHeight: 150,
+                    overflow: 'auto',
+                    background: '#f5f5f5',
+                    padding: 8,
+                    borderRadius: 4,
+                    fontSize: 12
+                  }}>
+                    {JSON.stringify(selectedLog.request_headers, null, 2)}
+                  </pre>
+                </Descriptions.Item>
+                <Descriptions.Item label="Request Body">
+                  <pre style={{
+                    maxHeight: 300,
+                    overflow: 'auto',
+                    background: '#f5f5f5',
+                    padding: 8,
+                    borderRadius: 4,
+                    fontSize: 12
+                  }}>
+                    {formatJSON(selectedLog.request_body)}
+                  </pre>
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+
+            <Card title="响应信息" size="small">
+              <Descriptions column={1} size="small">
+                <Descriptions.Item label="Status Code">
+                  <Tag color={getStatusColor(selectedLog.status_code)}>
+                    {selectedLog.status_code}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="Response Bytes">
+                  {formatBytes(selectedLog.response_bytes || 0)}
+                </Descriptions.Item>
+                <Descriptions.Item label="Headers">
+                  <pre style={{
+                    maxHeight: 150,
+                    overflow: 'auto',
+                    background: '#f5f5f5',
+                    padding: 8,
+                    borderRadius: 4,
+                    fontSize: 12
+                  }}>
+                    {JSON.stringify(selectedLog.response_headers, null, 2)}
+                  </pre>
+                </Descriptions.Item>
+                <Descriptions.Item label="Response Body">
+                  <pre style={{
+                    maxHeight: 400,
+                    overflow: 'auto',
+                    background: '#f5f5f5',
+                    padding: 8,
+                    borderRadius: 4,
+                    fontSize: 12
+                  }}>
+                    {escapeHtml(formatJSON(selectedLog.response_body))}
+                  </pre>
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

@@ -2,21 +2,32 @@
 package anthropic
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"modelgate/internal/middleware"
 	"modelgate/internal/proxy"
 )
 
+// UsageService 访问日志服务接口
+type UsageService interface {
+	RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64)
+	RecordAccessDetailed(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, requestHeaders map[string]string, requestBody string, responseHeaders map[string]string, responseBody string)
+}
+
 // Handler 处理 Anthropic API 请求
 type Handler struct {
-	proxy *proxy.Proxy
+	proxy        *proxy.Proxy
+	usageService UsageService
 }
 
 // NewHandler 创建 Anthropic Handler
-func NewHandler(proxy *proxy.Proxy) *Handler {
-	return &Handler{proxy: proxy}
+func NewHandler(proxy *proxy.Proxy, usageService UsageService) *Handler {
+	return &Handler{proxy: proxy, usageService: usageService}
 }
 
 // RegisterRoutes 注册 Anthropic 路由
@@ -24,7 +35,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc) 
 	v1 := r.Group("/v1")
 	v1.Use(authMiddleware)
 	{
-		v1.POST("/messages", h.HandleMessages)
+		v1.POST("/messages", middleware.AccessLogMiddleware(h.usageService), h.HandleMessages)
 	}
 }
 
@@ -38,9 +49,18 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 	}
 	uid := userID.(uuid.UUID)
 
+	// 读取原始请求体用于调试
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body: " + err.Error()})
+		return
+	}
+	// 重新设置 body 以便后续处理
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
 	// 解析 Anthropic 请求
 	var anthropicReq MessagesRequest
-	if err := c.ShouldBindJSON(&anthropicReq); err != nil {
+	if err := json.Unmarshal(bodyBytes, &anthropicReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format: " + err.Error()})
 		return
 	}
@@ -87,22 +107,31 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 	)
 }
 
+// Tool 工具定义
+type Tool struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	InputSchema map[string]interface{} `json:"input_schema"`
+}
+
 // MessagesRequest Anthropic 消息请求
 type MessagesRequest struct {
-	Model       string    `json:"model"`
-	Messages    []Message `json:"messages"`
-	System      string    `json:"system,omitempty"`
-	MaxTokens   int       `json:"max_tokens,omitempty"`
-	Temperature float64   `json:"temperature,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
-	TopP        float64   `json:"top_p,omitempty"`
-	TopK        int       `json:"top_k,omitempty"`
+	Model       string      `json:"model"`
+	Messages    []Message   `json:"messages"`
+	System      interface{} `json:"system,omitempty"` // 支持字符串或数组格式
+	MaxTokens   int         `json:"max_tokens,omitempty"`
+	Temperature float64     `json:"temperature,omitempty"`
+	Stream      bool        `json:"stream,omitempty"`
+	TopP        float64     `json:"top_p,omitempty"`
+	TopK        int         `json:"top_k,omitempty"`
+	StopSequences []string  `json:"stop_sequences,omitempty"`
+	Tools       []Tool      `json:"tools,omitempty"` // 工具定义
 }
 
 // Message Anthropic 消息
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"` // 支持字符串或数组格式
 }
 
 // MessagesResponse Anthropic 非流式响应
@@ -119,8 +148,16 @@ type MessagesResponse struct {
 
 // Block 内容块
 type Block struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type         string          `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	Thinking     string          `json:"thinking,omitempty"`     // Anthropic 思考块内容
+	Signature    string          `json:"signature,omitempty"`    // Anthropic 思考块签名
+	ID           string          `json:"id,omitempty"`           // 用于 tool_use 的唯一标识
+	ToolUseID    string          `json:"tool_use_id,omitempty"`  // 用于 tool_result 指向对应的 tool_use
+	Name         string          `json:"name,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	Content      interface{}     `json:"content,omitempty"`      // 用于 tool_result 的内容块
+	IsError      bool            `json:"is_error,omitempty"`     // 用于 tool_result
 }
 
 // Usage 使用量
@@ -137,12 +174,16 @@ type StreamEvent struct {
 	ContentBlock *Block      `json:"content_block,omitempty"`
 	Delta        *Delta      `json:"delta,omitempty"`
 	Usage        *Usage      `json:"usage,omitempty"`
-	StopReason   *string     `json:"stop_reason,omitempty"`
-	StopSequence *string     `json:"stop_sequence,omitempty"`
 }
 
 // Delta 增量更新
 type Delta struct {
-	Type string `json:"type,omitempty"`
-	Text string `json:"text,omitempty"`
+	Type             string  `json:"type,omitempty"`
+	Text             string  `json:"text,omitempty"`
+	Thinking         string  `json:"thinking,omitempty"`          // Anthropic 思考增量
+	Signature        string  `json:"signature,omitempty"`         // Anthropic 签名增量
+	PartialJSON      string  `json:"partial_json,omitempty"`      // 用于 tool_use 参数增量
+	ReasoningContent string  `json:"reasoning_content,omitempty"` // 用于兼容某些 OpenAI 后端
+	StopReason       *string `json:"stop_reason,omitempty"`
+	StopSequence     *string `json:"stop_sequence,omitempty"`
 }

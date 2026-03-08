@@ -3,6 +3,8 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -165,8 +167,11 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 		return
 	}
 
-	// 复制请求头
+	// 复制请求头（排除 Accept-Encoding，避免后端返回 gzip 压缩响应）
 	for key, values := range c.Request.Header {
+		if strings.ToLower(key) == "accept-encoding" {
+			continue
+		}
 		for _, value := range values {
 			proxyReq.Header.Add(key, value)
 		}
@@ -360,8 +365,11 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		return
 	}
 
-	// 复制请求头
+	// 复制请求头（排除 Accept-Encoding，避免后端返回 gzip 压缩响应）
 	for key, values := range c.Request.Header {
+		if strings.ToLower(key) == "accept-encoding" {
+			continue
+		}
 		for _, value := range values {
 			proxyReq.Header.Add(key, value)
 		}
@@ -440,6 +448,41 @@ func (p *Proxy) handleConvertedNormalResponse(
 		return
 	}
 
+	// 检查是否需要解压 gzip 响应
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gzipReader, err := gzip.NewReader(bytes.NewReader(respBody))
+		if err != nil {
+			p.usageService.RecordUsageDetailed(&usage.Record{
+				UserID:     req.UserID,
+				ModelID:    req.ModelID,
+				ClientIP:   req.ClientIP,
+				UserAgent:  req.UserAgent,
+				BackendID:  backendID,
+				StatusCode: http.StatusBadGateway,
+				Error:      "failed to create gzip reader: " + err.Error(),
+			})
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to decompress gzip response"})
+			return
+		}
+		defer gzipReader.Close()
+
+		decompressed, err := io.ReadAll(gzipReader)
+		if err != nil {
+			p.usageService.RecordUsageDetailed(&usage.Record{
+				UserID:     req.UserID,
+				ModelID:    req.ModelID,
+				ClientIP:   req.ClientIP,
+				UserAgent:  req.UserAgent,
+				BackendID:  backendID,
+				StatusCode: http.StatusBadGateway,
+				Error:      "failed to decompress gzip: " + err.Error(),
+			})
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to decompress gzip response"})
+			return
+		}
+		respBody = decompressed
+	}
+
 	latency := int(time.Since(startTime).Milliseconds())
 
 	// 记录使用日志
@@ -484,9 +527,32 @@ func (p *Proxy) handleConvertedStreamResponse(
 	c.Header("Connection", "keep-alive")
 	c.Status(resp.StatusCode)
 
-	reader := bufio.NewReader(resp.Body)
+	// 使用带 timeout 的 context 处理 gzip 流
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
+	defer cancel()
+
+	// 处理 gzip 压缩的流式响应
+	var reader *bufio.Reader
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gzipReader, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			fmt.Printf("Error creating gzip reader for stream: %v\n", err)
+			return
+		}
+		defer gzipReader.Close()
+		reader = bufio.NewReader(gzipReader)
+	} else {
+		reader = bufio.NewReader(resp.Body)
+	}
 
 	for {
+		select {
+		case <-ctx.Done():
+			fmt.Printf("Stream processing timeout or cancelled\n")
+			return
+		default:
+		}
+
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {

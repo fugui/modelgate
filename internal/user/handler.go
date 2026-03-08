@@ -17,6 +17,7 @@ import (
 	"modelgate/internal/config"
 	"modelgate/internal/middleware"
 	"modelgate/internal/models"
+	"modelgate/internal/usage"
 )
 
 type QuotaService interface {
@@ -26,6 +27,10 @@ type QuotaService interface {
 type QuotaStore interface {
 	GetRecentUsageRecords(userID uuid.UUID, days int) ([]map[string]interface{}, error)
 	GetDailyUsageList(userID uuid.UUID, startDate, endDate time.Time) ([]*models.QuotaUsageDaily, error)
+}
+
+type UsageService interface {
+	GetRecentAccess(userID uuid.UUID, limit int) []usage.AccessLog
 }
 
 type Cache interface {
@@ -38,6 +43,7 @@ type Handler struct {
 	jwtManager     *auth.JWTManager
 	quotaService   QuotaService
 	quotaStore     QuotaStore
+	usageService   UsageService
 	cache          Cache
 	ssoConfig      config.SSOConfig
 	feedbackURL    string
@@ -49,6 +55,7 @@ type NewHandlerParams struct {
 	JWTManager    *auth.JWTManager
 	QuotaService  QuotaService
 	QuotaStore    QuotaStore
+	UsageService  UsageService
 	Cache         Cache
 	SSOConfig     config.SSOConfig
 	FeedbackURL   string
@@ -61,6 +68,7 @@ func NewHandler(p NewHandlerParams) *Handler {
 		jwtManager:    p.JWTManager,
 		quotaService:  p.QuotaService,
 		quotaStore:    p.QuotaStore,
+		usageService:  p.UsageService,
 		cache:         p.Cache,
 		ssoConfig:     p.SSOConfig,
 		feedbackURL:   p.FeedbackURL,
@@ -88,6 +96,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 		auth.GET("/user/profile", h.Profile)
 		auth.GET("/user/quota", h.GetQuota)
 		auth.GET("/user/usage", h.GetUsage)
+		auth.GET("/user/access-logs", h.GetAccessLogs)
 	}
 
 	// 管理员接口
@@ -412,6 +421,56 @@ func (h *Handler) GetUsage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": records})
+}
+
+func (h *Handler) GetAccessLogs(c *gin.Context) {
+	user := middleware.GetCurrentUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// 支持查询参数 ?detailed=true 返回完整信息
+	detailed := c.Query("detailed") == "true"
+
+	// 获取最近20条访问记录
+	logs := h.usageService.GetRecentAccess(user.UserID, 20)
+
+	if detailed {
+		// 返回完整信息（包含请求/响应体和头信息）
+		c.JSON(http.StatusOK, gin.H{"data": logs})
+		return
+	}
+
+	// 默认返回简化版本（不包含请求/响应体和头信息，保持兼容性）
+	type SimpleAccessLog struct {
+		UserID        string    `json:"user_id"`
+		Method        string    `json:"method"`
+		Path          string    `json:"path"`
+		ClientIP      string    `json:"client_ip"`
+		UserAgent     string    `json:"user_agent"`
+		Timestamp     time.Time `json:"timestamp"`
+		StatusCode    int       `json:"status_code"`
+		RequestBytes  int64     `json:"request_bytes"`
+		ResponseBytes int64     `json:"response_bytes"`
+	}
+
+	simpleLogs := make([]SimpleAccessLog, 0, len(logs))
+	for _, log := range logs {
+		simpleLogs = append(simpleLogs, SimpleAccessLog{
+			UserID:        log.UserID.String(),
+			Method:        log.Method,
+			Path:          log.Path,
+			ClientIP:      log.ClientIP,
+			UserAgent:     log.UserAgent,
+			Timestamp:     log.Timestamp,
+			StatusCode:    log.StatusCode,
+			RequestBytes:  log.RequestBytes,
+			ResponseBytes: log.ResponseBytes,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": simpleLogs})
 }
 
 func (h *Handler) GetFrontendConfig(c *gin.Context) {
