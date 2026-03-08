@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 )
 
 // RateCounter 内存速率计数器
@@ -89,8 +89,8 @@ func (rc *RateCounter) GetCount(userID string, window int) int {
 }
 
 type Service struct {
-	store             *models.QuotaStore
-	modelStore        *models.ModelStore
+	store             *entity.QuotaStore
+	modelStore        *entity.ModelStore
 	rateCounter       *RateCounter
 	dailyRequestCache *DailyRequestCounter
 }
@@ -150,7 +150,7 @@ func (c *DailyRequestCounter) CleanupExpired() {
 	}
 }
 
-func NewService(store *models.QuotaStore, modelStore *models.ModelStore) *Service {
+func NewService(store *entity.QuotaStore, modelStore *entity.ModelStore) *Service {
 	s := &Service{
 		store:             store,
 		modelStore:        modelStore,
@@ -174,8 +174,8 @@ func (s *Service) dailyCleanupLoop() {
 }
 
 // CheckQuota 检查用户配额
-func (s *Service) CheckQuota(userID uuid.UUID, policyName string, modelID string) (*models.QuotaCheckResult, error) {
-	result := &models.QuotaCheckResult{
+func (s *Service) CheckQuota(userID uuid.UUID, policyName string, modelID string) (*entity.QuotaCheckResult, error) {
+	result := &entity.QuotaCheckResult{
 		Allowed: true,
 	}
 

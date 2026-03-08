@@ -1,84 +1,127 @@
+# 模界（Model Gate）配置文件示例
+# 复制此文件为 config.yaml 并根据实际情况修改
+
 server:
-  port: 8080
-  mode: "release"
+  port: 8080              # 服务端口
+  mode: "release"         # 运行模式: debug 或 release
 
 database:
-  path: "llmgate.db"
+  path: "modelgate.db"    # SQLite 数据库文件路径
 
 jwt:
-  secret: "your-jwt-secret-key-change-this-in-production"
-  expire_hours: 24
+  secret: "your-jwt-secret-key-change-this-in-production"  # JWT 签名密钥（生产环境必须修改）
+  expire_hours: 24        # JWT 令牌过期时间（小时）
 
+# 模型配置 - 支持多后端负载均衡
 models:
-  # GLM4.7 - 单实例部署示例
+  # 单实例模型配置示例
   - id: "glm4.7"
     name: "GLM 4.7"
     description: "智谱 GLM4.7 模型"
     enabled: true
+    model_params:           # 模型特定参数（可选）
+      max_tokens: 4096
+      temperature: 0.7
     backends:
       - id: "glm4.7-prod-01"
         name: "北京节点-01"
         base_url: "http://glm4-7.internal:8000"
         api_key: "your-glm-api-key-here"
-        model_name: "glm4"
-        weight: 10
+        model_name: "glm4"    # 后端实际模型名称
+        weight: 10            # 负载均衡权重
         region: "beijing"
+        enabled: true
 
-  # Kimi2.5 - 多实例部署示例
+  # 多实例负载均衡配置示例
   - id: "kimi2.5"
     name: "Kimi 2.5"
     description: "Moonshot Kimi 2.5"
     enabled: true
+    model_params:
+      max_tokens: 4096
+      temperature: 0.7
+      enable_thinking: false              # 禁用思考模式（DeepSeek等）
+      __user_agent__: "ModelGate/1.0"     # 自定义 User-Agent Header
+      __header_x_source__: "modelgate"    # 自定义 X-Source Header
     backends:
       - id: "kimi2.5-gz-01"
         name: "广州节点-01"
-        base_url: "https://api.kimi.com/coding/"
+        base_url: "https://api.moonshot.cn/v1"
         api_key: "your-kimi-api-key-here"
-        model_name: "Sonnet"
+        model_name: "kimi2.5"
         weight: 20
         region: "guangzhou"
+        enabled: true
+      - id: "kimi2.5-bj-01"
+        name: "北京节点-01"
+        base_url: "https://api.moonshot.cn/v1"
+        api_key: "your-kimi-api-key-here"
+        model_name: "kimi2.5"
+        weight: 15
+        region: "beijing"
+        enabled: true
 
   # Qwen 模型示例
   - id: "qwen3.5-397b"
     name: "Qwen 3.5 397B"
     description: "通义千问 3.5 397B"
     enabled: true
+    model_params: {}
     backends:
       - id: "qwen3.5-397b-prod"
+        name: "生产节点"
         base_url: "http://qwen35-397b.internal:8000"
+        api_key: ""
         model_name: "qwen3.5-397b-instruct"
         weight: 10
+        region: ""
+        enabled: true
 
+# 配额策略配置
 quota_policies:
   - name: "default"
-    rate_limit: 60
-    rate_limit_window: 60
-    token_quota_daily: 100000
+    rate_limit: 60              # 每分钟请求数限制
+    rate_limit_window: 60       # 速率限制窗口（秒）
+    request_quota_daily: 500    # 每日请求配额
     models:
       - "glm4.7"
       - "kimi2.5"
       - "qwen3.5-397b"
+    description: "默认策略，适用于普通用户"
+
   - name: "vip"
     rate_limit: 300
     rate_limit_window: 60
-    token_quota_daily: 1000000
+    request_quota_daily: 5000
     models:
-      - "*"
+      - "*"                    # "*" 表示适用于所有模型
+    description: "VIP 用户策略"
 
+# 管理员默认账号（首次启动时自动创建）
 admin:
-  default_email: "admin@llmgate.local"
-  default_password: "change-this-password"
+  default_email: "admin@modelgate.local"
+  default_password: "admin123"  # 生产环境务必修改
 
+# 日志配置
 logs:
-  path: "logs"
-  retention_days: 7
+  path: "logs"              # 日志目录
+  retention_days: 7         # 日志保留天数
 
 # 并发控制配置
 concurrency:
-  global_limit: 100  # 全局最大并发请求数
-  user_limit: 10     # 每个用户最大并发请求数
+  global_limit: 100         # 全局最大并发请求数，0 表示不限制
+  user_limit: 10            # 每个用户最大并发请求数，0 表示不限制
 
 # 前端配置
 frontend:
   feedback_url: "https://feedback.example.com"      # 用户反馈链接
   dev_manual_url: "https://docs.example.com"        # 开发手册链接
+
+# SSO 单点登录配置（可选）
+sso:
+  enabled: false
+  provider: "azure"         # 支持: azure, generic-oidc
+  client_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  client_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  issuer_url: "https://login.microsoftonline.com/{tenant}/v2.0"
+  email_claim: "email"      # 从 JWT Token 中提取邮箱的字段

@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 )
 
 // TestScenario_QuotaExceedsDailyLimit
@@ -19,7 +19,7 @@ func TestScenario_QuotaExceedsDailyLimit(t *testing.T) {
 	scenario.InitServices()
 
 	// 创建用户
-	user := scenario.CreateUser(t, "quotauser@example.com", "Quota User", models.RoleUser)
+	user := scenario.CreateUser(t, "quotauser@example.com", "Quota User", entity.RoleUser)
 
 	// 先消耗 900 tokens（模拟已使用）
 	for i := 0; i < 9; i++ {
@@ -56,7 +56,7 @@ func TestScenario_QuotaMultipleModels(t *testing.T) {
 	defer scenario.Cleanup()
 	scenario.InitServices()
 
-	user := scenario.CreateUser(t, "multi@example.com", "Multi Model User", models.RoleUser)
+	user := scenario.CreateUser(t, "multi@example.com", "Multi Model User", entity.RoleUser)
 
 	// 在模型 A 上消耗 tokens
 	err := scenario.QuotaSvc.DeductQuota(user.ID, "llama3-70b", 300, 100)

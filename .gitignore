@@ -69,3 +69,4 @@ config.yaml
 # Local database files
 *.db
 *.db.backup
+.gitnexus

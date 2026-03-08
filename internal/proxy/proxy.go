@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -14,7 +13,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
+	"modelgate/internal/logger"
 	"modelgate/internal/quota"
 	"modelgate/internal/usage"
 )
@@ -25,12 +25,12 @@ type Proxy struct {
 	quotaService *quota.Service
 	usageService *usage.Service
 	httpClient   *http.Client
-	modelStore   *models.ModelStore
-	backendStore *models.BackendStore
-	userStore    *models.UserStore
+	modelStore   *entity.ModelStore
+	backendStore *entity.BackendStore
+	userStore    *entity.UserStore
 }
 
-func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService *usage.Service, modelStore *models.ModelStore, backendStore *models.BackendStore, userStore *models.UserStore) *Proxy {
+func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService *usage.Service, modelStore *entity.ModelStore, backendStore *entity.BackendStore, userStore *entity.UserStore) *Proxy {
 	return &Proxy{
 		lb:           lb,
 		quotaService: quotaService,
@@ -536,7 +536,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		gzipReader, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			fmt.Printf("Error creating gzip reader for stream: %v\n", err)
+			logger.Errorw("Failed to create gzip reader", "error", err)
 			return
 		}
 		defer gzipReader.Close()
@@ -548,7 +548,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Printf("Stream processing timeout or cancelled\n")
+			logger.Warn("Stream processing timeout or cancelled")
 			return
 		default:
 		}
@@ -558,7 +558,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 			if err == io.EOF {
 				break
 			}
-			fmt.Printf("Error reading stream: %v\n", err)
+			logger.Errorw("Failed to read stream", "error", err)
 			break
 		}
 
@@ -611,7 +611,7 @@ func (p *Proxy) handleStreamResponse(c *gin.Context, resp *http.Response, userID
 				break
 			}
 			// 记录错误但不中断
-			fmt.Printf("Error reading stream: %v\n", err)
+			logger.Errorw("Failed to read stream", "error", err)
 			break
 		}
 

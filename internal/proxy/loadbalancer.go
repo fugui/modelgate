@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"modelgate/internal/config"
+	"modelgate/internal/logger"
 )
 
 // LoadBalancer 负载均衡器接口
@@ -88,11 +88,11 @@ func (lb *RoundRobinBalancer) Next(modelID string) (*Backend, bool) {
 
 	backends, exists := lb.backends[modelID]
 	if !exists {
-		log.Printf("Next: no backends found for model %s (not in map)", modelID)
+		logger.Infof("Next: no backends found for model %s (not in map)", modelID)
 		return nil, false
 	}
 	if len(backends) == 0 {
-		log.Printf("Next: backend list empty for model %s", modelID)
+		logger.Infof("Next: backend list empty for model %s", modelID)
 		return nil, false
 	}
 
@@ -112,7 +112,7 @@ func (lb *RoundRobinBalancer) Next(modelID string) (*Backend, bool) {
 	}
 
 	// 所有后端都不健康，返回第一个（降级）
-	log.Printf("Next: all %d backends for model %s are unhealthy, using fallback", len(backends), modelID)
+	logger.Infof("Next: all %d backends for model %s are unhealthy, using fallback", len(backends), modelID)
 	return &backends[0], true
 }
 
@@ -311,7 +311,7 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
-	log.Printf("ReloadConfig: loading %d models", len(models))
+	logger.Infof("ReloadConfig: loading %d models", len(models))
 
 	// 1. 构建新的后端映射
 	newBackends := make(map[string][]Backend)
@@ -323,7 +323,7 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 
 		// 跳过禁用的模型
 		if !modelConfig.Enabled {
-			log.Printf("ReloadConfig: skipping disabled model %s", modelID)
+			logger.Infof("ReloadConfig: skipping disabled model %s", modelID)
 			continue
 		}
 
@@ -332,7 +332,7 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 		for _, backendConfig := range modelConfig.Backends {
 			// 跳过禁用的后端
 			if !backendConfig.Enabled {
-				log.Printf("ReloadConfig: model %s - skipping disabled backend %s", modelID, backendConfig.ID)
+				logger.Infof("ReloadConfig: model %s - skipping disabled backend %s", modelID, backendConfig.ID)
 				continue
 			}
 
@@ -349,7 +349,7 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 			}
 
 			modelBackends = append(modelBackends, backend)
-			log.Printf("ReloadConfig: model %s - added backend %s (url=%s)", modelID, backend.ID, backend.URL)
+			logger.Infof("ReloadConfig: model %s - added backend %s (url=%s)", modelID, backend.ID, backend.URL)
 
 			// 4. 保留现有健康状态或初始化新的
 			if _, exists := lb.health[backend.ID]; !exists {
@@ -378,9 +378,9 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 				var counter uint32
 				newCounters[modelID] = &counter
 			}
-			log.Printf("ReloadConfig: model %s registered with %d backends", modelID, len(modelBackends))
+			logger.Infof("ReloadConfig: model %s registered with %d backends", modelID, len(modelBackends))
 		} else {
-			log.Printf("ReloadConfig: WARNING - model %s has no enabled backends!", modelID)
+			logger.Infof("ReloadConfig: WARNING - model %s has no enabled backends!", modelID)
 		}
 	}
 
@@ -402,8 +402,8 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 	lb.backends = newBackends
 	lb.counters = newCounters
 
-	log.Printf("LoadBalancer config reloaded: %d models configured with backends", len(newBackends))
+	logger.Infof("LoadBalancer config reloaded: %d models configured with backends", len(newBackends))
 	for modelID, backends := range newBackends {
-		log.Printf("  - %s: %d backends", modelID, len(backends))
+		logger.Infof("  - %s: %d backends", modelID, len(backends))
 	}
 }

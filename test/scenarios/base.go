@@ -9,7 +9,7 @@ import (
 	"modelgate/internal/auth"
 	"modelgate/internal/cache"
 	"modelgate/internal/config"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 	"modelgate/internal/quota"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -19,10 +19,10 @@ import (
 type TestScenario struct {
 	DB           *sql.DB
 	CfgManager   *config.ConfigManager
-	UserStore    *models.UserStore
-	APIKeyStore  *models.APIKeyStore
-	ModelStore   *models.ModelStore
-	QuotaStore   *models.QuotaStore
+	UserStore    *entity.UserStore
+	APIKeyStore  *entity.APIKeyStore
+	ModelStore   *entity.ModelStore
+	QuotaStore   *entity.QuotaStore
 	JWTManager   *auth.JWTManager
 	Cache        *cache.Cache
 	APIKeySvc    *apikey.Service
@@ -118,10 +118,10 @@ CREATE TABLE quota_usage_daily (
 	return &TestScenario{
 		DB:           db,
 		CfgManager:   cfgManager,
-		UserStore:    models.NewUserStore(db),
-		APIKeyStore:  models.NewAPIKeyStore(db),
-		ModelStore:   models.NewModelStore(cfgManager),
-		QuotaStore:   models.NewQuotaStore(cfgManager, db),
+		UserStore:    entity.NewUserStore(db),
+		APIKeyStore:  entity.NewAPIKeyStore(db),
+		ModelStore:   entity.NewModelStore(cfgManager),
+		QuotaStore:   entity.NewQuotaStore(cfgManager, db),
 		JWTManager:   auth.NewJWTManager("test-secret", 24),
 		Cache:        cache.New(),
 	}
@@ -134,8 +134,8 @@ func (s *TestScenario) InitServices() {
 }
 
 // CreateUser 辅助方法：创建测试用户
-func (s *TestScenario) CreateUser(t *testing.T, email, name string, role models.Role) *models.User {
-	user := &models.User{
+func (s *TestScenario) CreateUser(t *testing.T, email, name string, role entity.Role) *entity.User {
+	user := &entity.User{
 		Email:        email,
 		PasswordHash: "$2a$10$test", // 简化处理，实际应正确哈希
 		Name:         name,

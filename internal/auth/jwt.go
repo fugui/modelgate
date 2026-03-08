@@ -7,7 +7,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 )
 
 var (
@@ -20,7 +20,7 @@ type Claims struct {
 	UserID   uuid.UUID  `json:"user_id"`
 	Email    string     `json:"email"`
 	Name     string     `json:"name"`
-	Role     models.Role `json:"role"`
+	Role     entity.Role `json:"role"`
 	jwt.RegisteredClaims
 }
 
@@ -38,7 +38,7 @@ func NewJWTManager(secret string, expireHours int) *JWTManager {
 }
 
 // Generate 生成 JWT Token
-func (m *JWTManager) Generate(user *models.User) (string, error) {
+func (m *JWTManager) Generate(user *entity.User) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID: user.ID,

@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 )
 
 // TestScenario_UserEndToEndFlow
@@ -20,7 +20,7 @@ func TestScenario_UserEndToEndFlow(t *testing.T) {
 	scenario.InitServices()
 
 	// Step 1: 创建用户（模拟注册）
-	user := scenario.CreateUser(t, "user@example.com", "Test User", models.RoleUser)
+	user := scenario.CreateUser(t, "user@example.com", "Test User", entity.RoleUser)
 	assert.NotEqual(t, uuid.Nil, user.ID)
 	t.Logf("✓ 用户创建成功: %s (%s)", user.Email, user.ID)
 
@@ -37,7 +37,7 @@ func TestScenario_UserEndToEndFlow(t *testing.T) {
 	t.Logf("✓ JWT 验证通过")
 
 	// Step 4: 创建 API Key
-	keyReq := &models.APIKeyCreateRequest{
+	keyReq := &entity.APIKeyCreateRequest{
 		Name:            "开发测试",
 		Models:          []string{},
 		RateLimit:       0,

@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 )
 
 // TestScenario_APIKeyExpires
@@ -19,11 +19,11 @@ func TestScenario_APIKeyExpires(t *testing.T) {
 	defer scenario.Cleanup()
 	scenario.InitServices()
 
-	user := scenario.CreateUser(t, "expire@example.com", "Expire User", models.RoleUser)
+	user := scenario.CreateUser(t, "expire@example.com", "Expire User", entity.RoleUser)
 
 	// 创建 100ms 后过期的 Key
 	expiresAt := time.Now().Add(100 * time.Millisecond)
-	keyReq := &models.APIKeyCreateRequest{
+	keyReq := &entity.APIKeyCreateRequest{
 		Name:      "临时Key",
 		ExpiresAt: &expiresAt,
 	}
@@ -56,10 +56,10 @@ func TestScenario_APIKeyDisabled(t *testing.T) {
 	defer scenario.Cleanup()
 	scenario.InitServices()
 
-	user := scenario.CreateUser(t, "disable@example.com", "Disable User", models.RoleUser)
+	user := scenario.CreateUser(t, "disable@example.com", "Disable User", entity.RoleUser)
 
 	// 创建 Key
-	keyReq := &models.APIKeyCreateRequest{Name: "将被禁用的Key"}
+	keyReq := &entity.APIKeyCreateRequest{Name: "将被禁用的Key"}
 	key, err := scenario.APIKeySvc.GenerateKey(user.ID, keyReq)
 	require.NoError(t, err)
 
@@ -90,11 +90,11 @@ func TestScenario_UserDisabledKeysInvalid(t *testing.T) {
 	defer scenario.Cleanup()
 	scenario.InitServices()
 
-	user := scenario.CreateUser(t, "banned@example.com", "Banned User", models.RoleUser)
+	user := scenario.CreateUser(t, "banned@example.com", "Banned User", entity.RoleUser)
 
 	// 创建两个 Key
-	key1, _ := scenario.APIKeySvc.GenerateKey(user.ID, &models.APIKeyCreateRequest{Name: "Key1"})
-	key2, _ := scenario.APIKeySvc.GenerateKey(user.ID, &models.APIKeyCreateRequest{Name: "Key2"})
+	key1, _ := scenario.APIKeySvc.GenerateKey(user.ID, &entity.APIKeyCreateRequest{Name: "Key1"})
+	key2, _ := scenario.APIKeySvc.GenerateKey(user.ID, &entity.APIKeyCreateRequest{Name: "Key2"})
 
 	// 验证两个 Key 都有效
 	_, _, err := scenario.APIKeySvc.ValidateKey(key1.Key)

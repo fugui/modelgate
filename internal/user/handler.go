@@ -16,7 +16,7 @@ import (
 	"modelgate/internal/auth"
 	"modelgate/internal/config"
 	"modelgate/internal/middleware"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 	"modelgate/internal/usage"
 )
 
@@ -26,7 +26,7 @@ type QuotaService interface {
 
 type QuotaStore interface {
 	GetRecentUsageRecords(userID uuid.UUID, days int) ([]map[string]interface{}, error)
-	GetDailyUsageList(userID uuid.UUID, startDate, endDate time.Time) ([]*models.QuotaUsageDaily, error)
+	GetDailyUsageList(userID uuid.UUID, startDate, endDate time.Time) ([]*entity.QuotaUsageDaily, error)
 }
 
 type UsageService interface {
@@ -39,7 +39,7 @@ type Cache interface {
 }
 
 type Handler struct {
-	store          *models.UserStore
+	store          *entity.UserStore
 	jwtManager     *auth.JWTManager
 	quotaService   QuotaService
 	quotaStore     QuotaStore
@@ -51,7 +51,7 @@ type Handler struct {
 }
 
 type NewHandlerParams struct {
-	Store         *models.UserStore
+	Store         *entity.UserStore
 	JWTManager    *auth.JWTManager
 	QuotaService  QuotaService
 	QuotaStore    QuotaStore
@@ -155,7 +155,7 @@ func (h *Handler) Login(c *gin.Context) {
 }
 
 func (h *Handler) Register(c *gin.Context) {
-	var req models.UserCreateRequest
+	var req entity.UserCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -174,7 +174,7 @@ func (h *Handler) Register(c *gin.Context) {
 
 	// 默认角色为 user
 	if req.Role == "" {
-		req.Role = models.RoleUser
+		req.Role = entity.RoleUser
 	}
 
 	passwordHash, err := auth.HashPassword(req.Password)
@@ -183,7 +183,7 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	user := &models.User{
+	user := &entity.User{
 		Email:        req.Email,
 		PasswordHash: passwordHash,
 		Name:         req.Name,
@@ -247,7 +247,7 @@ func (h *Handler) List(c *gin.Context) {
 		return
 	}
 
-	var responses []models.UserResponse
+	var responses []entity.UserResponse
 	for _, u := range users {
 		responses = append(responses, u.ToResponse())
 	}
@@ -256,7 +256,7 @@ func (h *Handler) List(c *gin.Context) {
 }
 
 func (h *Handler) Create(c *gin.Context) {
-	var req models.UserCreateRequest
+	var req entity.UserCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -274,7 +274,7 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 
 	if req.Role == "" {
-		req.Role = models.RoleUser
+		req.Role = entity.RoleUser
 	}
 
 	passwordHash, err := auth.HashPassword(req.Password)
@@ -283,7 +283,7 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
-	user := &models.User{
+	user := &entity.User{
 		Email:        req.Email,
 		PasswordHash: passwordHash,
 		Name:         req.Name,
@@ -322,7 +322,7 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
-	var req models.UserUpdateRequest
+	var req entity.UserUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

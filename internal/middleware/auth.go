@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"modelgate/internal/auth"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 )
 
 const ContextKeyUser = "currentUser"
@@ -42,7 +42,7 @@ func AuthMiddleware(jwtManager *auth.JWTManager) gin.HandlerFunc {
 }
 
 // AuthMiddlewareWithUserValidation JWT 认证中间件（同时验证用户存在于数据库）
-func AuthMiddlewareWithUserValidation(jwtManager *auth.JWTManager, userStore *models.UserStore) gin.HandlerFunc {
+func AuthMiddlewareWithUserValidation(jwtManager *auth.JWTManager, userStore *entity.UserStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {

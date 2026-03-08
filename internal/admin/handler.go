@@ -1,4 +1,4 @@
-package model
+package admin
 
 import (
 	"net/http"
@@ -6,8 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"modelgate/internal/auth"
+	"modelgate/internal/entity"
 	"modelgate/internal/middleware"
-	"modelgate/internal/models"
 	"modelgate/internal/proxy"
 )
 
@@ -17,15 +17,15 @@ type LoadBalancer interface {
 	String() string
 }
 
-type Handler struct {
-	store        *models.ModelStore
-	backendStore *models.BackendStore
-	userStore    *models.UserStore
+type ModelHandler struct {
+	store        *entity.ModelStore
+	backendStore *entity.BackendStore
+	userStore    *entity.UserStore
 	loadBalancer LoadBalancer
 }
 
-func NewHandler(store *models.ModelStore, backendStore *models.BackendStore, lb LoadBalancer, userStore *models.UserStore) *Handler {
-	return &Handler{
+func NewModelHandler(store *entity.ModelStore, backendStore *entity.BackendStore, lb LoadBalancer, userStore *entity.UserStore) *ModelHandler {
+	return &ModelHandler{
 		store:        store,
 		backendStore: backendStore,
 		loadBalancer: lb,
@@ -33,11 +33,8 @@ func NewHandler(store *models.ModelStore, backendStore *models.BackendStore, lb 
 	}
 }
 
-func (h *Handler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager) {
-	// 公开接口 - 列出可用模型（用于 LLM 代理）
-	r.GET("/v1/models", h.ListForProxy)
-
-	// 需要认证的接口
+func (h *ModelHandler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager) {
+	// Health and status endpoints (require auth)
 	auth := r.Group("")
 	auth.Use(middleware.AuthMiddlewareWithUserValidation(jwtManager, h.userStore))
 	{
@@ -45,7 +42,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager
 		auth.GET("/admin/loadbalancer/status", h.GetLoadBalancerStatus)
 	}
 
-	// 管理员接口
+	// Model CRUD endpoints (require admin)
 	admin := r.Group("/admin/models")
 	admin.Use(middleware.AuthMiddlewareWithUserValidation(jwtManager, h.userStore))
 	admin.Use(middleware.AdminRequired())
@@ -61,7 +58,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager
 	}
 }
 
-func (h *Handler) List(c *gin.Context) {
+func (h *ModelHandler) List(c *gin.Context) {
 	models, err := h.store.List()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -71,38 +68,14 @@ func (h *Handler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": models})
 }
 
-func (h *Handler) ListForProxy(c *gin.Context) {
-	models, err := h.store.ListEnabled()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// OpenAI 兼容格式
-	var data []map[string]interface{}
-	for _, m := range models {
-		data = append(data, map[string]interface{}{
-			"id":       m.ID,
-			"object":   "model",
-			"created":  m.CreatedAt.Unix(),
-			"owned_by": "modelgate",
-		})
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"object": "list",
-		"data":   data,
-	})
-}
-
-func (h *Handler) Create(c *gin.Context) {
-	var req models.ModelCreateRequest
+func (h *ModelHandler) Create(c *gin.Context) {
+	var req entity.ModelCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	model := &models.Model{
+	model := &entity.Model{
 		ID:          req.ID,
 		Name:        req.Name,
 		Description: req.Description,
@@ -114,12 +87,12 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
-	// 创建关联的 backends
+	// Create associated backends
 	for _, backendInput := range req.Backends {
 		if backendInput.ID == "" {
 			continue
 		}
-		backend := &models.Backend{
+		backend := &entity.Backend{
 			ID:        backendInput.ID,
 			ModelID:   model.ID,
 			Name:      backendInput.Name,
@@ -133,7 +106,6 @@ func (h *Handler) Create(c *gin.Context) {
 			backend.Weight = 1
 		}
 		if err := h.backendStore.Create(backend); err != nil {
-			// 记录错误但不阻止模型创建
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create backend: " + err.Error()})
 			return
 		}
@@ -142,7 +114,7 @@ func (h *Handler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": model})
 }
 
-func (h *Handler) Update(c *gin.Context) {
+func (h *ModelHandler) Update(c *gin.Context) {
 	id := c.Param("id")
 
 	model, err := h.store.GetByID(id)
@@ -155,7 +127,7 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
-	var req models.ModelUpdateRequest
+	var req entity.ModelUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -179,7 +151,7 @@ func (h *Handler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": model})
 }
 
-func (h *Handler) Delete(c *gin.Context) {
+func (h *ModelHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 
 	if err := h.store.Delete(id); err != nil {
@@ -190,8 +162,7 @@ func (h *Handler) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "model deleted"})
 }
 
-// GetHealthStatus 获取所有后端的健康状态
-func (h *Handler) GetHealthStatus(c *gin.Context) {
+func (h *ModelHandler) GetHealthStatus(c *gin.Context) {
 	if h.loadBalancer == nil {
 		c.JSON(http.StatusOK, gin.H{"data": []interface{}{}})
 		return
@@ -201,11 +172,9 @@ func (h *Handler) GetHealthStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": status})
 }
 
-// GetModelBackends 获取指定模型的后端列表
-func (h *Handler) GetModelBackends(c *gin.Context) {
+func (h *ModelHandler) GetModelBackends(c *gin.Context) {
 	id := c.Param("id")
 
-	// 检查模型是否存在
 	model, err := h.store.GetByID(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -216,7 +185,6 @@ func (h *Handler) GetModelBackends(c *gin.Context) {
 		return
 	}
 
-	// 从数据库获取后端列表
 	backends, err := h.backendStore.ListByModel(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -226,11 +194,9 @@ func (h *Handler) GetModelBackends(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": backends})
 }
 
-// CreateBackend 为模型创建后端
-func (h *Handler) CreateBackend(c *gin.Context) {
+func (h *ModelHandler) CreateBackend(c *gin.Context) {
 	modelID := c.Param("id")
 
-	// 检查模型是否存在
 	model, err := h.store.GetByID(modelID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -241,13 +207,13 @@ func (h *Handler) CreateBackend(c *gin.Context) {
 		return
 	}
 
-	var req models.BackendCreateRequest
+	var req entity.BackendCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	backend := &models.Backend{
+	backend := &entity.Backend{
 		ID:        req.ID,
 		ModelID:   modelID,
 		Name:      req.Name,
@@ -271,8 +237,7 @@ func (h *Handler) CreateBackend(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": backend})
 }
 
-// UpdateBackend 更新后端
-func (h *Handler) UpdateBackend(c *gin.Context) {
+func (h *ModelHandler) UpdateBackend(c *gin.Context) {
 	backendID := c.Param("backend_id")
 
 	backend, err := h.backendStore.GetByID(backendID)
@@ -285,7 +250,7 @@ func (h *Handler) UpdateBackend(c *gin.Context) {
 		return
 	}
 
-	var req models.BackendUpdateRequest
+	var req entity.BackendUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -321,8 +286,7 @@ func (h *Handler) UpdateBackend(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": backend})
 }
 
-// DeleteBackend 删除后端
-func (h *Handler) DeleteBackend(c *gin.Context) {
+func (h *ModelHandler) DeleteBackend(c *gin.Context) {
 	backendID := c.Param("backend_id")
 
 	if err := h.backendStore.Delete(backendID); err != nil {
@@ -333,8 +297,7 @@ func (h *Handler) DeleteBackend(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "backend deleted"})
 }
 
-// GetLoadBalancerStatus 获取负载均衡器状态（调试用）
-func (h *Handler) GetLoadBalancerStatus(c *gin.Context) {
+func (h *ModelHandler) GetLoadBalancerStatus(c *gin.Context) {
 	if h.loadBalancer == nil {
 		c.JSON(http.StatusOK, gin.H{
 			"error": "load balancer not initialized",
@@ -342,10 +305,7 @@ func (h *Handler) GetLoadBalancerStatus(c *gin.Context) {
 		return
 	}
 
-	// 获取健康状态
 	healthStatus := h.loadBalancer.GetHealthStatus()
-
-	// 按模型分组
 	modelStats := make(map[string]interface{})
 
 	c.JSON(http.StatusOK, gin.H{
@@ -355,17 +315,17 @@ func (h *Handler) GetLoadBalancerStatus(c *gin.Context) {
 	})
 }
 
-// AdminHandler 管理员配额策略管理
-type AdminHandler struct {
-	quotaStore *models.QuotaStore
-	userStore  *models.UserStore
+// PolicyHandler handles admin quota policy endpoints
+type PolicyHandler struct {
+	quotaStore *entity.QuotaStore
+	userStore  *entity.UserStore
 }
 
-func NewAdminHandler(quotaStore *models.QuotaStore, userStore *models.UserStore) *AdminHandler {
-	return &AdminHandler{quotaStore: quotaStore, userStore: userStore}
+func NewPolicyHandler(quotaStore *entity.QuotaStore, userStore *entity.UserStore) *PolicyHandler {
+	return &PolicyHandler{quotaStore: quotaStore, userStore: userStore}
 }
 
-func (h *AdminHandler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager) {
+func (h *PolicyHandler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTManager) {
 	admin := r.Group("/admin/policies")
 	admin.Use(middleware.AuthMiddlewareWithUserValidation(jwtManager, h.userStore))
 	admin.Use(middleware.AdminRequired())
@@ -377,7 +337,7 @@ func (h *AdminHandler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTMa
 	}
 }
 
-func (h *AdminHandler) ListPolicies(c *gin.Context) {
+func (h *PolicyHandler) ListPolicies(c *gin.Context) {
 	policies, err := h.quotaStore.ListPolicies()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -387,8 +347,8 @@ func (h *AdminHandler) ListPolicies(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": policies})
 }
 
-func (h *AdminHandler) CreatePolicy(c *gin.Context) {
-	var policy models.QuotaPolicy
+func (h *PolicyHandler) CreatePolicy(c *gin.Context) {
+	var policy entity.QuotaPolicy
 	if err := c.ShouldBindJSON(&policy); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -407,7 +367,7 @@ func (h *AdminHandler) CreatePolicy(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": policy})
 }
 
-func (h *AdminHandler) UpdatePolicy(c *gin.Context) {
+func (h *PolicyHandler) UpdatePolicy(c *gin.Context) {
 	name := c.Param("name")
 
 	policy, err := h.quotaStore.GetPolicy(name)
@@ -420,7 +380,7 @@ func (h *AdminHandler) UpdatePolicy(c *gin.Context) {
 		return
 	}
 
-	var req models.QuotaPolicy
+	var req entity.QuotaPolicy
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -450,7 +410,7 @@ func (h *AdminHandler) UpdatePolicy(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": policy})
 }
 
-func (h *AdminHandler) DeletePolicy(c *gin.Context) {
+func (h *PolicyHandler) DeletePolicy(c *gin.Context) {
 	name := c.Param("name")
 
 	if err := h.quotaStore.DeletePolicy(name); err != nil {

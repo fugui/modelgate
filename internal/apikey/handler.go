@@ -10,7 +10,7 @@ import (
 	"modelgate/internal/auth"
 	"modelgate/internal/concurrency"
 	"modelgate/internal/middleware"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 )
 
 // contextKey 用于在 gin 上下文中存储认证信息
@@ -32,11 +32,11 @@ const (
 // Handler 处理 API Key 管理相关的 HTTP 请求
 type Handler struct {
 	service   *Service
-	userStore *models.UserStore
+	userStore *entity.UserStore
 }
 
 // NewHandler 创建 API Key HTTP 处理器
-func NewHandler(service *Service, userStore *models.UserStore) *Handler {
+func NewHandler(service *Service, userStore *entity.UserStore) *Handler {
 	return &Handler{service: service, userStore: userStore}
 }
 
@@ -66,7 +66,7 @@ func (h *Handler) List(c *gin.Context) {
 		return
 	}
 
-	var responses []models.APIKeyResponse
+	var responses []entity.APIKeyResponse
 	for _, key := range keys {
 		responses = append(responses, key.ToResponse())
 	}
@@ -81,7 +81,7 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
-	var req models.APIKeyCreateRequest
+	var req entity.APIKeyCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -122,7 +122,7 @@ type ProxyHandler struct {
 	service      *Service
 	proxy        Proxy
 	jwtManager   *auth.JWTManager
-	userStore    *models.UserStore
+	userStore    *entity.UserStore
 	usageService UsageService
 }
 
@@ -138,7 +138,7 @@ type Proxy interface {
 	HandleListModels(c *gin.Context)
 }
 
-func NewProxyHandler(service *Service, proxy Proxy, jwtManager *auth.JWTManager, userStore *models.UserStore, usageService UsageService) *ProxyHandler {
+func NewProxyHandler(service *Service, proxy Proxy, jwtManager *auth.JWTManager, userStore *entity.UserStore, usageService UsageService) *ProxyHandler {
 	return &ProxyHandler{
 		service:      service,
 		proxy:        proxy,

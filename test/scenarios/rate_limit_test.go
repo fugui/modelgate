@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 )
 
 // TestScenario_RateLimitExceeded
@@ -25,7 +25,7 @@ func TestScenario_RateLimitExceeded(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	user := scenario.CreateUser(t, "ratelimit@example.com", "Rate Limit User", models.RoleUser)
+	user := scenario.CreateUser(t, "ratelimit@example.com", "Rate Limit User", entity.RoleUser)
 
 	// 前 5 次请求应该成功
 	for i := 0; i < 5; i++ {
@@ -63,7 +63,7 @@ func TestScenario_ModelAccessControl(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	user := scenario.CreateUser(t, "limited@example.com", "Limited User", models.RoleUser)
+	user := scenario.CreateUser(t, "limited@example.com", "Limited User", entity.RoleUser)
 
 	// 访问授权模型应该成功
 	result, err := scenario.QuotaSvc.CheckQuota(user.ID, "llama3-70b")
@@ -89,7 +89,7 @@ func TestScenario_ConcurrentRequests(t *testing.T) {
 	defer scenario.Cleanup()
 	scenario.InitServices()
 
-	user := scenario.CreateUser(t, "concurrent@example.com", "Concurrent User", models.RoleUser)
+	user := scenario.CreateUser(t, "concurrent@example.com", "Concurrent User", entity.RoleUser)
 
 	// 并发 10 个请求，每个消耗 10 tokens
 	var wg sync.WaitGroup
@@ -122,7 +122,7 @@ func TestScenario_TokenQuotaResetNextDay(t *testing.T) {
 	defer scenario.Cleanup()
 	scenario.InitServices()
 
-	user := scenario.CreateUser(t, "reset@example.com", "Reset User", models.RoleUser)
+	user := scenario.CreateUser(t, "reset@example.com", "Reset User", entity.RoleUser)
 
 	// 用完全部配额
 	for i := 0; i < 10; i++ {

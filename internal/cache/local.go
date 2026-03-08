@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
 )
 
 // Cache 简单的内存缓存
@@ -19,14 +19,14 @@ type Cache struct {
 
 // APIKeyCacheItem API Key 缓存项
 type APIKeyCacheItem struct {
-	Key      *models.APIKey  // 完整的 API Key 对象
-	UserInfo *models.User    // 嵌入用户信息，减少二次查询
+	Key      *entity.APIKey  // 完整的 API Key 对象
+	UserInfo *entity.User    // 嵌入用户信息，减少二次查询
 	CachedAt time.Time
 }
 
 // UserCacheItem 用户缓存项
 type UserCacheItem struct {
-	User     *models.User
+	User     *entity.User
 	CachedAt time.Time
 }
 
@@ -73,7 +73,7 @@ func (c *Cache) GetAPIKey(keyPrefix string) *APIKeyCacheItem {
 }
 
 // SetAPIKey 缓存 API Key
-func (c *Cache) SetAPIKey(keyPrefix string, key *models.APIKey, user *models.User) {
+func (c *Cache) SetAPIKey(keyPrefix string, key *entity.APIKey, user *entity.User) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	
@@ -104,7 +104,7 @@ func (c *Cache) DeleteAPIKeysByUser(userID uuid.UUID) {
 }
 
 // GetUser 从缓存获取用户
-func (c *Cache) GetUser(userID string) *models.User {
+func (c *Cache) GetUser(userID string) *entity.User {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	
@@ -122,7 +122,7 @@ func (c *Cache) GetUser(userID string) *models.User {
 }
 
 // SetUser 缓存用户
-func (c *Cache) SetUser(userID string, user *models.User) {
+func (c *Cache) SetUser(userID string, user *entity.User) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	

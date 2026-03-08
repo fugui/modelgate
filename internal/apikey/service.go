@@ -11,7 +11,8 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"modelgate/internal/cache"
-	"modelgate/internal/models"
+	"modelgate/internal/entity"
+	"modelgate/internal/logger"
 )
 
 const (
@@ -22,13 +23,13 @@ const (
 
 // Service 提供 API Key 业务逻辑
 type Service struct {
-	store     *models.APIKeyStore
-	userStore *models.UserStore
+	store     *entity.APIKeyStore
+	userStore *entity.UserStore
 	cache     *cache.Cache
 }
 
 // NewService 创建 API Key 服务实例
-func NewService(store *models.APIKeyStore, userStore *models.UserStore, c *cache.Cache) *Service {
+func NewService(store *entity.APIKeyStore, userStore *entity.UserStore, c *cache.Cache) *Service {
 	return &Service{
 		store:     store,
 		userStore: userStore,
@@ -38,7 +39,7 @@ func NewService(store *models.APIKeyStore, userStore *models.UserStore, c *cache
 
 // GenerateKey 为用户生成新的 API Key
 // 返回包含明文的 API Key（仅创建时可获取）
-func (s *Service) GenerateKey(userID uuid.UUID, req *models.APIKeyCreateRequest) (*models.APIKeyWithSecret, error) {
+func (s *Service) GenerateKey(userID uuid.UUID, req *entity.APIKeyCreateRequest) (*entity.APIKeyWithSecret, error) {
 	// 生成随机 key
 	randomBytes := make([]byte, keyLength)
 	if _, err := rand.Read(randomBytes); err != nil {
@@ -51,7 +52,7 @@ func (s *Service) GenerateKey(userID uuid.UUID, req *models.APIKeyCreateRequest)
 		return nil, fmt.Errorf("failed to hash key: %w", err)
 	}
 
-	key := &models.APIKey{
+	key := &entity.APIKey{
 		UserID:    userID,
 		Name:      req.Name,
 		KeyHash:   string(keyHash),
@@ -64,7 +65,7 @@ func (s *Service) GenerateKey(userID uuid.UUID, req *models.APIKeyCreateRequest)
 		return nil, fmt.Errorf("failed to create key: %w", err)
 	}
 
-	return &models.APIKeyWithSecret{
+	return &entity.APIKeyWithSecret{
 		APIKeyResponse: key.ToResponse(),
 		Key:            plainKey,
 	}, nil
@@ -73,7 +74,7 @@ func (s *Service) GenerateKey(userID uuid.UUID, req *models.APIKeyCreateRequest)
 // ValidateKey 验证 API Key 的有效性
 // 检查：格式、hash、过期时间、启用状态、所属用户状态
 // 返回验证通过的 API Key 和用户信息
-func (s *Service) ValidateKey(plainKey string) (*models.APIKey, *models.User, error) {
+func (s *Service) ValidateKey(plainKey string) (*entity.APIKey, *entity.User, error) {
 	if !strings.HasPrefix(plainKey, keyPrefix) {
 		return nil, nil, fmt.Errorf("invalid key format")
 	}
@@ -151,7 +152,7 @@ func (s *Service) updateLastUsed(keyID uuid.UUID) {
 	go func() {
 		if err := s.store.UpdateLastUsed(keyID); err != nil {
 			// 记录错误但不影响主流程
-			fmt.Printf("Failed to update last_used_at for key %s: %v\n", keyID, err)
+			logger.Warnw("Failed to update API key last_used_at", "key_id", keyID, "error", err)
 		}
 		close(done)
 	}()
@@ -166,7 +167,7 @@ func (s *Service) updateLastUsed(keyID uuid.UUID) {
 }
 
 // GetUserKeys 获取指定用户的所有 API Key
-func (s *Service) GetUserKeys(userID uuid.UUID) ([]*models.APIKey, error) {
+func (s *Service) GetUserKeys(userID uuid.UUID) ([]*entity.APIKey, error) {
 	return s.store.ListByUser(userID)
 }
 

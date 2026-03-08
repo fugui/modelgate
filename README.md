@@ -12,10 +12,13 @@
 - **多后端架构**：一个模型可配置多个后端实例，支持权重轮询负载均衡
 - **健康检查**：自动检测后端可用性，自动剔除故障节点
 - **配额控制**：速率限制、Token 配额、并发控制
-- **模型参数**：支持自定义模型请求参数（如禁用思考模式、自定义 User-Agent）
+- **模型参数**：支持自定义模型请求参数（如禁用思考模式、自定义 HTTP Header）
+- **并发控制**：全局和用户级并发限制，防止服务过载
+- **SSO 支持**：支持 Azure AD 等企业身份提供商
 - **本地缓存**：API Key 和用户信息本地缓存，减少数据库查询
 - **审计日志**：完整的请求日志（7天自动清理）
 - **OpenAI 兼容**：提供与 OpenAI API 兼容的接口
+- **多客户端协议**：同时支持 OpenAI 和 Anthropic 客户端，自动转换为后端 LLM 支持的协议
 - **单文件部署**：前端资源嵌入二进制，仅需一个可执行文件
 
 ## 技术栈
@@ -146,17 +149,32 @@ quota_policies:
   - name: "default"
     rate_limit: 60              # 每分钟请求数
     rate_limit_window: 60       # 窗口秒数
-    token_quota_daily: 100000   # 每日 Token 上限
+    request_quota_daily: 500    # 每日请求配额上限
     models: ["*"]               # "*" 表示所有模型
   - name: "vip"
     rate_limit: 300
-    token_quota_daily: 1000000
+    rate_limit_window: 60
+    request_quota_daily: 5000
     models: ["*"]
 
 # 前端配置
 frontend:
   feedback_url: "https://feedback.example.com"
   dev_manual_url: "https://docs.example.com"
+
+# 并发控制
+concurrency:
+  global_limit: 100         # 全局最大并发请求数
+  user_limit: 10            # 每用户最大并发请求数
+
+# SSO 配置（可选）
+sso:
+  enabled: false
+  provider: "azure"         # 支持: azure, generic-oidc
+  client_id: "your-client-id"
+  client_secret: "your-client-secret"
+  issuer_url: "https://login.microsoftonline.com/{tenant}/v2.0"
+  email_claim: "email"
 ```
 
 ### Backend 配置字段说明
@@ -272,6 +290,40 @@ Content-Type: application/json
 }
 ```
 
+### LLM 代理接口（Anthropic 兼容）
+
+系统同时支持 Anthropic API 协议，自动将请求转换为后端 LLM 支持的格式：
+
+```bash
+# 消息完成（Anthropic 格式）
+POST /v1/messages
+Authorization: Bearer <api-key>
+Content-Type: application/json
+anthropic-version: 2023-06-01
+
+{
+  "model": "kimi2.5",
+  "messages": [
+    {"role": "user", "content": "Hello, how are you?"}
+  ],
+  "max_tokens": 1000,
+  "stream": false
+}
+```
+
+**支持的 Anthropic 特性：**
+- Messages API 格式
+- 流式响应（SSE）
+- 系统提示词（system prompt）
+- 工具调用（function calling）
+- 多模态内容（文本 + 图像）
+- 思考模式（thinking blocks）
+
+**协议转换说明：**
+- Anthropic 请求 → 转换为 OpenAI 格式 → 转发给后端 LLM
+- OpenAI 响应 → 转换为 Anthropic 格式 → 返回给客户端
+- 自动处理字段映射（roles, content blocks, usage 等）
+
 ### 管理接口
 
 #### 用户管理
@@ -306,6 +358,13 @@ GET    /api/v1/admin/policies
 POST   /api/v1/admin/policies
 PUT    /api/v1/admin/policies/:name
 DELETE /api/v1/admin/policies/:name
+```
+
+#### SSO 配置
+```bash
+GET    /api/v1/admin/sso/status     # 获取 SSO 状态
+PUT    /api/v1/admin/sso/config    # 更新 SSO 配置
+POST   /api/v1/admin/sso/test      # 测试 SSO 连接
 ```
 
 ### 后端数据结构
@@ -475,8 +534,21 @@ server {
 5. **定期备份**：备份 SQLite 数据库文件
 6. **日志审计**：定期检查日志目录的访问记录
 7. **网络隔离**：LLM 后端服务应部署在内网，通过 Model Gate 统一暴露
+8. **SSO 配置**：如启用 SSO，确保正确配置 issuer_url 和 client_secret
 
 ## 版本历史
+
+### v0.4.0 (2025-03)
+- ✨ 新增 SSO 单点登录支持（Azure AD / OIDC）
+- ✨ 新增并发控制（全局/用户级限制）
+- ✨ 新增 `request_quota_daily` 请求配额限制
+- ✨ 支持自定义模型 HTTP Headers（双下划线前缀）
+- ✨ 新增管理员手动触发后端健康检查
+- ✨ **新增 Anthropic API 协议支持**（自动转换为 OpenAI 协议）
+- ✨ 支持流式响应转换（SSE）
+- ✨ 支持工具调用和多模态内容转换
+- ♻️ 优化配额计数逻辑（内存计数器 + 定时持久化）
+- ♻️ 重构响应处理，避免 Body 重复读取问题
 
 ### v0.3.0 (2025-03)
 - ✨ 新增 `model_params` 模型参数配置

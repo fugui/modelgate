@@ -19,9 +19,9 @@ import (
 	"modelgate/internal/config"
 	"modelgate/internal/db"
 	"modelgate/internal/logger"
+	"modelgate/internal/admin"
+	"modelgate/internal/entity"
 	"modelgate/internal/middleware"
-	"modelgate/internal/model"
-	"modelgate/internal/models"
 	"modelgate/internal/proxy"
 	"modelgate/internal/quota"
 	"modelgate/internal/static"
@@ -38,6 +38,12 @@ func main() {
 
 	// 设置 gin 模式
 	gin.SetMode(cfg.Server.Mode)
+
+	// 初始化全局日志（根据运行模式设置日志级别和格式）
+	development := cfg.Server.Mode == "debug"
+	if err := logger.InitLogger(development); err != nil {
+		log.Printf("Failed to initialize logger: %v", err)
+	}
 
 	// 创建 ConfigManager
 	cfgManager := config.NewManager(cfg, "config.yaml")
@@ -66,12 +72,12 @@ func main() {
 	log.Println("Local cache initialized")
 
 	// 初始化存储层
-	userStore := models.NewUserStore(database.DB)
-	apiKeyStore := models.NewAPIKeyStore(database.DB)
+	userStore := entity.NewUserStore(database.DB)
+	apiKeyStore := entity.NewAPIKeyStore(database.DB)
 	// 新的 ConfigManager-based 存储
-	modelStore := models.NewModelStore(cfgManager)
-	backendStore := models.NewBackendStore(cfgManager)
-	quotaStore := models.NewQuotaStore(cfgManager, database.DB) // 需要 CM 和 DB
+	modelStore := entity.NewModelStore(cfgManager)
+	backendStore := entity.NewBackendStore(cfgManager)
+	quotaStore := entity.NewQuotaStore(cfgManager, database.DB) // 需要 CM 和 DB
 
 	// 初始化 JWT 管理器
 	jwtManager := auth.NewJWTManager(cfg.JWT.Secret, cfg.JWT.ExpireHours)
@@ -151,11 +157,12 @@ func main() {
 	apiKeyHandler := apikey.NewHandler(apiKeyService, userStore)
 	apiKeyHandler.RegisterRoutes(api, jwtManager)
 
-	modelHandler := model.NewHandler(modelStore, backendStore, lb, userStore)
-	modelHandler.RegisterRoutes(api, jwtManager)
+	// Register admin handlers (admin endpoints)
+	adminModelHandler := admin.NewModelHandler(modelStore, backendStore, lb, userStore)
+	adminModelHandler.RegisterRoutes(api, jwtManager)
 
-	adminHandler := model.NewAdminHandler(quotaStore, userStore)
-	adminHandler.RegisterRoutes(api, jwtManager)
+	adminPolicyHandler := admin.NewPolicyHandler(quotaStore, userStore)
+	adminPolicyHandler.RegisterRoutes(api, jwtManager)
 
 	// 并发状态管理 API（管理员）
 	if concurrencyLimiter != nil {
@@ -208,7 +215,7 @@ func main() {
 	log.Println("Server stopped")
 }
 
-func createDefaultAdmin(store *models.UserStore, email, password string) {
+func createDefaultAdmin(store *entity.UserStore, email, password string) {
 	if email == "" {
 		return
 	}
@@ -229,11 +236,11 @@ func createDefaultAdmin(store *models.UserStore, email, password string) {
 		return
 	}
 
-	admin := &models.User{
+	admin := &entity.User{
 		Email:        email,
 		PasswordHash: passwordHash,
 		Name:         "Administrator",
-		Role:         models.RoleAdmin,
+		Role:         entity.RoleAdmin,
 		QuotaPolicy:  "vip",
 		Enabled:      true,
 	}

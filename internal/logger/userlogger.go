@@ -165,7 +165,8 @@ func (l *UserLogger) CleanupOldLogs() error {
 			// 删除目录
 			dateDir := filepath.Join(l.basePath, dateStr)
 			if err := os.RemoveAll(dateDir); err != nil {
-				fmt.Printf("Failed to remove old log directory %s: %v\n", dateDir, err)
+				// Error is logged to stderr since this is the logger package itself
+				fmt.Fprintf(os.Stderr, "Failed to remove old log directory %s: %v\n", dateDir, err)
 			}
 		}
 	}
