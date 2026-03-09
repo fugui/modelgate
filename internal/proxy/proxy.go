@@ -226,8 +226,12 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 		return
 	}
 
+	// 检查后端实际响应的内容类型
+	contentType := resp.Header.Get("Content-Type")
+	isStreamResponse := req.Stream && (strings.Contains(contentType, "text/event-stream") || strings.Contains(contentType, "application/x-ndjson"))
+
 	// 根据是否流式响应选择处理方式
-	if req.Stream {
+	if isStreamResponse {
 		p.handleStreamResponse(c, resp, userID, modelID, user.QuotaPolicy, startTime, clientIP, userAgent, backend.ID)
 	} else {
 		defer resp.Body.Close()
@@ -328,6 +332,7 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	req *BackendRequest,
 	responseConverter func([]byte) ([]byte, error),
 	streamLineConverter func(string) (string, error),
+	pingMessage string,
 ) {
 	startTime := time.Now()
 
@@ -446,10 +451,14 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		return
 	}
 
+	// 检查后端实际响应的内容类型
+	contentType := resp.Header.Get("Content-Type")
+	isStreamResponse := req.IsStream && (strings.Contains(contentType, "text/event-stream") || strings.Contains(contentType, "application/x-ndjson"))
+
 	// 根据是否流式响应选择处理方式
-	if req.IsStream {
+	if isStreamResponse {
 		// handleConvertedStreamResponse 负责在结束后调用 resp.Body.Close()
-		p.handleConvertedStreamResponse(c, resp, req, backend.ID, startTime, streamLineConverter)
+		p.handleConvertedStreamResponse(c, resp, req, backend.ID, startTime, streamLineConverter, pingMessage)
 	} else {
 		defer resp.Body.Close()
 		p.handleConvertedNormalResponse(c, resp, req, backend.ID, startTime, responseConverter)
@@ -553,6 +562,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 	backendID string,
 	startTime time.Time,
 	lineConverter func(string) (string, error),
+	pingMessage string,
 ) {
 	defer resp.Body.Close()
 	c.Header("Content-Type", "text/event-stream")
@@ -562,7 +572,11 @@ func (p *Proxy) handleConvertedStreamResponse(
 	c.Status(resp.StatusCode)
 
 	// 立即发送一个 SSE 注释并 Flush，确保客户端收到 Header，防止首字节超时
-	c.Writer.WriteString(": ping\n\n")
+	if pingMessage != "" {
+		c.Writer.WriteString(pingMessage)
+	} else {
+		c.Writer.WriteString(": ping\n\n")
+	}
 	c.Writer.Flush()
 
 	// 使用带 timeout 的 context 处理流式响应，设置为 1 小时以支持超长生成
@@ -585,7 +599,11 @@ func (p *Proxy) handleConvertedStreamResponse(
 			case <-ticker.C:
 				writeMu.Lock()
 				// 发送 SSE 注释作为心跳
-				_, _ = c.Writer.WriteString(": keep-alive\n\n")
+				if pingMessage != "" {
+					_, _ = c.Writer.WriteString(pingMessage)
+				} else {
+					_, _ = c.Writer.WriteString(": keep-alive\n\n")
+				}
 				c.Writer.Flush()
 				writeMu.Unlock()
 			}

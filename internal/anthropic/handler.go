@@ -104,6 +104,8 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 		func(line string) (string, error) {
 			return ConvertStreamLine(line, &anthropicReq)
 		},
+		// Anthropic-compliant ping/keep-alive message
+		"event: ping\ndata: {\"type\": \"ping\"}\n\n",
 	)
 }
 
