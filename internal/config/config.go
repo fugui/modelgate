@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,8 +23,13 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port int    `yaml:"port"`
-	Mode string `yaml:"mode"`
+	Port            int           `yaml:"port"`
+	Mode            string        `yaml:"mode"`
+	ReadTimeout     time.Duration `yaml:"read_timeout"`
+	WriteTimeout    time.Duration `yaml:"write_timeout"`
+	IdleTimeout     time.Duration `yaml:"idle_timeout"`
+	MaxHeaderBytes  int           `yaml:"max_header_bytes"`
+	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
 }
 
 type DatabaseConfig struct {
@@ -128,6 +134,21 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Server.Mode == "" {
 		cfg.Server.Mode = "release"
+	}
+	if cfg.Server.ReadTimeout == 0 {
+		cfg.Server.ReadTimeout = 60 * time.Second
+	}
+	if cfg.Server.WriteTimeout == 0 {
+		cfg.Server.WriteTimeout = 120 * time.Second
+	}
+	if cfg.Server.IdleTimeout == 0 {
+		cfg.Server.IdleTimeout = 300 * time.Second
+	}
+	if cfg.Server.MaxHeaderBytes == 0 {
+		cfg.Server.MaxHeaderBytes = 1 << 20 // 1MB
+	}
+	if cfg.Server.ShutdownTimeout == 0 {
+		cfg.Server.ShutdownTimeout = 30 * time.Second
 	}
 	if cfg.JWT.Secret == "" {
 		cfg.JWT.Secret = "default-secret-change-in-production"

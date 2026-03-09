@@ -85,6 +85,12 @@ make dev
 server:
   port: 8080              # 服务端口
   mode: "release"         # debug 或 release
+  # 以下为可选的超时配置（使用默认值时可省略）
+  read_timeout: 60s       # 读取请求超时（默认 60s）
+  write_timeout: 120s     # 写入响应超时（默认 120s）
+  idle_timeout: 300s      # 空闲连接超时（默认 300s）
+  max_header_bytes: 1048576  # 请求头大小限制，单位字节（默认 1MB）
+  shutdown_timeout: 30s   # 优雅关闭超时（默认 30s）
 
 database:
   path: "modelgate.db"      # SQLite 数据库文件路径
@@ -543,6 +549,11 @@ server {
 8. **SSO 配置**：如启用 SSO，确保正确配置 issuer_url 和 client_secret
 
 ## 版本历史
+
+### v0.4.2 (2025-03)
+- ✨ 新增 HTTP 服务器超时配置（读/写/空闲超时、请求头限制）
+- ✨ 新增优雅关闭机制，支持 `shutdown_timeout` 配置
+- 🔒 增强服务安全性，防止连接泄漏和大请求头攻击
 
 ### v0.4.1 (2025-03)
 - ✨ 新增默认模型 Fallback 功能（模型无后端时自动切换）
