@@ -20,14 +20,11 @@ func NewHandler(service *Service) *Handler {
 
 // RegisterRoutes 注册仪表板路由
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
-	dashboard := r.Group("/dashboard")
-	{
-		dashboard.GET("/stats", h.GetDashboardStats)
-		dashboard.GET("/top-users", h.GetTopUsers)
-		dashboard.GET("/hourly", h.GetHourlyStats)
-		dashboard.GET("/departments", h.GetDepartmentStats)
-		dashboard.GET("/models", h.GetModelStats)
-	}
+	r.GET("/stats", h.GetDashboardStats)
+	r.GET("/top-users", h.GetTopUsers)
+	r.GET("/hourly", h.GetHourlyStats)
+	r.GET("/departments", h.GetDepartmentStats)
+	r.GET("/models", h.GetModelStats)
 }
 
 // GetDashboardStats 获取系统概览数据
