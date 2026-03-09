@@ -139,7 +139,7 @@ func Load(path string) (*Config, error) {
 		cfg.Server.ReadTimeout = 60 * time.Second
 	}
 	if cfg.Server.WriteTimeout == 0 {
-		cfg.Server.WriteTimeout = 120 * time.Second
+		cfg.Server.WriteTimeout = 30 * time.Minute
 	}
 	if cfg.Server.IdleTimeout == 0 {
 		cfg.Server.IdleTimeout = 300 * time.Second

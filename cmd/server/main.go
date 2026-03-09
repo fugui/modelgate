@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"modelgate/internal/admin"
 	"modelgate/internal/anthropic"
 	"modelgate/internal/apikey"
 	"modelgate/internal/auth"
@@ -20,9 +21,8 @@ import (
 	"modelgate/internal/config"
 	"modelgate/internal/dashboard"
 	"modelgate/internal/db"
-	"modelgate/internal/logger"
-	"modelgate/internal/admin"
 	"modelgate/internal/entity"
+	"modelgate/internal/logger"
 	"modelgate/internal/middleware"
 	"modelgate/internal/proxy"
 	"modelgate/internal/quota"

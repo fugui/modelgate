@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -213,20 +214,13 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 		}
 		return
 	}
-	defer resp.Body.Close()
+	// Body 将在后续具体的处理函数中关闭
 
 	p.lb.MarkSuccess(backend.ID)
 
-	// 如果后端返回 429，直接透传
-	if resp.StatusCode == http.StatusTooManyRequests {
-		// 读取响应体并透传
-		respBody, _ := io.ReadAll(resp.Body)
-		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
-		return
-	}
-
-	// 如果后端返回非 200 状态码，透传错误
+	// 如果后端返回 429 或其他非 200 状态码，透传错误并关闭 Body
 	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
 		respBody, _ := io.ReadAll(resp.Body)
 		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 		return
@@ -236,6 +230,7 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 	if req.Stream {
 		p.handleStreamResponse(c, resp, userID, modelID, user.QuotaPolicy, startTime, clientIP, userAgent, backend.ID)
 	} else {
+		defer resp.Body.Close()
 		p.handleNormalResponse(c, resp, userID, modelID, user.QuotaPolicy, startTime, clientIP, userAgent, backend.ID)
 	}
 }
@@ -437,12 +432,15 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		}
 		return
 	}
-	defer resp.Body.Close()
+	// 注意：这里不能使用 defer resp.Body.Close()，因为如果是流式响应，
+	// 需要在 handleConvertedStreamResponse 中异步或同步读取完后再关闭。
+	// 对于非流式响应，我们在处理完后关闭。
 
 	p.lb.MarkSuccess(backend.ID)
 
 	// 透传非 200 状态码
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
 		respBody, _ := io.ReadAll(resp.Body)
 		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 		return
@@ -450,8 +448,10 @@ func (p *Proxy) ExecuteCoreWorkflow(
 
 	// 根据是否流式响应选择处理方式
 	if req.IsStream {
+		// handleConvertedStreamResponse 负责在结束后调用 resp.Body.Close()
 		p.handleConvertedStreamResponse(c, resp, req, backend.ID, startTime, streamLineConverter)
 	} else {
+		defer resp.Body.Close()
 		p.handleConvertedNormalResponse(c, resp, req, backend.ID, startTime, responseConverter)
 	}
 }
@@ -554,14 +554,43 @@ func (p *Proxy) handleConvertedStreamResponse(
 	startTime time.Time,
 	lineConverter func(string) (string, error),
 ) {
+	defer resp.Body.Close()
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no") // 告知 Nginx 不要缓存响应
 	c.Status(resp.StatusCode)
 
-	// 使用带 timeout 的 context 处理 gzip 流
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
+	// 立即发送一个 SSE 注释并 Flush，确保客户端收到 Header，防止首字节超时
+	c.Writer.WriteString(": ping\n\n")
+	c.Writer.Flush()
+
+	// 使用带 timeout 的 context 处理流式响应，设置为 1 小时以支持超长生成
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 1*time.Hour)
 	defer cancel()
+
+	// 使用 mutex 保护并发写入 c.Writer (主循环和心跳协程)
+	var writeMu sync.Mutex
+
+	// 设置心跳计时器，每 30 秒发送一个 SSE 注释，防止中间代理因闲置断开连接
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	// 启动心跳协程
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				writeMu.Lock()
+				// 发送 SSE 注释作为心跳
+				_, _ = c.Writer.WriteString(": keep-alive\n\n")
+				c.Writer.Flush()
+				writeMu.Unlock()
+			}
+		}
+	}()
 
 	// 处理 gzip 压缩的流式响应
 	var reader *bufio.Reader
@@ -597,16 +626,21 @@ func (p *Proxy) handleConvertedStreamResponse(
 		// 转换每一行
 		if lineConverter != nil {
 			converted, err := lineConverter(line)
+			writeMu.Lock()
 			if err != nil {
 				// 转换失败时透传原始行
-				c.Writer.WriteString(line)
+				_, _ = c.Writer.WriteString(line)
 			} else {
-				c.Writer.WriteString(converted)
+				_, _ = c.Writer.WriteString(converted)
 			}
+			c.Writer.Flush()
+			writeMu.Unlock()
 		} else {
-			c.Writer.WriteString(line)
+			writeMu.Lock()
+			_, _ = c.Writer.WriteString(line)
+			c.Writer.Flush()
+			writeMu.Unlock()
 		}
-		c.Writer.Flush()
 	}
 
 	latency := int(time.Since(startTime).Milliseconds())
@@ -626,17 +660,57 @@ func (p *Proxy) handleConvertedStreamResponse(
 
 // handleStreamResponse 处理流式响应（SSE）
 func (p *Proxy) handleStreamResponse(c *gin.Context, resp *http.Response, userID uuid.UUID, modelID string, quotaPolicy string, startTime time.Time, clientIP, userAgent, backendID string) {
+	defer resp.Body.Close()
 	// 设置 SSE 响应头
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
 	c.Status(resp.StatusCode)
+
+	// 立即发送一个 SSE 注释并 Flush，防止首字节超时
+	c.Writer.WriteString(": ping\n\n")
+	c.Writer.Flush()
+
+	// 使用 ctx 监控请求生命周期，设置较长超时
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 1*time.Hour)
+	defer cancel()
+
+	// 使用 mutex 保护并发写入 c.Writer
+	var writeMu sync.Mutex
+
+	// 设置心跳计时器
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	// 启动心跳协程
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				writeMu.Lock()
+				// 发送 SSE 注释作为心跳
+				_, _ = c.Writer.WriteString(": keep-alive\n\n")
+				c.Writer.Flush()
+				writeMu.Unlock()
+			}
+		}
+	}()
 
 	// 创建 reader
 	reader := bufio.NewReader(resp.Body)
 
 	// 流式转发
 	for {
+		select {
+		case <-ctx.Done():
+			logger.Warn("Stream processing timeout or cancelled in handleStreamResponse")
+			return
+		default:
+		}
+
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -648,8 +722,10 @@ func (p *Proxy) handleStreamResponse(c *gin.Context, resp *http.Response, userID
 		}
 
 		// 转发给客户端
-		c.Writer.WriteString(line)
+		writeMu.Lock()
+		_, _ = c.Writer.WriteString(line)
 		c.Writer.Flush()
+		writeMu.Unlock()
 	}
 
 	latency := int(time.Since(startTime).Milliseconds())
