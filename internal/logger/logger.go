@@ -21,6 +21,7 @@ func init() {
 	config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 	config.EncoderConfig.TimeKey = "timestamp"
 	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	config.DisableCaller = true
 
 	logger, err := config.Build()
 	if err != nil {
@@ -30,7 +31,6 @@ func init() {
 				TimeKey:        "timestamp",
 				LevelKey:       "level",
 				NameKey:        "logger",
-				CallerKey:      "caller",
 				FunctionKey:    zapcore.OmitKey,
 				MessageKey:     "msg",
 				StacktraceKey:  "stacktrace",
@@ -38,7 +38,6 @@ func init() {
 				EncodeLevel:    zapcore.LowercaseLevelEncoder,
 				EncodeTime:     zapcore.ISO8601TimeEncoder,
 				EncodeDuration: zapcore.SecondsDurationEncoder,
-				EncodeCaller:   zapcore.ShortCallerEncoder,
 			}),
 			zapcore.AddSync(os.Stdout),
 			zapcore.InfoLevel,
@@ -62,6 +61,7 @@ func InitLogger(development bool) error {
 			enc.AppendString(t.Format("2006-01-02T15:04:05.000Z0700"))
 		}
 	}
+	config.DisableCaller = true
 
 	logger, err := config.Build()
 	if err != nil {
