@@ -25,6 +25,8 @@ type AccessLog struct {
 	RequestBody     string            `json:"request_body"`     // 请求体（限制大小）
 	ResponseHeaders map[string]string `json:"response_headers"` // 响应头
 	ResponseBody    string            `json:"response_body"`    // 响应体（限制大小）
+	InputTokens     int               `json:"input_tokens"`     // 请求Tokens
+	OutputTokens    int               `json:"output_tokens"`    // 响应Tokens
 }
 
 // Service 使用记录服务
@@ -42,9 +44,11 @@ type Record struct {
 	LatencyMs  int
 	ClientIP   string
 	UserAgent  string
-	StatusCode int
-	Error      string
-	BackendID  string
+	StatusCode   int
+	Error        string
+	BackendID    string
+	InputTokens  int
+	OutputTokens int
 }
 
 // NewService 创建使用记录服务
@@ -63,10 +67,12 @@ func (s *Service) RecordUsageDetailed(record *Record) {
 		Model:      record.ModelID,
 		LatencyMs:  record.LatencyMs,
 		ClientIP:   record.ClientIP,
-		UserAgent:  record.UserAgent,
-		StatusCode: record.StatusCode,
-		Error:      record.Error,
-		BackendID:  record.BackendID,
+		UserAgent:    record.UserAgent,
+		StatusCode:   record.StatusCode,
+		Error:        record.Error,
+		BackendID:    record.BackendID,
+		InputTokens:  record.InputTokens,
+		OutputTokens: record.OutputTokens,
 	})
 }
 

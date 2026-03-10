@@ -2,8 +2,10 @@ package scenarios
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"modelgate/internal/apikey"
 	"modelgate/internal/auth"
@@ -31,8 +33,12 @@ type TestScenario struct {
 
 // SetupTestDB 创建内存测试数据库和配置
 func SetupTestDB(t *testing.T) *TestScenario {
-	db, err := sql.Open("sqlite3", ":memory:")
+	// 使用命名共享内存 DB，避免多连接时每个连接看到不同的空 DB
+	dbName := fmt.Sprintf("file:testdb_%s?mode=memory&cache=shared", uuid.New().String()[:8])
+	db, err := sql.Open("sqlite3", dbName)
 	require.NoError(t, err)
+	// 关锁到单连接，确保所有 goroutine 用同一物理连接
+	db.SetMaxOpenConns(1)
 
 	// 创建核心数据表（不再包含 models, backends, quota_policies）
 	schema := `
@@ -64,6 +70,7 @@ CREATE TABLE api_keys (
     enabled INTEGER DEFAULT 1,
     expires_at DATETIME,
     last_used_at DATETIME,
+    total_tokens_used INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id)
@@ -75,6 +82,8 @@ CREATE TABLE quota_usage_daily (
     date DATE NOT NULL,
     model_id TEXT NOT NULL,
     request_count INTEGER DEFAULT 0,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
     UNIQUE(user_id, date, model_id)
 );
 `
@@ -130,7 +139,7 @@ CREATE TABLE quota_usage_daily (
 // InitServices 初始化服务（必须在 SetupTestDB 之后调用）
 func (s *TestScenario) InitServices() {
 	s.APIKeySvc = apikey.NewService(s.APIKeyStore, s.UserStore, s.Cache)
-	s.QuotaSvc = quota.NewService(s.QuotaStore, s.ModelStore, nil)
+	s.QuotaSvc = quota.NewService(s.QuotaStore, s.ModelStore, s.APIKeyStore, nil)
 }
 
 // CreateUser 辅助方法：创建测试用户

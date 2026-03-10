@@ -14,10 +14,11 @@ type APIKey struct {
 	KeyHash    string     `json:"-"`
 	KeyPrefix  string     `json:"key_prefix"`
 	Enabled    bool       `json:"enabled"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt      *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	TotalTokensUsed int        `json:"total_tokens_used"`
 }
 
 type APIKeyCreateRequest struct {
@@ -30,10 +31,11 @@ type APIKeyResponse struct {
 	UserID     uuid.UUID  `json:"user_id"`
 	Name       string     `json:"name"`
 	KeyPrefix  string     `json:"key_prefix"`
-	Enabled    bool       `json:"enabled"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
+	Enabled         bool       `json:"enabled"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt      *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	TotalTokensUsed int        `json:"total_tokens_used"`
 }
 
 type APIKeyWithSecret struct {
@@ -46,11 +48,12 @@ func (k *APIKey) ToResponse() APIKeyResponse {
 		ID:         k.ID,
 		UserID:     k.UserID,
 		Name:       k.Name,
-		KeyPrefix:  k.KeyPrefix,
-		Enabled:    k.Enabled,
-		ExpiresAt:  k.ExpiresAt,
-		LastUsedAt: k.LastUsedAt,
-		CreatedAt:  k.CreatedAt,
+		KeyPrefix:       k.KeyPrefix,
+		Enabled:         k.Enabled,
+		ExpiresAt:       k.ExpiresAt,
+		LastUsedAt:      k.LastUsedAt,
+		CreatedAt:       k.CreatedAt,
+		TotalTokensUsed: k.TotalTokensUsed,
 	}
 }
 
@@ -66,8 +69,8 @@ func NewAPIKeyStore(db *sql.DB) *APIKeyStore {
 func (s *APIKeyStore) Create(key *APIKey) error {
 	key.ID = uuid.New()
 	query := `
-		INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, enabled, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, enabled, expires_at, total_tokens_used)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0)
 		RETURNING created_at, updated_at`
 
 	return s.db.QueryRow(query,
@@ -80,12 +83,13 @@ func (s *APIKeyStore) GetByID(id uuid.UUID) (*APIKey, error) {
 	key := &APIKey{}
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
-		       enabled, expires_at, last_used_at, created_at, updated_at
+		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
 		FROM api_keys WHERE id = ?`
 
 	err := s.db.QueryRow(query, id.String()).Scan(
 		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
 		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
+		&key.TotalTokensUsed,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -100,12 +104,13 @@ func (s *APIKeyStore) GetByHash(hash string) (*APIKey, error) {
 	key := &APIKey{}
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
-		       enabled, expires_at, last_used_at, created_at, updated_at
+		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
 		FROM api_keys WHERE key_hash = ? AND enabled = 1`
 
 	err := s.db.QueryRow(query, hash).Scan(
 		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
 		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
+		&key.TotalTokensUsed,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -120,12 +125,13 @@ func (s *APIKeyStore) GetByKeyPrefix(prefix string) (*APIKey, error) {
 	key := &APIKey{}
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
-		       enabled, expires_at, last_used_at, created_at, updated_at
+		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
 		FROM api_keys WHERE key_prefix = ? AND enabled = 1`
 
 	err := s.db.QueryRow(query, prefix).Scan(
 		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
 		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
+		&key.TotalTokensUsed,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -139,7 +145,7 @@ func (s *APIKeyStore) GetByKeyPrefix(prefix string) (*APIKey, error) {
 func (s *APIKeyStore) ListByUser(userID uuid.UUID) ([]*APIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
-		       enabled, expires_at, last_used_at, created_at, updated_at
+		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
 		FROM api_keys WHERE user_id = ? ORDER BY created_at DESC`
 
 	rows, err := s.db.Query(query, userID.String())
@@ -154,6 +160,7 @@ func (s *APIKeyStore) ListByUser(userID uuid.UUID) ([]*APIKey, error) {
 		err := rows.Scan(
 			&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
 			&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
+			&key.TotalTokensUsed,
 		)
 		if err != nil {
 			return nil, err
@@ -177,6 +184,11 @@ func (s *APIKeyStore) Update(key *APIKey) error {
 
 func (s *APIKeyStore) UpdateLastUsed(id uuid.UUID) error {
 	_, err := s.db.Exec("UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?", id.String())
+	return err
+}
+
+func (s *APIKeyStore) AddTokensUsed(id uuid.UUID, tokens int) error {
+	_, err := s.db.Exec("UPDATE api_keys SET total_tokens_used = total_tokens_used + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", tokens, id.String())
 	return err
 }
 

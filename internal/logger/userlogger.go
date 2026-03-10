@@ -16,9 +16,11 @@ type UsageLogEntry struct {
 	LatencyMs int    `json:"latency_ms"`
 	ClientIP  string `json:"client_ip,omitempty"`
 	UserAgent string `json:"user_agent,omitempty"`
-	StatusCode int   `json:"status_code,omitempty"`
-	Error     string `json:"error,omitempty"`
-	BackendID string `json:"backend_id,omitempty"`
+	StatusCode   int    `json:"status_code,omitempty"`
+	Error        string `json:"error,omitempty"`
+	BackendID    string `json:"backend_id,omitempty"`
+	InputTokens  int    `json:"input_tokens,omitempty"`
+	OutputTokens int    `json:"output_tokens,omitempty"`
 }
 
 // UserLogger 按用户分文件的日志记录器

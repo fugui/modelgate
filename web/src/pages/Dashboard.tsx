@@ -13,6 +13,7 @@ interface APIKey {
   created_at: string;
   last_used_at?: string;
   enabled: boolean;
+  total_tokens_used?: number;
 }
 
 const Dashboard: React.FC = () => {
@@ -81,7 +82,8 @@ const Dashboard: React.FC = () => {
   const columns = [
     { title: '名称', dataIndex: 'name' },
     { title: 'Key', render: (r: APIKey) => `${r.key_prefix}****` },
-    { title: '创建时间', dataIndex: 'created_at' },
+    { title: 'Token消耗', dataIndex: 'total_tokens_used', render: (v: number) => v ? v.toLocaleString() : '0' },
+    { title: '创建时间', dataIndex: 'created_at', render: (text: string) => new Date(text).toLocaleString() },
     { 
       title: '状态', 
       dataIndex: 'enabled',

@@ -96,6 +96,7 @@ type DashboardRecorder interface {
 type Service struct {
 	store             *entity.QuotaStore
 	modelStore        *entity.ModelStore
+	apiKeyStore       *entity.APIKeyStore // 增加 APIKeyStore 依赖以便记录 Token 消耗
 	rateCounter       *RateCounter
 	dailyRequestCache *DailyRequestCounter
 	dashboardRecorder DashboardRecorder
@@ -156,10 +157,11 @@ func (c *DailyRequestCounter) CleanupExpired() {
 	}
 }
 
-func NewService(store *entity.QuotaStore, modelStore *entity.ModelStore, dashboardRecorder DashboardRecorder) *Service {
+func NewService(store *entity.QuotaStore, modelStore *entity.ModelStore, apiKeyStore *entity.APIKeyStore, dashboardRecorder DashboardRecorder) *Service {
 	s := &Service{
 		store:             store,
 		modelStore:        modelStore,
+		apiKeyStore:       apiKeyStore,
 		rateCounter:       NewRateCounter(),
 		dailyRequestCache: NewDailyRequestCounter(),
 		dashboardRecorder: dashboardRecorder,
@@ -280,6 +282,30 @@ func (s *Service) RecordRequest(userID uuid.UUID, modelID string) error {
 	err := s.store.IncrementRequestCount(userID, modelID)
 	if err != nil {
 		return err
+	}
+
+	// 更新内存缓存
+	s.dailyRequestCache.Add(userID.String(), time.Now())
+
+	// 记录小时级统计（用于仪表板）
+	if s.dashboardRecorder != nil {
+		s.dashboardRecorder.RecordHourlyStat(userID.String())
+	}
+
+	return nil
+}
+
+// RecordRequestTokens 记录一次请求并记录消耗的 Token
+func (s *Service) RecordRequestTokens(userID uuid.UUID, modelID string, apiKeyID uuid.UUID, inputTokens, outputTokens int) error {
+	// 增加请求计数及 Token (每日配额)
+	err := s.store.IncrementUsage(userID, modelID, inputTokens, outputTokens)
+	if err != nil {
+		return err
+	}
+
+	// 增加 API Key Token 消耗
+	if apiKeyID != uuid.Nil && s.apiKeyStore != nil {
+		_ = s.apiKeyStore.AddTokensUsed(apiKeyID, inputTokens+outputTokens)
 	}
 
 	// 更新内存缓存

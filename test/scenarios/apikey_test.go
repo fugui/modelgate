@@ -21,8 +21,8 @@ func TestScenario_APIKeyExpires(t *testing.T) {
 
 	user := scenario.CreateUser(t, "expire@example.com", "Expire User", entity.RoleUser)
 
-	// 创建 100ms 后过期的 Key
-	expiresAt := time.Now().Add(100 * time.Millisecond)
+	// 创建 2秒后过期的 Key（要考虑 bcrypt 验证耗时）
+	expiresAt := time.Now().Add(2 * time.Second)
 	keyReq := &entity.APIKeyCreateRequest{
 		Name:      "临时Key",
 		ExpiresAt: &expiresAt,
@@ -36,8 +36,8 @@ func TestScenario_APIKeyExpires(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("✓ 过期前验证通过")
 
-	// 等待过期
-	time.Sleep(150 * time.Millisecond)
+	// 等待过期（2.1秒）
+	time.Sleep(2100 * time.Millisecond)
 
 	// 过期后验证应该失败
 	_, _, err = scenario.APIKeySvc.ValidateKey(key.Key)

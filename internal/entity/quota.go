@@ -25,6 +25,8 @@ type QuotaUsageDaily struct {
 	Date          time.Time `json:"date"`
 	ModelID       string    `json:"model_id"`
 	RequestCount  int       `json:"request_count"`
+	InputTokens   int       `json:"input_tokens"`
+	OutputTokens  int       `json:"output_tokens"`
 }
 
 type QuotaCheckResult struct {
@@ -144,14 +146,21 @@ func (s *QuotaStore) GetDailyRequestCount(userID uuid.UUID, date time.Time) (int
 
 // IncrementRequestCount 增加请求计数
 func (s *QuotaStore) IncrementRequestCount(userID uuid.UUID, modelID string) error {
+	return s.IncrementUsage(userID, modelID, 0, 0)
+}
+
+// IncrementUsage 增加请求计数和 Token 消耗
+func (s *QuotaStore) IncrementUsage(userID uuid.UUID, modelID string, inputTokens, outputTokens int) error {
 	query := `
-		INSERT INTO quota_usage_daily (id, user_id, date, model_id, request_count)
-		VALUES (?, ?, ?, ?, 1)
+		INSERT INTO quota_usage_daily (id, user_id, date, model_id, request_count, input_tokens, output_tokens)
+		VALUES (?, ?, ?, ?, 1, ?, ?)
 		ON CONFLICT(user_id, date, model_id) DO UPDATE SET
-			request_count = request_count + 1`
+			request_count = request_count + 1,
+			input_tokens = input_tokens + ?,
+			output_tokens = output_tokens + ?`
 
 	id := uuid.New().String()
-	_, err := s.db.Exec(query, id, userID.String(), time.Now().Format("2006-01-02"), modelID)
+	_, err := s.db.Exec(query, id, userID.String(), time.Now().Format("2006-01-02"), modelID, inputTokens, outputTokens, inputTokens, outputTokens)
 	return err
 }
 
@@ -173,7 +182,7 @@ func (s *QuotaStore) GetUsageStats(userID uuid.UUID, startDate, endDate time.Tim
 // GetDailyUsageList 获取用户指定日期范围内的每日使用列表
 func (s *QuotaStore) GetDailyUsageList(userID uuid.UUID, startDate, endDate time.Time) ([]*QuotaUsageDaily, error) {
 	query := `
-		SELECT id, user_id, date, model_id, request_count
+		SELECT id, user_id, date, model_id, request_count, input_tokens, output_tokens
 		FROM quota_usage_daily
 		WHERE user_id = ? AND date BETWEEN ? AND ?
 		ORDER BY date DESC, model_id`
@@ -190,7 +199,7 @@ func (s *QuotaStore) GetDailyUsageList(userID uuid.UUID, startDate, endDate time
 		var idStr, userIDStr string
 		err := rows.Scan(
 			&idStr, &userIDStr, &usage.Date, &usage.ModelID,
-			&usage.RequestCount,
+			&usage.RequestCount, &usage.InputTokens, &usage.OutputTokens,
 		)
 		if err != nil {
 			return nil, err
@@ -210,7 +219,9 @@ func (s *QuotaStore) GetRecentUsageRecords(userID uuid.UUID, days int) ([]map[st
 	query := `
 		SELECT
 			date,
-			COALESCE(SUM(request_count), 0) as requests
+			COALESCE(SUM(request_count), 0) as requests,
+			COALESCE(SUM(input_tokens), 0) as input_tokens,
+			COALESCE(SUM(output_tokens), 0) as output_tokens
 		FROM quota_usage_daily
 		WHERE user_id = ? AND date >= ?
 		GROUP BY date
@@ -225,14 +236,16 @@ func (s *QuotaStore) GetRecentUsageRecords(userID uuid.UUID, days int) ([]map[st
 	var records []map[string]interface{}
 	for rows.Next() {
 		var date time.Time
-		var requests int
-		err := rows.Scan(&date, &requests)
+		var requests, inputTokens, outputTokens int
+		err := rows.Scan(&date, &requests, &inputTokens, &outputTokens)
 		if err != nil {
 			return nil, err
 		}
 		records = append(records, map[string]interface{}{
-			"date":     date.Format("2006-01-02"),
-			"requests": requests,
+			"date":          date.Format("2006-01-02"),
+			"requests":      requests,
+			"input_tokens":  inputTokens,
+			"output_tokens": outputTokens,
 		})
 	}
 	return records, rows.Err()

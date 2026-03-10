@@ -106,6 +106,7 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 	backendReq := &BackendRequest{
 		ModelID:     modelID,
 		UserID:      userID,
+		APIKeyID:    apiKeyID,
 		RequestBody: bodyBytes,
 		IsStream:    req.Stream,
 		ClientIP:    c.ClientIP(),
@@ -125,6 +126,7 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 type BackendRequest struct {
 	ModelID     string
 	UserID      uuid.UUID
+	APIKeyID    uuid.UUID
 	RequestBody []byte
 	IsStream    bool
 	ClientIP    string
@@ -275,10 +277,27 @@ func (p *Proxy) ExecuteCoreWorkflow(
 
 	p.lb.MarkSuccess(backend.ID)
 
+	// 计算请求的 InputTokens
+	inputTokens := utils.EstimateTokens(string(req.RequestBody))
+
 	// 透传非 200 状态码
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		respBody, _ := io.ReadAll(resp.Body)
+		
+		outputTokens := utils.EstimateTokens(string(respBody))
+		p.usageService.RecordUsageDetailed(&usage.Record{
+			UserID:       req.UserID,
+			ModelID:      req.ModelID,
+			LatencyMs:    int(time.Since(startTime).Milliseconds()),
+			ClientIP:     req.ClientIP,
+			UserAgent:    req.UserAgent,
+			BackendID:    backend.ID,
+			StatusCode:   resp.StatusCode,
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+		})
+		
 		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 		return
 	}
@@ -290,10 +309,10 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	// 根据是否流式响应选择处理方式
 	if isStreamResponse {
 		// handleConvertedStreamResponse 负责在结束后调用 resp.Body.Close()
-		p.handleConvertedStreamResponse(c, resp, req, backend.ID, startTime, streamLineConverter, pingMessage)
+		p.handleConvertedStreamResponse(c, resp, req, backend.ID, startTime, streamLineConverter, pingMessage, inputTokens)
 	} else {
 		defer resp.Body.Close()
-		p.handleConvertedNormalResponse(c, resp, req, backend.ID, startTime, responseConverter)
+		p.handleConvertedNormalResponse(c, resp, req, backend.ID, startTime, responseConverter, inputTokens)
 	}
 }
 
@@ -305,17 +324,19 @@ func (p *Proxy) handleConvertedNormalResponse(
 	backendID string,
 	startTime time.Time,
 	converter func([]byte) ([]byte, error),
+	inputTokens int,
 ) {
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		p.usageService.RecordUsageDetailed(&usage.Record{
-			UserID:     req.UserID,
-			ModelID:    req.ModelID,
-			ClientIP:   req.ClientIP,
-			UserAgent:  req.UserAgent,
-			BackendID:  backendID,
-			StatusCode: http.StatusBadGateway,
-			Error:      "failed to read backend response",
+			UserID:      req.UserID,
+			ModelID:     req.ModelID,
+			ClientIP:    req.ClientIP,
+			UserAgent:   req.UserAgent,
+			BackendID:   backendID,
+			StatusCode:  http.StatusBadGateway,
+			Error:       "failed to read backend response",
+			InputTokens: inputTokens,
 		})
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read backend response"})
 		return
@@ -339,21 +360,36 @@ func (p *Proxy) handleConvertedNormalResponse(
 		}
 	}
 
+	// 计算 OutputTokens
+	outputTokens := 0
+	var normalResp OpenAIResponse
+	if err := json.Unmarshal(respBody, &normalResp); err == nil && normalResp.Usage.CompletionTokens > 0 {
+		outputTokens = normalResp.Usage.CompletionTokens
+		// 覆盖 inputTokens 以便使用大模型提供的更精准值（如果有的话）
+		if normalResp.Usage.PromptTokens > 0 {
+			inputTokens = normalResp.Usage.PromptTokens
+		}
+	} else {
+		outputTokens = utils.EstimateTokens(string(respBody))
+	}
+
 	latency := int(time.Since(startTime).Milliseconds())
 
 	// 记录使用日志
 	p.usageService.RecordUsageDetailed(&usage.Record{
-		UserID:     req.UserID,
-		ModelID:    req.ModelID,
-		LatencyMs:  latency,
-		ClientIP:   req.ClientIP,
-		UserAgent:  req.UserAgent,
-		BackendID:  backendID,
-		StatusCode: resp.StatusCode,
+		UserID:       req.UserID,
+		ModelID:      req.ModelID,
+		LatencyMs:    latency,
+		ClientIP:     req.ClientIP,
+		UserAgent:    req.UserAgent,
+		BackendID:    backendID,
+		StatusCode:   resp.StatusCode,
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
 	})
 
-	// 记录请求
-	_ = p.quotaService.RecordRequest(req.UserID, req.ModelID)
+	// 记录请求并扣除 Token
+	_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens)
 
 	// 只有在成功解压后才删除 Content-Encoding header
 	if decompressed {
@@ -390,6 +426,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 	startTime time.Time,
 	lineConverter func(string, map[string]interface{}) (string, error),
 	pingMessage string,
+	inputTokens int,
 ) {
 	defer resp.Body.Close()
 	c.Header("Content-Type", "text/event-stream")
@@ -453,6 +490,8 @@ func (p *Proxy) handleConvertedStreamResponse(
 
 	// 创建该流的状态跟踪器
 	streamState := make(map[string]interface{})
+	var fullCollectedText strings.Builder
+	outputTokens := 0
 
 	for {
 		select {
@@ -478,8 +517,12 @@ func (p *Proxy) handleConvertedStreamResponse(
 			if err != nil {
 				// 转换失败时透传原始行
 				_, _ = c.Writer.WriteString(line)
+				fullCollectedText.WriteString(line)
 			} else {
 				_, _ = c.Writer.WriteString(converted)
+				// 解析转换后的行获取内容以估算 Token
+				contentDelta := extractContentFromSSE(converted)
+				fullCollectedText.WriteString(contentDelta)
 			}
 			c.Writer.Flush()
 			writeMu.Unlock()
@@ -488,22 +531,46 @@ func (p *Proxy) handleConvertedStreamResponse(
 			_, _ = c.Writer.WriteString(line)
 			c.Writer.Flush()
 			writeMu.Unlock()
+			contentDelta := extractContentFromSSE(line)
+			fullCollectedText.WriteString(contentDelta)
 		}
 	}
 
+	outputTokens = utils.EstimateTokens(fullCollectedText.String())
 	latency := int(time.Since(startTime).Milliseconds())
 
 	p.usageService.RecordUsageDetailed(&usage.Record{
-		UserID:     req.UserID,
-		ModelID:    req.ModelID,
-		LatencyMs:  latency,
-		ClientIP:   req.ClientIP,
-		UserAgent:  req.UserAgent,
-		BackendID:  backendID,
-		StatusCode: resp.StatusCode,
+		UserID:       req.UserID,
+		ModelID:      req.ModelID,
+		LatencyMs:    latency,
+		ClientIP:     req.ClientIP,
+		UserAgent:    req.UserAgent,
+		BackendID:    backendID,
+		StatusCode:   resp.StatusCode,
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
 	})
 
-	_ = p.quotaService.RecordRequest(req.UserID, req.ModelID)
+	_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens)
+}
+
+// extractContentFromSSE 从 SSE 格式的 data 行中粗略提取文本以估算 Token
+func extractContentFromSSE(line string) string {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "data: ") || line == "data: [DONE]" {
+		return ""
+	}
+	
+	jsonStr := strings.TrimPrefix(line, "data: ")
+	var streamResp StreamResponse
+	if err := json.Unmarshal([]byte(jsonStr), &streamResp); err == nil {
+		if len(streamResp.Choices) > 0 {
+			if content, ok := streamResp.Choices[0].Delta["content"].(string); ok {
+				return content
+			}
+		}
+	}
+	return ""
 }
 
 func (p *Proxy) HandleListModels(c *gin.Context) {

@@ -12,6 +12,7 @@ interface APIKey {
   last_used_at?: string;
   enabled: boolean;
   expires_at?: string;
+  total_tokens_used?: number;
 }
 
 const APIKeyManage: React.FC = () => {
@@ -140,6 +141,12 @@ const APIKeyManage: React.FC = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       render: (text: string) => new Date(text).toLocaleString(),
+    },
+    {
+      title: 'Token消耗',
+      dataIndex: 'total_tokens_used',
+      key: 'total_tokens_used',
+      render: (tokens: number | undefined) => tokens ? tokens.toLocaleString() : '0',
     },
     {
       title: '最后使用',

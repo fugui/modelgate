@@ -123,7 +123,7 @@ const UsageStats: React.FC = () => {
       ellipsis: true,
     },
     {
-      title: '流量',
+      title: '流量(字节)',
       key: 'traffic',
       width: 150,
       render: (_: any, record: any) => (
@@ -131,6 +131,18 @@ const UsageStats: React.FC = () => {
           <span style={{ color: '#52c41a' }}>↑{formatBytes(record.request_bytes || 0)}</span>
           <span style={{ margin: '0 4px' }}>/</span>
           <span style={{ color: '#1890ff' }}>↓{formatBytes(record.response_bytes || 0)}</span>
+        </span>
+      ),
+    },
+    {
+      title: 'Tokens',
+      key: 'tokens',
+      width: 150,
+      render: (_: any, record: any) => (
+        <span>
+          <span style={{ color: '#fa8c16' }}>↑{record.input_tokens || 0}</span>
+          <span style={{ margin: '0 4px' }}>/</span>
+          <span style={{ color: '#722ed1' }}>↓{record.output_tokens || 0}</span>
         </span>
       ),
     },
@@ -269,6 +281,9 @@ const UsageStats: React.FC = () => {
                 <Descriptions.Item label="Client IP">{selectedLog.client_ip}</Descriptions.Item>
                 <Descriptions.Item label="User Agent" style={{ wordBreak: 'break-all' }}>
                   {selectedLog.user_agent}
+                </Descriptions.Item>
+                <Descriptions.Item label="Tokens" style={{ wordBreak: 'break-all' }}>
+                  Input: {selectedLog.input_tokens || 0} / Output: {selectedLog.output_tokens || 0}
                 </Descriptions.Item>
                 <Descriptions.Item label="Headers">
                   <pre style={{

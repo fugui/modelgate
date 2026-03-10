@@ -87,7 +87,7 @@ func main() {
 	// 初始化服务层
 	apiKeyService := apikey.NewService(apiKeyStore, userStore, localCache)
 	dashboardService := dashboard.NewService(database.DB)
-	quotaService := quota.NewService(quotaStore, modelStore, dashboardService)
+	quotaService := quota.NewService(quotaStore, modelStore, apiKeyStore, dashboardService)
 	usageService := usage.NewService(userLogger)
 
 	// 初始化负载均衡器
@@ -149,11 +149,9 @@ func main() {
 		JWTManager:   jwtManager,
 		QuotaService: quotaService,
 		QuotaStore:   quotaStore,
-		UsageService: usageService,
-		Cache:        localCache,
-		SSOConfig:    cfg.SSO,
-		FeedbackURL:  cfg.Frontend.FeedbackURL,
-		DevManualURL: cfg.Frontend.DevManualURL,
+		UsageService:  usageService,
+		Cache:         localCache,
+		ConfigManager: cfgManager,
 	})
 	userHandler.RegisterRoutes(api)
 

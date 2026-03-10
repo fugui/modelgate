@@ -79,6 +79,10 @@ func (s *Service) ValidateKey(plainKey string) (*entity.APIKey, *entity.User, er
 		return nil, nil, fmt.Errorf("invalid key format")
 	}
 
+	if len(plainKey) < prefixLen {
+		return nil, nil, fmt.Errorf("invalid key format")
+	}
+
 	keyPrefixStr := plainKey[:prefixLen]
 
 	// 1. 尝试从缓存获取
@@ -87,17 +91,32 @@ func (s *Service) ValidateKey(plainKey string) (*entity.APIKey, *entity.User, er
 		if err := bcrypt.CompareHashAndPassword([]byte(cached.Key.KeyHash), []byte(plainKey)); err != nil {
 			return nil, nil, fmt.Errorf("invalid key")
 		}
+		// 检查是否过期（缓存命中也要检查）
+		if cached.Key.ExpiresAt != nil && cached.Key.ExpiresAt.Before(time.Now()) {
+			s.cache.DeleteAPIKey(keyPrefixStr) // 清除已过期的缓存
+			return nil, nil, fmt.Errorf("key expired")
+		}
 		// 检查是否启用
 		if !cached.Key.Enabled {
 			return nil, nil, fmt.Errorf("key disabled")
 		}
-		// 检查用户是否启用
-		if !cached.UserInfo.Enabled {
+		// 检查用户是否启用（重新查询 DB 以获取最新状态）
+		user, err := s.userStore.GetByID(cached.Key.UserID)
+		if err != nil {
+			// DB 查询失败，不能确定用户状态，使用缓存信息降级
+			if !cached.UserInfo.Enabled {
+				return nil, nil, fmt.Errorf("user disabled")
+			}
+			go s.updateLastUsed(cached.Key.ID)
+			return cached.Key, cached.UserInfo, nil
+		}
+		if user == nil || !user.Enabled {
+			s.cache.DeleteAPIKey(keyPrefixStr) // 用户已被禁用，清除缓存
 			return nil, nil, fmt.Errorf("user disabled")
 		}
 		// 异步更新最后使用时间
 		go s.updateLastUsed(cached.Key.ID)
-		return cached.Key, cached.UserInfo, nil
+		return cached.Key, user, nil
 	}
 
 	// 2. 缓存未命中，从数据库查找

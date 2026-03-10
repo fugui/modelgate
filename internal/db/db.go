@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     last_used_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    total_tokens_used INTEGER DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -76,6 +77,8 @@ CREATE TABLE IF NOT EXISTS quota_usage_daily (
     date DATE NOT NULL,
     model_id TEXT NOT NULL,
     request_count INTEGER DEFAULT 0,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
     UNIQUE(user_id, date, model_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -95,6 +98,17 @@ CREATE INDEX IF NOT EXISTS idx_quota_usage_date ON quota_usage_daily(date);
 	_, err := db.Exec(schema)
 	if err != nil {
 		return fmt.Errorf("failed to execute schema: %w", err)
+	}
+
+	// 增量迁移脚本：为现有表添加 Token 统计字段，忽略重复列导致的错误
+	migrations := []string{
+		"ALTER TABLE api_keys ADD COLUMN total_tokens_used INTEGER DEFAULT 0;",
+		"ALTER TABLE quota_usage_daily ADD COLUMN input_tokens INTEGER DEFAULT 0;",
+		"ALTER TABLE quota_usage_daily ADD COLUMN output_tokens INTEGER DEFAULT 0;",
+	}
+
+	for _, query := range migrations {
+		_, _ = db.Exec(query) // 忽略错误，如果列已存在则会报错但安全忽略
 	}
 
 	// 注意：quota_policies 表已弃用，相关迁移代码已移除

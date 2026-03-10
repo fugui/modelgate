@@ -500,7 +500,7 @@ func (h *Handler) GetSSOConfig(c *gin.Context) {
 		"data": gin.H{
 			"enabled":   ssoConfig.Enabled,
 			"client_id": ssoConfig.ClientID,
-			"auth_url":  ssoConfig.AuthURL,
+			"auth_url":  ssoConfig.GetAuthorizeURL(),
 			"provider":  ssoConfig.Provider,
 		},
 	})
@@ -562,14 +562,6 @@ func (h *Handler) SSOCallback(c *gin.Context) {
 	}
 
 	// 2. 交换 Token
-	tokenReq := url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {code},
-		"client_id":     {ssoConfig.ClientID},
-		"client_secret": {ssoConfig.ClientSecret},
-		"redirect_uri":  {ssoConfig.RedirectURL},
-	}
-	
 	// 构建回调 URL
 	callbackURL := fmt.Sprintf("%s/api/v1/auth/sso/callback", c.Request.Host)
 	if c.Request.TLS == nil {
