@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"modelgate/internal/middleware"
 	"modelgate/internal/proxy"
+	"modelgate/internal/utils"
 )
 
 // UsageService 访问日志服务接口
@@ -36,6 +37,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc) 
 	v1.Use(authMiddleware)
 	{
 		v1.POST("/messages", middleware.AccessLogMiddleware(h.usageService), h.HandleMessages)
+		v1.POST("/messages/count_tokens", h.HandleCountTokens)
 	}
 }
 
@@ -107,6 +109,89 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 		// Anthropic-compliant ping/keep-alive message
 		"event: ping\ndata: {\"type\": \"ping\"}\n\n",
 	)
+}
+
+// HandleCountTokens 处理 /v1/messages/count_tokens 请求
+func (h *Handler) HandleCountTokens(c *gin.Context) {
+	// 获取认证信息
+	_, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body: " + err.Error()})
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	var anthropicReq MessagesRequest
+	if err := json.Unmarshal(bodyBytes, &anthropicReq); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format: " + err.Error()})
+		return
+	}
+
+	// 抽出文本以估算 Tokens
+	var contentBuilder bytes.Buffer
+
+	// 1. 尝试追加 System Prompt
+	if anthropicReq.System != nil {
+		switch v := anthropicReq.System.(type) {
+		case string:
+			contentBuilder.WriteString(v)
+		case []interface{}: // System messages can be an array of blocks
+			for _, blockObj := range v {
+				if blockMap, ok := blockObj.(map[string]interface{}); ok {
+					if bText, _ := blockMap["text"].(string); bText != "" {
+						contentBuilder.WriteString(bText)
+					}
+				}
+			}
+		}
+	}
+
+	// 2. 追加 Messages
+	for _, msg := range anthropicReq.Messages {
+		switch v := msg.Content.(type) {
+		case string:
+			contentBuilder.WriteString(v)
+		case []interface{}:
+			for _, blockObj := range v {
+				if blockMap, ok := blockObj.(map[string]interface{}); ok {
+					if bType, _ := blockMap["type"].(string); bType == "text" {
+						if bText, _ := blockMap["text"].(string); bText != "" {
+							contentBuilder.WriteString(bText)
+						}
+					} else if bType == "tool_result" {
+						if cObj, ok := blockMap["content"].(string); ok {
+							contentBuilder.WriteString(cObj)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. 追加 Tools 的结构和描述占用的 tokens
+	if len(anthropicReq.Tools) > 0 {
+		for _, tool := range anthropicReq.Tools {
+			contentBuilder.WriteString(tool.Name)
+			contentBuilder.WriteString(tool.Description)
+			if b, err := json.Marshal(tool.InputSchema); err == nil {
+				contentBuilder.Write(b)
+			}
+		}
+	}
+
+	// 估算总 Token
+	inputTokens := utils.EstimateTokens(contentBuilder.String())
+
+	// Anthropic Count Tokens Response 结构
+	c.JSON(http.StatusOK, gin.H{
+		"input_tokens": inputTokens,
+	})
 }
 
 // Tool 工具定义

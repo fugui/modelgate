@@ -276,13 +276,24 @@ func parseStreamResponse(body []byte) string {
 					contents = append(contents, content)
 				}
 				// 提取 tool_calls
-				if toolCall, ok := delta["tool_calls"]; ok {
-					toolCalls = append(toolCalls, fmt.Sprintf("%v", toolCall))
+				if tcObjs, ok := delta["tool_calls"].([]interface{}); ok {
+					for _, tcObj := range tcObjs {
+						if tcMap, ok := tcObj.(map[string]interface{}); ok {
+							if fnMap, ok := tcMap["function"].(map[string]interface{}); ok {
+								if name, _ := fnMap["name"].(string); name != "" {
+									toolCalls = append(toolCalls, fmt.Sprintf("\n[Tool Call]: %s(", name))
+								}
+								if args, _ := fnMap["arguments"].(string); args != "" {
+									toolCalls = append(toolCalls, args)
+								}
+							}
+						}
+					}
 				}
 			}
 		}
 
-		// 尝试 Claude 格式: delta.text
+		// 尝试 Claude 格式: delta.text, delta.partial_json
 		if delta, ok := event["delta"].(map[string]interface{}); ok {
 			// Claude 使用 delta.text 而不是 delta.content
 			if text, ok := delta["text"].(string); ok && text != "" {
@@ -292,12 +303,28 @@ func parseStreamResponse(body []byte) string {
 			if thinking, ok := delta["thinking"].(string); ok && thinking != "" {
 				contents = append(contents, "[Thinking]: "+thinking)
 			}
+			// Claude Tool Arguments
+			if partialJSON, ok := delta["partial_json"].(string); ok && partialJSON != "" {
+				toolCalls = append(toolCalls, partialJSON)
+			}
+		}
+
+		// 尝试 Claude Tool Use Start
+		if cb, ok := event["content_block"].(map[string]interface{}); ok {
+			if cbType, _ := cb["type"].(string); cbType == "tool_use" {
+				if name, _ := cb["name"].(string); name != "" {
+					toolCalls = append(toolCalls, fmt.Sprintf("\n[Tool Call]: %s(", name))
+				}
+			}
 		}
 	}
 
 	result := strings.Join(contents, "")
 	if len(toolCalls) > 0 {
-		result += "\n[TOOL_CALLS]: " + strings.Join(toolCalls, ", ")
+		// Replace linebreaks inside arguments if needed, or close the parentheses (approximation as stream splits)
+		combinedTools := strings.Join(toolCalls, "")
+		// We can just append the collected raw chunks
+		result += "\n\n" + strings.TrimSpace(combinedTools)
 	}
 
 	// 如果没有提取到任何内容，返回原始 body（可能是未知格式）

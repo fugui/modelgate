@@ -645,6 +645,13 @@ func adjustMaxTokens(body []byte, contextWindow int) []byte {
 			}
 			payload[tokenKey] = newMax
 
+			logger.Infow("Clamped model context tokens",
+				"current_max", maxTokens,
+				"new_max", newMax,
+				"estimated_input", inputTokens,
+				"context_window", contextWindow,
+			)
+
 			if newBody, err := json.Marshal(payload); err == nil {
 				return newBody
 			}
