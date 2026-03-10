@@ -18,18 +18,19 @@ import (
 	"modelgate/internal/logger"
 	"modelgate/internal/quota"
 	"modelgate/internal/usage"
+	"modelgate/internal/utils"
 )
 
 // Proxy LLM 代理
 type Proxy struct {
-	lb            *RoundRobinBalancer
-	quotaService  *quota.Service
-	usageService  *usage.Service
-	httpClient    *http.Client
-	modelStore    *entity.ModelStore
-	backendStore  *entity.BackendStore
-	userStore     *entity.UserStore
-	defaultModel  string
+	lb           *RoundRobinBalancer
+	quotaService *quota.Service
+	usageService *usage.Service
+	httpClient   *http.Client
+	modelStore   *entity.ModelStore
+	backendStore *entity.BackendStore
+	userStore    *entity.UserStore
+	defaultModel string
 }
 
 func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService *usage.Service, modelStore *entity.ModelStore, backendStore *entity.BackendStore, userStore *entity.UserStore, defaultModel string) *Proxy {
@@ -120,8 +121,6 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 	)
 }
 
-
-
 // BackendRequest 后端请求参数
 type BackendRequest struct {
 	ModelID     string
@@ -194,8 +193,14 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	// 获取模型配置并注入参数
 	modelConfig, _ := p.modelStore.GetByID(req.ModelID)
 	requestBody := req.RequestBody
-	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
-		requestBody = injectModelParams(requestBody, modelConfig.ModelParams)
+
+	if modelConfig != nil {
+		if len(modelConfig.ModelParams) > 0 {
+			requestBody = injectModelParams(requestBody, modelConfig.ModelParams)
+		}
+		if modelConfig.ContextWindow > 0 {
+			requestBody = adjustMaxTokens(requestBody, modelConfig.ContextWindow)
+		}
 	}
 
 	// 修改请求体以替换 model 名称
@@ -488,8 +493,6 @@ func (p *Proxy) handleConvertedStreamResponse(
 	_ = p.quotaService.RecordRequest(req.UserID, req.ModelID)
 }
 
-
-
 func (p *Proxy) HandleListModels(c *gin.Context) {
 	models, err := p.modelStore.ListEnabled()
 	if err != nil {
@@ -579,4 +582,74 @@ func modifyRequestModel(reqBody []byte, modelName string) []byte {
 	}
 
 	return modifiedBody
+}
+
+// adjustMaxTokens intercepts the request body, counts the tokens roughly,
+// and clamps max_tokens or max_completion_tokens if they would exceed the context window.
+func adjustMaxTokens(body []byte, contextWindow int) []byte {
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+
+	// 抽出文本以估算 Tokens
+	var contentBuilder strings.Builder
+	if messages, ok := payload["messages"].([]interface{}); ok {
+		for _, msgObj := range messages {
+			if msgMap, ok := msgObj.(map[string]interface{}); ok {
+				if content, ok := msgMap["content"]; ok {
+					switch v := content.(type) {
+					case string:
+						contentBuilder.WriteString(v)
+					case []interface{}:
+						// Anthropic/复杂体格式，抽出文本块
+						for _, blockObj := range v {
+							if blockMap, ok := blockObj.(map[string]interface{}); ok {
+								if bType, _ := blockMap["type"].(string); bType == "text" {
+									if bText, _ := blockMap["text"].(string); bText != "" {
+										contentBuilder.WriteString(bText)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	inputTokens := utils.EstimateTokens(contentBuilder.String())
+
+	// 获取客户端请求的最大 Token 数
+	var maxTokens int
+	var tokenKey string
+	if mt, ok := payload["max_tokens"]; ok {
+		if val, ok := mt.(float64); ok {
+			maxTokens = int(val)
+			tokenKey = "max_tokens"
+		}
+	} else if mct, ok := payload["max_completion_tokens"]; ok {
+		// qwen or new openai format
+		if val, ok := mct.(float64); ok {
+			maxTokens = int(val)
+			tokenKey = "max_completion_tokens"
+		}
+	}
+
+	if maxTokens > 0 && tokenKey != "" {
+		if inputTokens+maxTokens > contextWindow {
+			newMax := contextWindow - inputTokens
+			// Minimum safeguard
+			if newMax < 1000 {
+				newMax = 1000
+			}
+			payload[tokenKey] = newMax
+
+			if newBody, err := json.Marshal(payload); err == nil {
+				return newBody
+			}
+		}
+	}
+
+	return body
 }

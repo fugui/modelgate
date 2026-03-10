@@ -6,6 +6,7 @@
 *.dylib
 llmgate
 modelgate
+import_users
 
 # Test binary, built with `go test -c`
 *.test
@@ -70,3 +71,11 @@ config.yaml
 *.db
 *.db.backup
 .gitnexus
+
+# Ignore all files without an extension in the root directory
+/*
+!/*/
+!/*.*
+# Whitelist essential root files without extensions
+!Makefile
+!LICENSE

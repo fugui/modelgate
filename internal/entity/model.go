@@ -7,13 +7,14 @@ import (
 )
 
 type Model struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Enabled     bool                   `json:"enabled"`
-	ModelParams map[string]interface{} `json:"model_params"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Description   string                 `json:"description"`
+	Enabled       bool                   `json:"enabled"`
+	ContextWindow int                    `json:"context_window"`
+	ModelParams   map[string]interface{} `json:"model_params"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 type ModelCreateRequest struct {
@@ -55,24 +56,26 @@ func NewModelStore(cm *config.ConfigManager) *ModelStore {
 // configToModel 将配置模型转换为数据模型
 func (s *ModelStore) configToModel(cm config.ModelConfig) *Model {
 	return &Model{
-		ID:          cm.ID,
-		Name:        cm.Name,
-		Description: cm.Description,
-		Enabled:     cm.Enabled,
-		ModelParams: cm.ModelParams,
-		CreatedAt:   time.Now(), // 配置中无时间信息，使用当前时间
-		UpdatedAt:   time.Now(),
+		ID:            cm.ID,
+		Name:          cm.Name,
+		Description:   cm.Description,
+		Enabled:       cm.Enabled,
+		ContextWindow: cm.ContextWindow,
+		ModelParams:   cm.ModelParams,
+		CreatedAt:     time.Now(), // 配置中无时间信息，使用当前时间
+		UpdatedAt:     time.Now(),
 	}
 }
 
 // modelToConfig 将数据模型转换为配置模型
 func (s *ModelStore) modelToConfig(m *Model) config.ModelConfig {
 	return config.ModelConfig{
-		ID:          m.ID,
-		Name:        m.Name,
-		Description: m.Description,
-		Enabled:     m.Enabled,
-		ModelParams: m.ModelParams,
+		ID:            m.ID,
+		Name:          m.Name,
+		Description:   m.Description,
+		Enabled:       m.Enabled,
+		ContextWindow: m.ContextWindow,
+		ModelParams:   m.ModelParams,
 	}
 }
 
