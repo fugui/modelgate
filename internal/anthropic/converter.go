@@ -26,208 +26,22 @@ type ToolResult struct {
 
 // ConvertToOpenAI 将 Anthropic 请求转换为 OpenAI 格式
 func ConvertToOpenAI(req *MessagesRequest) ([]byte, error) {
-	// 构建 OpenAI 格式的 messages
 	var messages []map[string]interface{}
 
 	// 添加 system 消息（如果有）
-	if req.System != nil {
-		switch v := req.System.(type) {
-		case string:
-			if v != "" {
-				messages = append(messages, map[string]interface{}{
-					"role":    "system",
-					"content": v,
-				})
-			}
-		case []interface{}:
-			// system 可能是 content blocks 数组
-			var systemTexts []string
-			for _, block := range v {
-				if blockMap, ok := block.(map[string]interface{}); ok {
-					if blockType, ok := blockMap["type"].(string); ok && blockType == "text" {
-						if text, ok := blockMap["text"].(string); ok {
-							systemTexts = append(systemTexts, text)
-						}
-					}
-				}
-			}
-			if len(systemTexts) > 0 {
-				messages = append(messages, map[string]interface{}{
-					"role":    "system",
-					"content": strings.Join(systemTexts, "\n"),
-				})
-			}
-		}
+	if sysMsgs := parseSystemMessage(req.System); sysMsgs != nil {
+		messages = append(messages, sysMsgs...)
 	}
 
 	// 转换 messages
 	for _, msg := range req.Messages {
-		role := msg.Role
-
-		// 处理 content 数组格式（包含 text, image, thinking, tool_use 和 tool_result）
 		if contentArray, ok := msg.Content.([]interface{}); ok {
-			var openaiContent []interface{}
-			var toolUses []ToolUse
-			var toolResults []ToolResult
-			var thinkingContent string
-
-			for _, block := range contentArray {
-				if blockMap, ok := block.(map[string]interface{}); ok {
-					blockType, _ := blockMap["type"].(string)
-
-					switch blockType {
-					case "text":
-						if text, ok := blockMap["text"].(string); ok {
-							openaiContent = append(openaiContent, map[string]interface{}{
-								"type": "text",
-								"text": text,
-							})
-						}
-					case "thinking":
-						// 处理 Anthropic 思考块
-						if thinking, ok := blockMap["thinking"].(string); ok {
-							thinkingContent = thinking
-						}
-					case "image":
-						if source, ok := blockMap["source"].(map[string]interface{}); ok {
-							mediaType, _ := source["media_type"].(string)
-							data, _ := source["data"].(string)
-							if mediaType != "" && data != "" {
-								openaiContent = append(openaiContent, map[string]interface{}{
-									"type": "image_url",
-									"image_url": map[string]interface{}{
-										"url": fmt.Sprintf("data:%s;base64,%s", mediaType, data),
-									},
-								})
-							}
-						}
-					case "tool_use":
-						toolUse := ToolUse{Type: "tool_use"}
-						if id, ok := blockMap["id"].(string); ok {
-							toolUse.ID = id
-						}
-						if name, ok := blockMap["name"].(string); ok {
-							toolUse.Name = name
-						}
-						if input, ok := blockMap["input"]; ok {
-							if inputData, err := json.Marshal(input); err == nil {
-								toolUse.Input = inputData
-							} else {
-								toolUse.Input = []byte("{}")
-							}
-						}
-						toolUses = append(toolUses, toolUse)
-					case "tool_result":
-						toolResult := ToolResult{Type: "tool_result"}
-						if toolUseID, ok := blockMap["tool_use_id"].(string); ok {
-							toolResult.ToolUseID = toolUseID
-						}
-						if content, ok := blockMap["content"]; ok {
-							toolResult.Content = content
-						}
-						if isError, ok := blockMap["is_error"].(bool); ok {
-							toolResult.IsError = isError
-						}
-						toolResults = append(toolResults, toolResult)
-					}
-				}
-			}
-
-			// 根据角色和提取的内容构建 OpenAI 消息
-			if role == "assistant" {
-				openaiMsg := map[string]interface{}{
-					"role":    "assistant",
-					"content": openaiContent,
-				}
-				if thinkingContent != "" {
-					openaiMsg["reasoning_content"] = thinkingContent
-				}
-				
-				if len(toolUses) > 0 {
-					if len(openaiContent) == 0 {
-						openaiMsg["content"] = nil
-					}
-					var toolCalls []map[string]interface{}
-					for _, toolUse := range toolUses {
-						toolCall := map[string]interface{}{
-							"id":   toolUse.ID,
-							"type": "function",
-							"function": map[string]interface{}{
-								"name":      toolUse.Name,
-								"arguments": string(toolUse.Input),
-							},
-						}
-						toolCalls = append(toolCalls, toolCall)
-					}
-					openaiMsg["tool_calls"] = toolCalls
-				}
-				messages = append(messages, openaiMsg)
-			} else if role == "user" && len(toolResults) > 0 {
-				// 关键修复：工具结果必须紧随 assistant 消息，不能被任何 user 消息中断。
-				// Anthropic 允许在一个 user 消息中混合文本和工具结果，但 OpenAI 要求必须先回复工具调用。
-				for _, toolResult := range toolResults {
-					var contentStr string
-					switch v := toolResult.Content.(type) {
-					case string:
-						contentStr = v
-					case []interface{}:
-						// 处理 Anthropic 的 content 数组格式（常见于 tool_result 包含 text 块）
-						var parts []string
-						for _, block := range v {
-							if bMap, ok := block.(map[string]interface{}); ok {
-								if bType, _ := bMap["type"].(string); bType == "text" {
-									if bText, _ := bMap["text"].(string); bText != "" {
-										parts = append(parts, bText)
-									}
-								}
-							}
-						}
-						if len(parts) > 0 {
-							contentStr = strings.Join(parts, "\n")
-						} else {
-							// 如果没有文本，回退到 JSON
-							if data, err := json.Marshal(v); err == nil {
-								contentStr = string(data)
-							}
-						}
-					default:
-						if data, err := json.Marshal(v); err == nil {
-							contentStr = string(data)
-						}
-					}
-
-					messages = append(messages, map[string]interface{}{
-						"role":         "tool",
-						"content":      contentStr,
-						"tool_call_id": toolResult.ToolUseID,
-					})
-				}
-				
-				// 如果该 user 消息中还有剩余的文本或图片（例如 Claude 的解释或后续提问），
-				// 在工具调用完全回复后，作为下一条 user 消息发送。
-				if len(openaiContent) > 0 {
-					messages = append(messages, map[string]interface{}{
-						"role":    "user",
-						"content": openaiContent,
-					})
-				}
-			} else {
-				openaiMsg := map[string]interface{}{
-					"role":    role,
-					"content": openaiContent,
-				}
-				if len(openaiContent) == 1 {
-					if block, ok := openaiContent[0].(map[string]interface{}); ok {
-						if block["type"] == "text" {
-							openaiMsg["content"] = block["text"]
-						}
-					}
-				}
-				messages = append(messages, openaiMsg)
-			}
+			parsed := parseAnthropicContentElements(contentArray)
+			msgs := buildOpenAIMessages(msg.Role, parsed)
+			messages = append(messages, msgs...)
 		} else if contentStr, ok := msg.Content.(string); ok {
 			messages = append(messages, map[string]interface{}{
-				"role":    role,
+				"role":    msg.Role,
 				"content": contentStr,
 			})
 		}
@@ -253,24 +67,213 @@ func ConvertToOpenAI(req *MessagesRequest) ([]byte, error) {
 		openaiReq["stop"] = req.StopSequences
 	}
 
-	// 转换 tools（如果有）
+	// 转换 tools
 	if len(req.Tools) > 0 {
 		var openaiTools []map[string]interface{}
 		for _, tool := range req.Tools {
-			openaiTool := map[string]interface{}{
+			openaiTools = append(openaiTools, map[string]interface{}{
 				"type": "function",
 				"function": map[string]interface{}{
 					"name":        tool.Name,
 					"description": tool.Description,
 					"parameters":  tool.InputSchema,
 				},
-			}
-			openaiTools = append(openaiTools, openaiTool)
+			})
 		}
 		openaiReq["tools"] = openaiTools
 	}
 
 	return json.Marshal(openaiReq)
+}
+
+func parseSystemMessage(system interface{}) []map[string]interface{} {
+	if system == nil {
+		return nil
+	}
+	switch v := system.(type) {
+	case string:
+		if v != "" {
+			return []map[string]interface{}{{"role": "system", "content": v}}
+		}
+	case []interface{}:
+		var systemTexts []string
+		for _, block := range v {
+			if blockMap, ok := block.(map[string]interface{}); ok {
+				if blockType, ok := blockMap["type"].(string); ok && blockType == "text" {
+					if text, ok := blockMap["text"].(string); ok {
+						systemTexts = append(systemTexts, text)
+					}
+				}
+			}
+		}
+		if len(systemTexts) > 0 {
+			return []map[string]interface{}{{"role": "system", "content": strings.Join(systemTexts, "\n")}}
+		}
+	}
+	return nil
+}
+
+type parsedAnthropicContent struct {
+	openaiContent   []interface{}
+	toolUses        []ToolUse
+	toolResults     []ToolResult
+	thinkingContent string
+}
+
+func parseAnthropicContentElements(contentArray []interface{}) parsedAnthropicContent {
+	var parsed parsedAnthropicContent
+	for _, block := range contentArray {
+		if blockMap, ok := block.(map[string]interface{}); ok {
+			blockType, _ := blockMap["type"].(string)
+			switch blockType {
+			case "text":
+				if text, ok := blockMap["text"].(string); ok {
+					parsed.openaiContent = append(parsed.openaiContent, map[string]interface{}{
+						"type": "text",
+						"text": text,
+					})
+				}
+			case "thinking":
+				if thinking, ok := blockMap["thinking"].(string); ok {
+					parsed.thinkingContent = thinking
+				}
+			case "image":
+				if source, ok := blockMap["source"].(map[string]interface{}); ok {
+					mediaType, _ := source["media_type"].(string)
+					data, _ := source["data"].(string)
+					// Only keep non-empty standard types
+					if mediaType != "" && data != "" {
+						parsed.openaiContent = append(parsed.openaiContent, map[string]interface{}{
+							"type": "image_url",
+							"image_url": map[string]interface{}{
+								"url": fmt.Sprintf("data:%s;base64,%s", mediaType, data),
+							},
+						})
+					}
+				}
+			case "tool_use":
+				toolUse := ToolUse{Type: "tool_use"}
+				if id, ok := blockMap["id"].(string); ok {
+					toolUse.ID = id
+				}
+				if name, ok := blockMap["name"].(string); ok {
+					toolUse.Name = name
+				}
+				if input, ok := blockMap["input"]; ok {
+					if inputData, err := json.Marshal(input); err == nil {
+						toolUse.Input = inputData
+					} else {
+						toolUse.Input = []byte("{}")
+					}
+				}
+				parsed.toolUses = append(parsed.toolUses, toolUse)
+			case "tool_result":
+				toolResult := ToolResult{Type: "tool_result"}
+				if toolUseID, ok := blockMap["tool_use_id"].(string); ok {
+					toolResult.ToolUseID = toolUseID
+				}
+				if content, ok := blockMap["content"]; ok {
+					toolResult.Content = content
+				}
+				if isError, ok := blockMap["is_error"].(bool); ok {
+					toolResult.IsError = isError
+				}
+				parsed.toolResults = append(parsed.toolResults, toolResult)
+			}
+		}
+	}
+	return parsed
+}
+
+func buildOpenAIMessages(role string, parsed parsedAnthropicContent) []map[string]interface{} {
+	var messages []map[string]interface{}
+
+	if role == "assistant" {
+		openaiMsg := map[string]interface{}{
+			"role":    "assistant",
+			"content": parsed.openaiContent,
+		}
+		if parsed.thinkingContent != "" {
+			openaiMsg["reasoning_content"] = parsed.thinkingContent
+		}
+
+		if len(parsed.toolUses) > 0 {
+			if len(parsed.openaiContent) == 0 {
+				openaiMsg["content"] = nil
+			}
+			var toolCalls []map[string]interface{}
+			for _, toolUse := range parsed.toolUses {
+				toolCalls = append(toolCalls, map[string]interface{}{
+					"id":   toolUse.ID,
+					"type": "function",
+					"function": map[string]interface{}{
+						"name":      toolUse.Name,
+						"arguments": string(toolUse.Input),
+					},
+				})
+			}
+			openaiMsg["tool_calls"] = toolCalls
+		}
+		messages = append(messages, openaiMsg)
+	} else if role == "user" && len(parsed.toolResults) > 0 {
+		for _, toolResult := range parsed.toolResults {
+			messages = append(messages, map[string]interface{}{
+				"role":         "tool",
+				"content":      convertToolResultContent(toolResult.Content),
+				"tool_call_id": toolResult.ToolUseID,
+			})
+		}
+		if len(parsed.openaiContent) > 0 {
+			messages = append(messages, map[string]interface{}{
+				"role":    "user",
+				"content": parsed.openaiContent,
+			})
+		}
+	} else {
+		openaiMsg := map[string]interface{}{
+			"role":    role,
+			"content": parsed.openaiContent,
+		}
+		if len(parsed.openaiContent) == 1 {
+			if block, ok := parsed.openaiContent[0].(map[string]interface{}); ok {
+				if block["type"] == "text" {
+					openaiMsg["content"] = block["text"]
+				}
+			}
+		}
+		messages = append(messages, openaiMsg)
+	}
+
+	return messages
+}
+
+func convertToolResultContent(content interface{}) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []interface{}:
+		var parts []string
+		for _, block := range v {
+			if bMap, ok := block.(map[string]interface{}); ok {
+				if bType, _ := bMap["type"].(string); bType == "text" {
+					if bText, _ := bMap["text"].(string); bText != "" {
+						parts = append(parts, bText)
+					}
+				}
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "\n")
+		}
+		if data, err := json.Marshal(v); err == nil {
+			return string(data)
+		}
+	default:
+		if data, err := json.Marshal(v); err == nil {
+			return string(data)
+		}
+	}
+	return ""
 }
 
 // ConvertFromOpenAI 将 OpenAI 响应转换为 Anthropic 格式
@@ -404,40 +407,25 @@ func ConvertFromOpenAI(body []byte, originalReq *MessagesRequest) ([]byte, error
 }
 
 // ConvertStreamLine 转换流式响应的每一行
-func ConvertStreamLine(line string, originalReq *MessagesRequest, state map[string]interface{}) (string, error) {
-	// 处理空行或注释
+type StreamParser struct {
+	originalReq *MessagesRequest
+	state       map[string]interface{}
+	sb          strings.Builder
+}
+
+func (p *StreamParser) ParseLine(line string) (string, error) {
 	if line == "\n" || line == "" || strings.HasPrefix(line, ":") {
 		return line, nil
 	}
-
-	// OpenAI 格式: data: {...}
 	if !strings.HasPrefix(line, "data: ") {
 		return line, nil
 	}
 
-	data := strings.TrimPrefix(line, "data: ")
-	data = strings.TrimSpace(data)
-
-	// 处理 [DONE]
+	data := strings.TrimSpace(strings.TrimPrefix(line, "data: "))
 	if data == "[DONE]" {
-		var sb strings.Builder
-		
-		// 如果有活跃的内容块，先结束它
-		if active, ok := state["active_block_index"].(int); ok && active >= 0 {
-			event := map[string]interface{}{
-				"type":  "content_block_stop",
-				"index": active,
-			}
-			ej, _ := json.Marshal(event)
-			sb.WriteString(fmt.Sprintf("event: content_block_stop\ndata: %s\n\n", ej))
-			state["active_block_index"] = -1
-		}
-		
-		sb.WriteString("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
-		return sb.String(), nil
+		return p.handleDone(), nil
 	}
 
-	// 解析 OpenAI 流式响应
 	var openaiStream map[string]interface{}
 	if err := json.Unmarshal([]byte(data), &openaiStream); err != nil {
 		return line, nil
@@ -445,26 +433,7 @@ func ConvertStreamLine(line string, originalReq *MessagesRequest, state map[stri
 
 	choices, ok := openaiStream["choices"].([]interface{})
 	if !ok || len(choices) == 0 {
-		// 处理最后的 Usage 事件
-		if usage, ok := openaiStream["usage"].(map[string]interface{}); ok {
-			var inputTokens, outputTokens int
-			if pt, ok := usage["prompt_tokens"].(float64); ok {
-				inputTokens = int(pt)
-			}
-			if ct, ok := usage["completion_tokens"].(float64); ok {
-				outputTokens = int(ct)
-			}
-			event := map[string]interface{}{
-				"type": "message_delta",
-				"usage": map[string]interface{}{
-					"output_tokens": outputTokens,
-					"input_tokens":  inputTokens,
-				},
-			}
-			ej, _ := json.Marshal(event)
-			return fmt.Sprintf("event: message_delta\ndata: %s\n\n", ej), nil
-		}
-		return line, nil
+		return p.handleUsageOrOther(openaiStream, line), nil
 	}
 
 	choice := choices[0].(map[string]interface{})
@@ -473,118 +442,125 @@ func ConvertStreamLine(line string, originalReq *MessagesRequest, state map[stri
 		return line, nil
 	}
 
-	var sb strings.Builder
+	msgID, _ := openaiStream["id"].(string)
+	p.handleMessageStart(msgID)
+	p.handleThinkingDelta(delta)
+	p.handleTextDelta(delta)
+	p.handleToolCalls(delta)
+	p.handleFinishReason(choice)
 
-	// 1. 处理消息开始 (message_start)
-	// 不再依赖 delta["role"] 的存在与否，而是依赖状态字典，确保必定在流开始时发出一次 message_start
-	if started, _ := state["started_message"].(bool); !started {
-		state["started_message"] = true
-		msgID, _ := openaiStream["id"].(string)
+	return p.sb.String(), nil
+}
+
+func (p *StreamParser) emitEvent(eventType string, data interface{}) {
+	ej, _ := json.Marshal(data)
+	p.sb.WriteString(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(ej)))
+}
+
+func (p *StreamParser) stopActiveBlock() {
+	if active, ok := p.state["active_block_index"].(int); ok && active >= 0 {
+		p.emitEvent("content_block_stop", map[string]interface{}{
+			"type":  "content_block_stop",
+			"index": active,
+		})
+		p.state["active_block_index"] = -1
+	}
+}
+
+func (p *StreamParser) handleDone() string {
+	p.stopActiveBlock()
+	p.emitEvent("message_stop", map[string]interface{}{"type": "message_stop"})
+	return p.sb.String()
+}
+
+func (p *StreamParser) handleUsageOrOther(stream map[string]interface{}, originalLine string) string {
+	if usage, ok := stream["usage"].(map[string]interface{}); ok {
+		var input, output int
+		if pt, ok := usage["prompt_tokens"].(float64); ok { input = int(pt) }
+		if ct, ok := usage["completion_tokens"].(float64); ok { output = int(ct) }
+		p.emitEvent("message_delta", map[string]interface{}{
+			"type": "message_delta",
+			"usage": map[string]interface{}{
+				"output_tokens": output,
+				"input_tokens":  input,
+			},
+		})
+		return p.sb.String()
+	}
+	return originalLine
+}
+
+func (p *StreamParser) handleMessageStart(msgID string) {
+	if started, _ := p.state["started_message"].(bool); !started {
+		p.state["started_message"] = true
 		if msgID == "" {
 			msgID = "msg_gen_" + generateID()
 		}
-		event := map[string]interface{}{
+		p.emitEvent("message_start", map[string]interface{}{
 			"type": "message_start",
 			"message": map[string]interface{}{
 				"id":    msgID,
 				"type":  "message",
 				"role":  "assistant",
-				"model": originalReq.Model,
-				"usage": map[string]interface{}{
-					"input_tokens":  0,
-					"output_tokens": 0,
-				},
+				"model": p.originalReq.Model,
+				"usage": map[string]interface{}{"input_tokens": 0, "output_tokens": 0},
 			},
-		}
-		ej, _ := json.Marshal(event)
-		sb.WriteString(fmt.Sprintf("event: message_start\ndata: %s\n\n", ej))
+		})
 	}
+}
 
-	// 2. 处理推理内容 (thinking delta)
+func (p *StreamParser) handleThinkingDelta(delta map[string]interface{}) {
 	if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
-		// Emit content_block_start for thinking if not started yet
-		if started, _ := state["started_thinking"].(bool); !started {
-			state["started_thinking"] = true
-			state["active_block_index"] = 0
-			
-			startEvent := map[string]interface{}{
+		if started, _ := p.state["started_thinking"].(bool); !started {
+			p.state["started_thinking"] = true
+			p.state["active_block_index"] = 0
+			p.emitEvent("content_block_start", map[string]interface{}{
 				"type":  "content_block_start",
 				"index": 0,
-				"content_block": map[string]interface{}{
-					"type": "thinking",
-					"thinking": "",
-				},
-			}
-			ej, _ := json.Marshal(startEvent)
-			sb.WriteString(fmt.Sprintf("event: content_block_start\ndata: %s\n\n", ej))
+				"content_block": map[string]interface{}{"type": "thinking", "thinking": ""},
+			})
 		}
-		
-		event := map[string]interface{}{
+		p.emitEvent("content_block_delta", map[string]interface{}{
 			"type":  "content_block_delta",
 			"index": 0,
-			"delta": map[string]interface{}{
-				"type":     "thinking_delta",
-				"thinking": reasoning,
-			},
-		}
-		ej, _ := json.Marshal(event)
-		sb.WriteString(fmt.Sprintf("event: content_block_delta\ndata: %s\n\n", ej))
+			"delta": map[string]interface{}{"type": "thinking_delta", "thinking": reasoning},
+		})
 	}
+}
 
-	// 3. 处理文本内容 (content_block_delta)
+func (p *StreamParser) handleTextDelta(delta map[string]interface{}) {
 	if content, ok := delta["content"].(string); ok && content != "" {
-		// Stop thinking block if it was active
-		if active, ok := state["active_block_index"].(int); ok && active == 0 {
-			stopEvent := map[string]interface{}{
-				"type":  "content_block_stop",
-				"index": 0,
-			}
-			ej, _ := json.Marshal(stopEvent)
-			sb.WriteString(fmt.Sprintf("event: content_block_stop\ndata: %s\n\n", ej))
-			state["active_block_index"] = -1
+		if active, ok := p.state["active_block_index"].(int); ok && active == 0 {
+			p.stopActiveBlock()
 		}
-
-		// Emit content_block_start for text if not started yet
-		if started, _ := state["started_text"].(bool); !started {
-			state["started_text"] = true
-			state["active_block_index"] = 1
-			
-			startEvent := map[string]interface{}{
+		if started, _ := p.state["started_text"].(bool); !started {
+			p.state["started_text"] = true
+			p.state["active_block_index"] = 1
+			p.emitEvent("content_block_start", map[string]interface{}{
 				"type":  "content_block_start",
 				"index": 1,
-				"content_block": map[string]interface{}{
-					"type": "text",
-					"text": "",
-				},
-			}
-			ej, _ := json.Marshal(startEvent)
-			sb.WriteString(fmt.Sprintf("event: content_block_start\ndata: %s\n\n", ej))
+				"content_block": map[string]interface{}{"type": "text", "text": ""},
+			})
 		}
-		
-		event := map[string]interface{}{
+		p.emitEvent("content_block_delta", map[string]interface{}{
 			"type":  "content_block_delta",
-			"index": 1, // 推理通常在 0，文本在 1
-			"delta": map[string]interface{}{
-				"type": "text_delta",
-				"text": content,
-			},
-		}
-		ej, _ := json.Marshal(event)
-		sb.WriteString(fmt.Sprintf("event: content_block_delta\ndata: %s\n\n", ej))
+			"index": 1,
+			"delta": map[string]interface{}{"type": "text_delta", "text": content},
+		})
 	}
+}
 
-	// 4. 处理工具调用 (tool_calls)
+func (p *StreamParser) handleToolCalls(delta map[string]interface{}) {
 	if toolCalls, ok := delta["tool_calls"].([]interface{}); ok {
 		for _, tc := range toolCalls {
 			if tcMap, ok := tc.(map[string]interface{}); ok {
 				idx, _ := tcMap["index"].(float64)
-				anthropicIdx := int(idx) + 2 // 0:thinking, 1:text, 2+:tools
+				anthropicIdx := int(idx) + 2
 
 				if function, ok := tcMap["function"].(map[string]interface{}); ok {
-					// 4.1 处理工具开始 (content_block_start)
 					if name, ok := function["name"].(string); ok && name != "" {
 						toolID, _ := tcMap["id"].(string)
-						startEvent := map[string]interface{}{
+						p.emitEvent("content_block_start", map[string]interface{}{
 							"type":  "content_block_start",
 							"index": anthropicIdx,
 							"content_block": map[string]interface{}{
@@ -592,54 +568,41 @@ func ConvertStreamLine(line string, originalReq *MessagesRequest, state map[stri
 								"id":   toolID,
 								"name": name,
 							},
-						}
-						ej, _ := json.Marshal(startEvent)
-						sb.WriteString(fmt.Sprintf("event: content_block_start\ndata: %s\n\n", ej))
+						})
 					}
-
-					// 4.2 处理参数增量 (content_block_delta)
 					if args, ok := function["arguments"].(string); ok && args != "" {
-						deltaEvent := map[string]interface{}{
+						p.emitEvent("content_block_delta", map[string]interface{}{
 							"type":  "content_block_delta",
 							"index": anthropicIdx,
 							"delta": map[string]interface{}{
 								"type":         "input_json_delta",
 								"partial_json": args,
 							},
-						}
-						ej, _ := json.Marshal(deltaEvent)
-						sb.WriteString(fmt.Sprintf("event: content_block_delta\ndata: %s\n\n", ej))
+						})
 					}
 				}
 			}
 		}
 	}
+}
 
-	// 5. 处理结束原因 (message_delta)
+func (p *StreamParser) handleFinishReason(choice map[string]interface{}) {
 	if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
-		// 如果有活跃的内容块，先结束它
-		if active, ok := state["active_block_index"].(int); ok && active >= 0 {
-			stopEvent := map[string]interface{}{
-				"type":  "content_block_stop",
-				"index": active,
-			}
-			ej, _ := json.Marshal(stopEvent)
-			sb.WriteString(fmt.Sprintf("event: content_block_stop\ndata: %s\n\n", ej))
-			state["active_block_index"] = -1
-		}
-		
-		stopReason := convertStopReason(fr)
-		event := map[string]interface{}{
+		p.stopActiveBlock()
+		p.emitEvent("message_delta", map[string]interface{}{
 			"type": "message_delta",
-			"delta": map[string]interface{}{
-				"stop_reason": stopReason,
-			},
-		}
-		ej, _ := json.Marshal(event)
-		sb.WriteString(fmt.Sprintf("event: message_delta\ndata: %s\n\n", ej))
+			"delta": map[string]interface{}{"stop_reason": convertStopReason(fr)},
+		})
 	}
+}
 
-	return sb.String(), nil
+// ConvertStreamLine 转换流式响应的每一行
+func ConvertStreamLine(line string, originalReq *MessagesRequest, state map[string]interface{}) (string, error) {
+	parser := &StreamParser{
+		originalReq: originalReq,
+		state:       state,
+	}
+	return parser.ParseLine(line)
 }
 
 // convertStopReason 转换 stop reason

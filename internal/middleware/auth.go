@@ -41,7 +41,7 @@ func AuthMiddleware(jwtManager *auth.JWTManager) gin.HandlerFunc {
 	}
 }
 
-// AuthMiddlewareWithUserValidation JWT 认证中间件（同时验证用户存在于数据库）
+// AuthMiddlewareWithUserValidation JWT 认证中间件（同时验证用户存在于数据库，并注入完整用户信息）
 func AuthMiddlewareWithUserValidation(jwtManager *auth.JWTManager, userStore *entity.UserStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -82,17 +82,28 @@ func AuthMiddlewareWithUserValidation(jwtManager *auth.JWTManager, userStore *en
 		}
 
 		c.Set(ContextKeyUser, claims)
+		// 注入完整的 User 对象供后续 Handler 使用
+		c.Set("fullUser", user)
 		c.Next()
 	}
 }
 
-// GetCurrentUser 从上下文中获取当前用户
+// GetCurrentUser 从上下文中获取当前用户的 Token Claims
 func GetCurrentUser(c *gin.Context) *auth.Claims {
 	user, exists := c.Get(ContextKeyUser)
 	if !exists {
 		return nil
 	}
 	return user.(*auth.Claims)
+}
+
+// GetCurrentFullUser 从上下文中获取当前完整的 User 实体
+func GetCurrentFullUser(c *gin.Context) *entity.User {
+	user, exists := c.Get("fullUser")
+	if !exists {
+		return nil
+	}
+	return user.(*entity.User)
 }
 
 // AdminRequired 管理员权限检查

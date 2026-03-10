@@ -82,8 +82,6 @@ type StreamChoice struct {
 }
 
 func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID uuid.UUID) {
-	startTime := time.Now()
-
 	// 读取请求体
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -104,209 +102,25 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 		return
 	}
 
-	// 获取用户信息
-	user, err := p.userStore.GetByID(userID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get user info"})
-		return
-	}
-	if user == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
-		return
+	backendReq := &BackendRequest{
+		ModelID:     modelID,
+		UserID:      userID,
+		RequestBody: bodyBytes,
+		IsStream:    req.Stream,
+		ClientIP:    c.ClientIP(),
+		UserAgent:   c.Request.UserAgent(),
 	}
 
-	// 检查配额
-	quotaResult, err := p.quotaService.CheckQuota(userID, user.QuotaPolicy, modelID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "quota check failed"})
-		return
-	}
-
-	if !quotaResult.Allowed {
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"error": quotaResult.Reason,
-			"quota": quotaResult,
-		})
-		return
-	}
-
-	// 获取客户端信息
-	clientIP := c.ClientIP()
-	userAgent := c.Request.UserAgent()
-
-	// 选择后端
-	backend, ok := p.lb.Next(modelID, p.defaultModel)
-	if !ok {
-		// 记录失败日志
-		p.usageService.RecordUsageDetailed(&usage.Record{
-			UserID:     userID,
-			ModelID:    modelID,
-			ClientIP:   clientIP,
-			UserAgent:  userAgent,
-			StatusCode: http.StatusServiceUnavailable,
-			Error:      "no backend available",
-		})
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no backend available for model: " + modelID})
-		return
-	}
-
-	// 获取模型配置并注入参数
-	modelConfig, _ := p.modelStore.GetByID(modelID)
-	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
-		bodyBytes = injectModelParams(bodyBytes, modelConfig.ModelParams)
-	}
-
-	// 修改请求体以替换 model 名称
-	requestBody := bodyBytes
-	if backend.ModelName != "" {
-		requestBody = modifyRequestModel(bodyBytes, backend.ModelName)
-	}
-
-	// 转发请求 - 自动处理 base_url 末尾的斜杠
-	url := strings.TrimSuffix(backend.URL, "/") + "/v1/chat/completions"
-	proxyReq, err := http.NewRequest(c.Request.Method, url, bytes.NewReader(requestBody))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
-		return
-	}
-
-	// 复制请求头（排除 Accept-Encoding，避免后端返回 gzip 压缩响应）
-	for key, values := range c.Request.Header {
-		if strings.ToLower(key) == "accept-encoding" {
-			continue
-		}
-		for _, value := range values {
-			proxyReq.Header.Add(key, value)
-		}
-	}
-
-	// 添加后端认证（如果有）
-	if backend.APIKey != "" {
-		proxyReq.Header.Set("Authorization", "Bearer "+backend.APIKey)
-	}
-
-	// 注入自定义 header（来自 model_params，覆盖原始值）
-	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
-		for key, value := range modelConfig.ModelParams {
-			if strings.HasPrefix(key, "__") && strings.HasSuffix(key, "__") {
-				headerName := convertHeaderName(key)
-				if strValue, ok := value.(string); ok {
-					proxyReq.Header.Set(headerName, strValue)
-				}
-			}
-		}
-	}
-
-	// 更新 Content-Length
-	proxyReq.ContentLength = int64(len(requestBody))
-
-	// 发送请求
-	resp, err := p.httpClient.Do(proxyReq)
-	if err != nil {
-		p.lb.MarkFailed(backend.ID)
-		// 区分错误类型返回不同状态码
-		if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
-			// 超时错误
-			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "backend request timeout"})
-		} else {
-			// 连接错误或其他错误
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "backend unavailable: " + err.Error()})
-		}
-		return
-	}
-	// Body 将在后续具体的处理函数中关闭
-
-	p.lb.MarkSuccess(backend.ID)
-
-	// 如果后端返回 429 或其他非 200 状态码，透传错误并关闭 Body
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		respBody, _ := io.ReadAll(resp.Body)
-		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
-		return
-	}
-
-	// 检查后端实际响应的内容类型
-	contentType := resp.Header.Get("Content-Type")
-	isStreamResponse := req.Stream && (strings.Contains(contentType, "text/event-stream") || strings.Contains(contentType, "application/x-ndjson"))
-
-	// 根据是否流式响应选择处理方式
-	if isStreamResponse {
-		p.handleStreamResponse(c, resp, userID, modelID, user.QuotaPolicy, startTime, clientIP, userAgent, backend.ID)
-	} else {
-		defer resp.Body.Close()
-		p.handleNormalResponse(c, resp, userID, modelID, user.QuotaPolicy, startTime, clientIP, userAgent, backend.ID)
-	}
+	p.ExecuteCoreWorkflow(
+		c,
+		backendReq,
+		nil, // responseConverter
+		nil, // streamLineConverter
+		"",  // default ping message
+	)
 }
 
-// handleNormalResponse 处理非流式响应
-func (p *Proxy) handleNormalResponse(c *gin.Context, resp *http.Response, userID uuid.UUID, modelID string, quotaPolicy string, startTime time.Time, clientIP, userAgent, backendID string) {
-	// 读取响应
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		// 记录失败日志
-		p.usageService.RecordUsageDetailed(&usage.Record{
-			UserID:     userID,
-			ModelID:    modelID,
-			ClientIP:   clientIP,
-			UserAgent:  userAgent,
-			BackendID:  backendID,
-			StatusCode: http.StatusBadGateway,
-			Error:      "failed to read backend response",
-		})
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read backend response"})
-		return
-	}
 
-	// 检查是否需要解压 gzip 响应
-	decompressed := false
-	if resp.Header.Get("Content-Encoding") == "gzip" {
-		gzipReader, err := gzip.NewReader(bytes.NewReader(respBody))
-		if err != nil {
-			logger.Warnw("failed to create gzip reader", "error", err)
-		} else {
-			defer gzipReader.Close()
-			decompressedBody, err := io.ReadAll(gzipReader)
-			if err != nil {
-				logger.Warnw("failed to decompress gzip response", "error", err)
-			} else {
-				respBody = decompressedBody
-				decompressed = true
-			}
-		}
-	}
-
-	latency := int(time.Since(startTime).Milliseconds())
-
-	// 记录使用日志（不含 token）
-	p.usageService.RecordUsageDetailed(&usage.Record{
-		UserID:    userID,
-		ModelID:   modelID,
-		LatencyMs: latency,
-		ClientIP:  clientIP,
-		UserAgent: userAgent,
-		BackendID: backendID,
-		StatusCode: resp.StatusCode,
-	})
-
-	// 记录请求（增加请求计数）
-	_ = p.quotaService.RecordRequest(userID, modelID)
-
-	// 只有在成功解压后才删除 Content-Encoding header
-	if decompressed {
-		resp.Header.Del("Content-Encoding")
-	}
-
-	// 设置 Content-Type（确保中间件能正确捕获）
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/json" // 默认 Content-Type
-	}
-	c.Header("Content-Type", contentType)
-
-	// 返回响应
-	c.Data(resp.StatusCode, contentType, respBody)
-}
 
 // BackendRequest 后端请求参数
 type BackendRequest struct {
@@ -490,38 +304,21 @@ func (p *Proxy) handleConvertedNormalResponse(
 	}
 
 	// 检查是否需要解压 gzip 响应
+	decompressed := false
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		gzipReader, err := gzip.NewReader(bytes.NewReader(respBody))
 		if err != nil {
-			p.usageService.RecordUsageDetailed(&usage.Record{
-				UserID:     req.UserID,
-				ModelID:    req.ModelID,
-				ClientIP:   req.ClientIP,
-				UserAgent:  req.UserAgent,
-				BackendID:  backendID,
-				StatusCode: http.StatusBadGateway,
-				Error:      "failed to create gzip reader: " + err.Error(),
-			})
-			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to decompress gzip response"})
-			return
+			logger.Warnw("failed to create gzip reader", "error", err)
+		} else {
+			defer gzipReader.Close()
+			decompressedBody, err := io.ReadAll(gzipReader)
+			if err != nil {
+				logger.Warnw("failed to decompress gzip response", "error", err)
+			} else {
+				respBody = decompressedBody
+				decompressed = true
+			}
 		}
-		defer gzipReader.Close()
-
-		decompressed, err := io.ReadAll(gzipReader)
-		if err != nil {
-			p.usageService.RecordUsageDetailed(&usage.Record{
-				UserID:     req.UserID,
-				ModelID:    req.ModelID,
-				ClientIP:   req.ClientIP,
-				UserAgent:  req.UserAgent,
-				BackendID:  backendID,
-				StatusCode: http.StatusBadGateway,
-				Error:      "failed to decompress gzip: " + err.Error(),
-			})
-			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to decompress gzip response"})
-			return
-		}
-		respBody = decompressed
 	}
 
 	latency := int(time.Since(startTime).Milliseconds())
@@ -540,6 +337,18 @@ func (p *Proxy) handleConvertedNormalResponse(
 	// 记录请求
 	_ = p.quotaService.RecordRequest(req.UserID, req.ModelID)
 
+	// 只有在成功解压后才删除 Content-Encoding header
+	if decompressed {
+		resp.Header.Del("Content-Encoding")
+	}
+
+	// 设置 Content-Type（确保中间件能正确捕获）
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json" // 默认 Content-Type
+	}
+	c.Header("Content-Type", contentType)
+
 	// 转换响应
 	if converter != nil {
 		converted, err := converter(respBody)
@@ -547,11 +356,11 @@ func (p *Proxy) handleConvertedNormalResponse(
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert response: " + err.Error()})
 			return
 		}
-		c.Data(resp.StatusCode, "application/json", converted)
+		c.Data(resp.StatusCode, contentType, converted)
 		return
 	}
 
-	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
+	c.Data(resp.StatusCode, contentType, respBody)
 }
 
 // handleConvertedStreamResponse 处理流式响应（带转换）
@@ -679,92 +488,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 	_ = p.quotaService.RecordRequest(req.UserID, req.ModelID)
 }
 
-// handleStreamResponse 处理流式响应（SSE）
-func (p *Proxy) handleStreamResponse(c *gin.Context, resp *http.Response, userID uuid.UUID, modelID string, quotaPolicy string, startTime time.Time, clientIP, userAgent, backendID string) {
-	defer resp.Body.Close()
-	// 设置 SSE 响应头
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-	c.Status(resp.StatusCode)
 
-	// 立即发送一个 SSE 注释并 Flush，防止首字节超时
-	c.Writer.WriteString(": ping\n\n")
-	c.Writer.Flush()
-
-	// 使用 ctx 监控请求生命周期，设置较长超时
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 1*time.Hour)
-	defer cancel()
-
-	// 使用 mutex 保护并发写入 c.Writer
-	var writeMu sync.Mutex
-
-	// 设置心跳计时器
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	// 启动心跳协程
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				writeMu.Lock()
-				// 发送 SSE 注释作为心跳
-				_, _ = c.Writer.WriteString(": keep-alive\n\n")
-				c.Writer.Flush()
-				writeMu.Unlock()
-			}
-		}
-	}()
-
-	// 创建 reader
-	reader := bufio.NewReader(resp.Body)
-
-	// 流式转发
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Warn("Stream processing timeout or cancelled in handleStreamResponse")
-			return
-		default:
-		}
-
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			// 记录错误但不中断
-			logger.Errorw("Failed to read stream", "error", err)
-			break
-		}
-
-		// 转发给客户端
-		writeMu.Lock()
-		_, _ = c.Writer.WriteString(line)
-		c.Writer.Flush()
-		writeMu.Unlock()
-	}
-
-	latency := int(time.Since(startTime).Milliseconds())
-
-	// 记录使用日志（不含 token）
-	p.usageService.RecordUsageDetailed(&usage.Record{
-		UserID:     userID,
-		ModelID:    modelID,
-		LatencyMs:  latency,
-		ClientIP:   clientIP,
-		UserAgent:  userAgent,
-		BackendID:  backendID,
-		StatusCode: resp.StatusCode,
-	})
-
-	// 记录请求（增加请求计数）
-	_ = p.quotaService.RecordRequest(userID, modelID)
-}
 
 func (p *Proxy) HandleListModels(c *gin.Context) {
 	models, err := p.modelStore.ListEnabled()

@@ -223,23 +223,13 @@ func (h *Handler) Register(c *gin.Context) {
 }
 
 func (h *Handler) Profile(c *gin.Context) {
-	user := middleware.GetCurrentUser(c)
+	user := middleware.GetCurrentFullUser(c)
 	if user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
 
-	u, err := h.store.GetByID(user.UserID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if u == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"data": u.ToResponse()})
+	c.JSON(http.StatusOK, gin.H{"data": user.ToResponse()})
 }
 
 func (h *Handler) List(c *gin.Context) {
@@ -384,24 +374,13 @@ func (h *Handler) Delete(c *gin.Context) {
 }
 
 func (h *Handler) GetQuota(c *gin.Context) {
-	currentUser := middleware.GetCurrentUser(c)
-	if currentUser == nil {
+	user := middleware.GetCurrentFullUser(c)
+	if user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
 
-	// 获取完整用户信息（包含 quota_policy）
-	user, err := h.store.GetByID(currentUser.UserID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if user == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
-		return
-	}
-
-	stats, err := h.quotaService.GetQuotaStats(currentUser.UserID, user.QuotaPolicy)
+	stats, err := h.quotaService.GetQuotaStats(user.ID, user.QuotaPolicy)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -411,7 +390,7 @@ func (h *Handler) GetQuota(c *gin.Context) {
 }
 
 func (h *Handler) GetUsage(c *gin.Context) {
-	user := middleware.GetCurrentUser(c)
+	user := middleware.GetCurrentFullUser(c)
 	if user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
@@ -420,7 +399,7 @@ func (h *Handler) GetUsage(c *gin.Context) {
 	// 支持查询参数 days，默认 7 天
 	days := 7
 	// 获取最近 N 天的使用统计
-	records, err := h.quotaStore.GetRecentUsageRecords(user.UserID, days)
+	records, err := h.quotaStore.GetRecentUsageRecords(user.ID, days)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -430,7 +409,7 @@ func (h *Handler) GetUsage(c *gin.Context) {
 }
 
 func (h *Handler) GetAccessLogs(c *gin.Context) {
-	user := middleware.GetCurrentUser(c)
+	user := middleware.GetCurrentFullUser(c)
 	if user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
@@ -440,7 +419,7 @@ func (h *Handler) GetAccessLogs(c *gin.Context) {
 	detailed := c.Query("detailed") == "true"
 
 	// 获取最近20条访问记录
-	logs := h.usageService.GetRecentAccess(user.UserID, 20)
+	logs := h.usageService.GetRecentAccess(user.ID, 20)
 
 	if detailed {
 		// 返回完整信息（包含请求/响应体和头信息）
@@ -684,8 +663,8 @@ func (h *Handler) parseIDToken(idToken string) (string, error) {
 }
 
 func (h *Handler) ChangePassword(c *gin.Context) {
-	currentUser := middleware.GetCurrentUser(c)
-	if currentUser == nil {
+	user := middleware.GetCurrentFullUser(c)
+	if user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
@@ -693,17 +672,6 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// 获取用户完整信息（包含密码哈希）
-	user, err := h.store.GetByID(currentUser.UserID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if user == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
 
@@ -727,7 +695,7 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 	}
 
 	// 更新密码
-	if err := h.store.UpdatePassword(currentUser.UserID, newPasswordHash); err != nil {
+	if err := h.store.UpdatePassword(user.ID, newPasswordHash); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
