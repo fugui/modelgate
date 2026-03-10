@@ -156,6 +156,17 @@ const Admin: React.FC = () => {
     }
   };
 
+  const handleSystemConfigSubmit = async (values: any) => {
+    try {
+      await api.put('/api/v1/admin/config/frontend', values);
+      messageApi.success('系统配置保存成功');
+      fetchSystemConfig();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      messageApi.error(error.response?.data?.error || '保存系统配置失败');
+    }
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -1047,6 +1058,7 @@ const Admin: React.FC = () => {
                     layout="horizontal"
                     labelCol={{ span: 6 }}
                     wrapperCol={{ span: 18 }}
+                    onFinish={handleSystemConfigSubmit}
                   >
                     <Form.Item
                       name="feedback_url"

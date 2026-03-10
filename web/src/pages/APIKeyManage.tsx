@@ -59,9 +59,40 @@ const APIKeyManage: React.FC = () => {
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    message.success('已复制到剪贴板');
+  const copyToClipboard = async (text: string) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        message.success('已复制到剪贴板');
+      } else {
+        // Fallback for non-secure contexts (HTTP)
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "absolute";
+        textArea.style.opacity = "0";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+          const successful = document.execCommand('copy');
+          if (successful) {
+            message.success('已复制到剪贴板');
+          } else {
+            message.error('复制失败，请手动复制');
+          }
+        } catch (err) {
+          console.error('Fallback copy error', err);
+          message.error('复制失败，请手动复制');
+        } finally {
+          textArea.remove();
+        }
+      }
+    } catch (err) {
+      console.error('Copy error', err);
+      message.error('复制失败，请手动复制');
+    }
   };
 
   const toggleShowKey = (id: string) => {

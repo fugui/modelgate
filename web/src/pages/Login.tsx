@@ -12,7 +12,7 @@ const Login: React.FC = () => {
   React.useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      navigate('/dashboard');
+      navigate('/chat');
     }
   }, [navigate]);
 
@@ -23,7 +23,7 @@ const Login: React.FC = () => {
       localStorage.setItem('token', res.data.data.token);
       localStorage.setItem('user', JSON.stringify(res.data.data.user));
       messageApi.success('登录成功');
-      navigate('/dashboard');
+      navigate('/chat');
     } catch (err: any) {
       messageApi.error(err.response?.data?.error || '登录失败');
     } finally {

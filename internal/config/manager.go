@@ -183,6 +183,21 @@ func (cm *ConfigManager) UpdatePolicies(policies []PolicyConfig) error {
 	return nil
 }
 
+// UpdateFrontend 更新前端配置
+func (cm *ConfigManager) UpdateFrontend(frontend FrontendConfig) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	cm.cfg.Frontend = frontend
+	if err := cm.saveLocked(); err != nil {
+		return err
+	}
+
+	// 异步通知订阅者
+	go cm.notifyWatchers(ConfigEvent{Type: "frontend", Data: frontend})
+	return nil
+}
+
 // Reload 从文件重新加载配置（用于外部修改后）
 func (cm *ConfigManager) Reload() error {
 	cm.mu.Lock()

@@ -50,9 +50,7 @@ type Handler struct {
 	quotaStore     QuotaStore
 	usageService   UsageService
 	cache          Cache
-	ssoConfig      config.SSOConfig
-	feedbackURL    string
-	devManualURL   string
+	cm             *config.ConfigManager
 }
 
 type NewHandlerParams struct {
@@ -62,9 +60,7 @@ type NewHandlerParams struct {
 	QuotaStore    QuotaStore
 	UsageService  UsageService
 	Cache         Cache
-	SSOConfig     config.SSOConfig
-	FeedbackURL   string
-	DevManualURL  string
+	ConfigManager *config.ConfigManager
 }
 
 func NewHandler(p NewHandlerParams) *Handler {
@@ -75,9 +71,7 @@ func NewHandler(p NewHandlerParams) *Handler {
 		quotaStore:    p.QuotaStore,
 		usageService:  p.UsageService,
 		cache:         p.Cache,
-		ssoConfig:     p.SSOConfig,
-		feedbackURL:   p.FeedbackURL,
-		devManualURL:  p.DevManualURL,
+		cm:            p.ConfigManager,
 	}
 }
 
@@ -88,7 +82,8 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/config/frontend", h.GetFrontendConfig)
 
 	// SSO 接口（如果启用）
-	if h.ssoConfig.Enabled {
+	ssoConfig := h.cm.GetConfig().SSO
+	if ssoConfig.Enabled {
 		r.GET("/auth/sso/config", h.GetSSOConfig)
 		r.GET("/auth/sso/login", h.SSOLogin)
 		r.GET("/auth/sso/callback", h.SSOCallback)
@@ -106,14 +101,20 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	}
 
 	// 管理员接口
-	admin := r.Group("/admin/users")
+	admin := r.Group("/admin")
 	admin.Use(middleware.AuthMiddlewareWithUserValidation(h.jwtManager, h.store))
 	admin.Use(middleware.AdminRequired())
 	{
-		admin.GET("", h.List)
-		admin.POST("", h.Create)
-		admin.PUT("/:id", h.Update)
-		admin.DELETE("/:id", h.Delete)
+		// /admin/users
+		users := admin.Group("/users")
+		users.GET("", h.List)
+		users.POST("", h.Create)
+		users.PUT("/:id", h.Update)
+		users.DELETE("/:id", h.Delete)
+		
+		// /admin/config
+		config := admin.Group("/config")
+		config.PUT("/frontend", h.UpdateFrontendConfig)
 	}
 }
 
@@ -459,31 +460,53 @@ func (h *Handler) GetAccessLogs(c *gin.Context) {
 }
 
 func (h *Handler) GetFrontendConfig(c *gin.Context) {
+	cfg := h.cm.GetConfig()
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"feedback_url":   h.feedbackURL,
-			"dev_manual_url": h.devManualURL,
-			"sso_enabled":    h.ssoConfig.Enabled,
+			"feedback_url":   cfg.Frontend.FeedbackURL,
+			"dev_manual_url": cfg.Frontend.DevManualURL,
+			"sso_enabled":    cfg.SSO.Enabled,
 		},
 	})
+}
+
+// UpdateFrontendConfig 更新前端系统配置 (Admin API)
+func (h *Handler) UpdateFrontendConfig(c *gin.Context) {
+	var req config.FrontendConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.cm.UpdateFrontend(req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save configuration: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "success", "data": req})
 }
 
 // ========== SSO 相关接口 ==========
 
 // GetSSOConfig 获取 SSO 配置（供前端使用）
 func (h *Handler) GetSSOConfig(c *gin.Context) {
-	if !h.ssoConfig.Enabled {
+	ssoConfig := h.cm.GetConfig().SSO
+	if !ssoConfig.Enabled {
 		c.JSON(http.StatusOK, gin.H{"data": nil})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"enabled":  true,
-			"provider": h.ssoConfig.Provider,
+			"enabled":   ssoConfig.Enabled,
+			"client_id": ssoConfig.ClientID,
+			"auth_url":  ssoConfig.AuthURL,
+			"provider":  ssoConfig.Provider,
 		},
 	})
 }
+
+
 
 // generateState 生成随机 state
 func generateState() string {
@@ -494,7 +517,8 @@ func generateState() string {
 
 // SSOLogin 跳转至 SSO 登录页
 func (h *Handler) SSOLogin(c *gin.Context) {
-	if !h.ssoConfig.Enabled {
+	ssoConfig := h.cm.GetConfig().SSO
+	if !ssoConfig.Enabled {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "SSO not enabled"})
 		return
 	}
@@ -513,8 +537,8 @@ func (h *Handler) SSOLogin(c *gin.Context) {
 
 	// 构建授权 URL
 	authURL := fmt.Sprintf("%s?client_id=%s&redirect_uri=%s&response_type=code&scope=openid email profile&state=%s",
-		h.ssoConfig.GetAuthorizeURL(),
-		url.QueryEscape(h.ssoConfig.ClientID),
+		ssoConfig.GetAuthorizeURL(),
+		url.QueryEscape(ssoConfig.ClientID),
 		url.QueryEscape(callbackURL),
 		state,
 	)
@@ -524,22 +548,28 @@ func (h *Handler) SSOLogin(c *gin.Context) {
 
 // SSOCallback SSO 回调处理
 func (h *Handler) SSOCallback(c *gin.Context) {
-	if !h.ssoConfig.Enabled {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "SSO not enabled"})
+	ssoConfig := h.cm.GetConfig().SSO
+	if !ssoConfig.Enabled {
+		c.JSON(http.StatusForbidden, gin.H{"error": "SSO is disabled"})
 		return
 	}
 
+	// 1. 获取 Authorization Code
 	code := c.Query("code")
-	state := c.Query("state")
-
-	// 验证 state
-	cookieState, err := c.Cookie("sso_state")
-	if err != nil || cookieState != state {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid state"})
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing authorization code"})
 		return
 	}
-	c.SetCookie("sso_state", "", -1, "/", "", false, true)
 
+	// 2. 交换 Token
+	tokenReq := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"client_id":     {ssoConfig.ClientID},
+		"client_secret": {ssoConfig.ClientSecret},
+		"redirect_uri":  {ssoConfig.RedirectURL},
+	}
+	
 	// 构建回调 URL
 	callbackURL := fmt.Sprintf("%s/api/v1/auth/sso/callback", c.Request.Host)
 	if c.Request.TLS == nil {
@@ -603,14 +633,15 @@ type TokenResponse struct {
 
 // exchangeCodeForToken 用 code 换取 token
 func (h *Handler) exchangeCodeForToken(code, redirectURI string) (*TokenResponse, error) {
+	ssoConfig := h.cm.GetConfig().SSO
 	data := url.Values{}
 	data.Set("grant_type", "authorization_code")
-	data.Set("client_id", h.ssoConfig.ClientID)
-	data.Set("client_secret", h.ssoConfig.ClientSecret)
+	data.Set("client_id", ssoConfig.ClientID)
+	data.Set("client_secret", ssoConfig.ClientSecret)
 	data.Set("code", code)
 	data.Set("redirect_uri", redirectURI)
 
-	resp, err := http.PostForm(h.ssoConfig.GetTokenURL(), data)
+	resp, err := http.PostForm(ssoConfig.GetTokenURL(), data)
 	if err != nil {
 		return nil, err
 	}
@@ -649,7 +680,8 @@ func (h *Handler) parseIDToken(idToken string) (string, error) {
 		return "", err
 	}
 
-	emailClaim := h.ssoConfig.EmailClaim
+	ssoConfig := h.cm.GetConfig().SSO
+	emailClaim := ssoConfig.EmailClaim
 	if emailClaim == "" {
 		emailClaim = "email"
 	}
