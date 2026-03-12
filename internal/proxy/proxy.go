@@ -30,10 +30,9 @@ type Proxy struct {
 	modelStore   *entity.ModelStore
 	backendStore *entity.BackendStore
 	userStore    *entity.UserStore
-	defaultModel string
 }
 
-func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService *usage.Service, modelStore *entity.ModelStore, backendStore *entity.BackendStore, userStore *entity.UserStore, defaultModel string) *Proxy {
+func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService *usage.Service, modelStore *entity.ModelStore, backendStore *entity.BackendStore, userStore *entity.UserStore) *Proxy {
 	return &Proxy{
 		lb:           lb,
 		quotaService: quotaService,
@@ -42,7 +41,6 @@ func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService 
 		modelStore:   modelStore,
 		backendStore: backendStore,
 		userStore:    userStore,
-		defaultModel: defaultModel,
 	}
 }
 
@@ -170,8 +168,8 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	}
 
 	// 当指定的模型不被允许时，降级使用默认模型重试
-	if !quotaResult.Allowed && quotaResult.Reason == "model not allowed" && p.defaultModel != "" {
-		req.ModelID = p.defaultModel
+	if !quotaResult.Allowed && quotaResult.Reason == "model not allowed" && quotaResult.DefaultModel != "" {
+		req.ModelID = quotaResult.DefaultModel
 		quotaResult, err = p.quotaService.CheckQuota(req.UserID, user.QuotaPolicy, req.ModelID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "quota check failed"})
@@ -191,7 +189,7 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	_ = p.quotaService.IncrementRate(req.UserID, quotaResult.RateLimitWindow)
 
 	// 选择后端
-	backend, ok := p.lb.Next(req.ModelID, p.defaultModel)
+	backend, ok := p.lb.Next(req.ModelID, quotaResult.DefaultModel)
 	if !ok {
 		p.usageService.RecordUsageDetailed(&usage.Record{
 			UserID:     req.UserID,
@@ -286,6 +284,8 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		respBody, _ := io.ReadAll(resp.Body)
 		
 		outputTokens := utils.EstimateTokens(string(respBody))
+		c.Set("input_tokens", inputTokens)
+		c.Set("output_tokens", outputTokens)
 		p.usageService.RecordUsageDetailed(&usage.Record{
 			UserID:       req.UserID,
 			ModelID:      req.ModelID,
@@ -374,6 +374,8 @@ func (p *Proxy) handleConvertedNormalResponse(
 	}
 
 	latency := int(time.Since(startTime).Milliseconds())
+	c.Set("input_tokens", inputTokens)
+	c.Set("output_tokens", outputTokens)
 
 	// 记录使用日志
 	p.usageService.RecordUsageDetailed(&usage.Record{
@@ -538,6 +540,9 @@ func (p *Proxy) handleConvertedStreamResponse(
 
 	outputTokens = utils.EstimateTokens(fullCollectedText.String())
 	latency := int(time.Since(startTime).Milliseconds())
+
+	c.Set("input_tokens", inputTokens)
+	c.Set("output_tokens", outputTokens)
 
 	p.usageService.RecordUsageDetailed(&usage.Record{
 		UserID:       req.UserID,

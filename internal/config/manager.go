@@ -348,7 +348,11 @@ func (cm *ConfigManager) AddModel(model ModelConfig) error {
 	}
 
 	cm.cfg.Models = append(cm.cfg.Models, model)
-	return cm.saveLocked()
+	if err := cm.saveLocked(); err != nil {
+		return err
+	}
+	go cm.notifyWatchers(ConfigEvent{Type: "models", Data: cm.cfg.Models})
+	return nil
 }
 
 // UpdateModel 更新模型
@@ -369,7 +373,11 @@ func (cm *ConfigManager) UpdateModel(model ModelConfig) error {
 		return fmt.Errorf("model %s not found", model.ID)
 	}
 
-	return cm.saveLocked()
+	if err := cm.saveLocked(); err != nil {
+		return err
+	}
+	go cm.notifyWatchers(ConfigEvent{Type: "models", Data: cm.cfg.Models})
+	return nil
 }
 
 // DeleteModel 删除模型
@@ -392,7 +400,11 @@ func (cm *ConfigManager) DeleteModel(modelID string) error {
 	}
 
 	cm.cfg.Models = newModels
-	return cm.saveLocked()
+	if err := cm.saveLocked(); err != nil {
+		return err
+	}
+	go cm.notifyWatchers(ConfigEvent{Type: "models", Data: cm.cfg.Models})
+	return nil
 }
 
 // AddBackend 添加后端到模型
@@ -410,7 +422,11 @@ func (cm *ConfigManager) AddBackend(modelID string, backend BackendConfig) error
 			}
 
 			cm.cfg.Models[i].Backends = append(cm.cfg.Models[i].Backends, backend)
-			return cm.saveLocked()
+			if err := cm.saveLocked(); err != nil {
+				return err
+			}
+			go cm.notifyWatchers(ConfigEvent{Type: "models", Data: cm.cfg.Models})
+			return nil
 		}
 	}
 
@@ -435,7 +451,11 @@ func (cm *ConfigManager) UpdateBackend(modelID string, backend BackendConfig) er
 			if !found {
 				return fmt.Errorf("backend %s not found", backend.ID)
 			}
-			return cm.saveLocked()
+			if err := cm.saveLocked(); err != nil {
+				return err
+			}
+			go cm.notifyWatchers(ConfigEvent{Type: "models", Data: cm.cfg.Models})
+			return nil
 		}
 	}
 
@@ -462,7 +482,11 @@ func (cm *ConfigManager) DeleteBackend(modelID, backendID string) error {
 				return fmt.Errorf("backend %s not found", backendID)
 			}
 			cm.cfg.Models[i].Backends = newBackends
-			return cm.saveLocked()
+			if err := cm.saveLocked(); err != nil {
+				return err
+			}
+			go cm.notifyWatchers(ConfigEvent{Type: "models", Data: cm.cfg.Models})
+			return nil
 		}
 	}
 
@@ -482,7 +506,11 @@ func (cm *ConfigManager) AddPolicy(policy PolicyConfig) error {
 	}
 
 	cm.cfg.Policies = append(cm.cfg.Policies, policy)
-	return cm.saveLocked()
+	if err := cm.saveLocked(); err != nil {
+		return err
+	}
+	go cm.notifyWatchers(ConfigEvent{Type: "policies", Data: cm.cfg.Policies})
+	return nil
 }
 
 // UpdatePolicy 更新配额策略
@@ -503,7 +531,11 @@ func (cm *ConfigManager) UpdatePolicy(policy PolicyConfig) error {
 		return fmt.Errorf("policy %s not found", policy.Name)
 	}
 
-	return cm.saveLocked()
+	if err := cm.saveLocked(); err != nil {
+		return err
+	}
+	go cm.notifyWatchers(ConfigEvent{Type: "policies", Data: cm.cfg.Policies})
+	return nil
 }
 
 // DeletePolicy 删除配额策略
@@ -526,7 +558,11 @@ func (cm *ConfigManager) DeletePolicy(name string) error {
 	}
 
 	cm.cfg.Policies = newPolicies
-	return cm.saveLocked()
+	if err := cm.saveLocked(); err != nil {
+		return err
+	}
+	go cm.notifyWatchers(ConfigEvent{Type: "policies", Data: cm.cfg.Policies})
+	return nil
 }
 
 // LastModified 获取配置文件最后修改时间

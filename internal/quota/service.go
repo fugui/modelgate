@@ -210,6 +210,9 @@ func (s *Service) CheckQuota(userID uuid.UUID, policyName string, modelID string
 			break
 		}
 	}
+	
+	result.DefaultModel = policy.DefaultModel
+
 	if !hasModelAccess {
 		result.Allowed = false
 		result.Reason = "model not allowed"

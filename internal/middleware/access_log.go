@@ -81,7 +81,7 @@ func (r *responseRecorder) WriteHeader(code int) {
 // UsageRecorder 访问日志记录器接口
 type UsageRecorder interface {
 	RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64)
-	RecordAccessDetailed(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, requestHeaders map[string]string, requestBody string, responseHeaders map[string]string, responseBody string)
+	RecordAccessDetailed(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, requestHeaders map[string]string, requestBody string, responseHeaders map[string]string, responseBody string, inputTokens int, outputTokens int)
 }
 
 // AccessLogMiddleware 访问日志记录中间件
@@ -180,6 +180,14 @@ func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 			copy(requestBodyCopy, requestBody)
 			responseBodyCopy := responseBody // string 是不可变的，无需深拷贝
 
+			var inputTokens, outputTokens int
+			if inTokens, exists := c.Get("input_tokens"); exists {
+				inputTokens, _ = inTokens.(int)
+			}
+			if outTokens, exists := c.Get("output_tokens"); exists {
+				outputTokens, _ = outTokens.(int)
+			}
+
 			go usageService.RecordAccessDetailed(
 				userID,
 				method,
@@ -193,6 +201,8 @@ func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 				string(requestBodyCopy),
 				responseHeaders,
 				responseBodyCopy,
+				inputTokens,
+				outputTokens,
 			)
 		}
 	}

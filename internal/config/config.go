@@ -19,7 +19,6 @@ type Config struct {
 	Frontend     FrontendConfig    `yaml:"frontend"`
 	Concurrency  ConcurrencyConfig `yaml:"concurrency"`
 	SSO          SSOConfig         `yaml:"sso"`
-	DefaultModel string            `yaml:"default_model"`
 }
 
 type ServerConfig struct {
@@ -74,6 +73,7 @@ type PolicyConfig struct {
 	RequestQuotaDaily int      `yaml:"request_quota_daily"`
 	Models            []string `yaml:"models"`
 	Description       string   `yaml:"description"`
+	DefaultModel      string   `yaml:"default_model"`
 }
 
 type AdminConfig struct {

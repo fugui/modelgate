@@ -67,38 +67,13 @@ func (s *Service) RecordUsageDetailed(record *Record) {
 		Model:      record.ModelID,
 		LatencyMs:  record.LatencyMs,
 		ClientIP:   record.ClientIP,
-		UserAgent:    record.UserAgent,
-		StatusCode:   record.StatusCode,
-		Error:        record.Error,
-		BackendID:    record.BackendID,
+		UserAgent:  record.UserAgent,
+		StatusCode: record.StatusCode,
+		Error:      record.Error,
+		BackendID:  record.BackendID,
 		InputTokens:  record.InputTokens,
 		OutputTokens: record.OutputTokens,
 	})
-
-	// 同时将记录写入内存 ring buffer，供 /stats 页面读取 Token 展示
-	s.logsMutex.Lock()
-	defer s.logsMutex.Unlock()
-
-	r, exists := s.accessLogs[record.UserID]
-	if !exists {
-		r = ring.New(s.maxLogs)
-		s.accessLogs[record.UserID] = r
-	}
-
-	r.Value = AccessLog{
-		UserID:       record.UserID,
-		Method:       "POST",
-		Path:         "/v1/chat/completions",
-		ClientIP:     record.ClientIP,
-		UserAgent:    record.UserAgent,
-		Timestamp:    time.Now(),
-		StatusCode:   record.StatusCode,
-		RequestBytes: 0, // 已由中间件记录，此处不重复记录
-		ResponseBytes: 0,
-		InputTokens:  record.InputTokens,
-		OutputTokens: record.OutputTokens,
-	}
-	s.accessLogs[record.UserID] = r.Next()
 }
 
 // CleanupOldRecords 清理旧记录（由 logger 自动处理）
@@ -125,7 +100,7 @@ func (s *Service) Flush() {
 
 // RecordAccess 记录用户访问日志
 func (s *Service) RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64) {
-	s.RecordAccessDetailed(userID, method, path, clientIP, userAgent, statusCode, requestBytes, responseBytes, nil, "", nil, "")
+	s.RecordAccessDetailed(userID, method, path, clientIP, userAgent, statusCode, requestBytes, responseBytes, nil, "", nil, "", 0, 0)
 }
 
 // RecordAccessDetailed 记录用户访问日志（包含详细信息）
@@ -138,6 +113,8 @@ func (s *Service) RecordAccessDetailed(
 	requestBody string,
 	responseHeaders map[string]string,
 	responseBody string,
+	inputTokens int,
+	outputTokens int,
 ) {
 	s.logsMutex.Lock()
 	defer s.logsMutex.Unlock()
@@ -164,6 +141,8 @@ func (s *Service) RecordAccessDetailed(
 		RequestBody:     truncateString(requestBody, constants.MaxLogRequestBodySize),
 		ResponseHeaders: responseHeaders,
 		ResponseBody:    truncateString(responseBody, constants.MaxLogResponseBodySize),
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
 	}
 
 	// 存入 ring buffer

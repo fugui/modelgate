@@ -213,7 +213,13 @@ const BackendManage: React.FC = () => {
       title: '最后检查',
       dataIndex: 'last_check_at',
       key: 'last_check_at',
-      render: (time: string) => time ? new Date(time).toLocaleString() : '-',
+      render: (time: any) => {
+        if (!time) return '-';
+        const dateStr = typeof time === 'string' ? time : (time.Time || '');
+        if (!dateStr || dateStr.startsWith('0001-01-01')) return '-';
+        const d = new Date(dateStr);
+        return isNaN(d.getTime()) ? '-' : d.toLocaleString();
+      },
     },
     {
       title: '操作',

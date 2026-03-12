@@ -58,6 +58,7 @@ interface Policy {
   request_quota_daily: number;
   models: string[];
   description: string;
+  default_model?: string;
 }
 
 interface ModelFormValues {
@@ -97,6 +98,7 @@ interface PolicyFormValues {
   rate_limit_window: number;
   request_quota_daily: number;
   models: string[];
+  default_model?: string;
 }
 
 
@@ -537,7 +539,8 @@ const Admin: React.FC = () => {
       enabled: true,
       rate_limit: 60,
       rate_limit_window: 60,
-      request_quota_daily: 1000
+      request_quota_daily: 1000,
+      default_model: '',
     });
     setPolicyModalVisible(true);
   };
@@ -552,6 +555,7 @@ const Admin: React.FC = () => {
       rate_limit_window: policy.rate_limit_window,
       request_quota_daily: policy.request_quota_daily,
       models: policy.models || [],
+      default_model: policy.default_model,
     });
     setPolicyModalVisible(true);
   };
@@ -577,6 +581,7 @@ const Admin: React.FC = () => {
           rate_limit_window: values.rate_limit_window,
           request_quota_daily: values.request_quota_daily,
           models: values.models,
+          default_model: values.default_model,
         });
         messageApi.success('策略更新成功');
       } else {
@@ -588,6 +593,7 @@ const Admin: React.FC = () => {
           rate_limit_window: values.rate_limit_window,
           request_quota_daily: values.request_quota_daily,
           models: values.models,
+          default_model: values.default_model,
         });
         messageApi.success('策略创建成功');
       }
@@ -735,6 +741,11 @@ const Admin: React.FC = () => {
           : '-',
     },
     {
+      title: '默认模型',
+      dataIndex: 'default_model',
+      render: (model: string) => model ? <Tag color="blue">{model}</Tag> : '-',
+    },
+    {
       title: '操作',
       render: (_: unknown, record: Policy) => (
         <Space>
@@ -824,7 +835,13 @@ const Admin: React.FC = () => {
       title: '最后检查',
       dataIndex: 'last_check_at',
       key: 'last_check_at',
-      render: (time: string) => time ? new Date(time).toLocaleString() : '-',
+      render: (time: any) => {
+        if (!time) return '-';
+        const dateStr = typeof time === 'string' ? time : (time.Time || '');
+        if (!dateStr || dateStr.startsWith('0001-01-01')) return '-';
+        const d = new Date(dateStr);
+        return isNaN(d.getTime()) ? '-' : d.toLocaleString();
+      },
     },
     {
       title: '操作',
@@ -928,7 +945,11 @@ const Admin: React.FC = () => {
       render: (_: unknown, record: Backend) => {
         const health = healthStatus[record.id];
         if (!health || !health.last_check) return '-';
-        return new Date(health.last_check).toLocaleString();
+        const lastCheckVal = health.last_check as any;
+        const dateStr = typeof lastCheckVal === 'string' ? lastCheckVal : (lastCheckVal.Time || '');
+        if (!dateStr || dateStr.startsWith('0001-01-01')) return '-';
+        const d = new Date(dateStr);
+        return isNaN(d.getTime()) ? '-' : d.toLocaleString();
       },
     },
   ];
@@ -1514,6 +1535,18 @@ const Admin: React.FC = () => {
             <Select
               mode="multiple"
               placeholder="请选择关联模型"
+              style={{ width: '100%' }}
+              options={models.map(model => ({ label: model.name, value: model.id }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="default_model"
+            label="默认模型"
+            extra="该策略所对应的默认回退模型（可选）"
+          >
+            <Select
+              allowClear
+              placeholder="请选择默认模型"
               style={{ width: '100%' }}
               options={models.map(model => ({ label: model.name, value: model.id }))}
             />

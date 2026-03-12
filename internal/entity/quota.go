@@ -15,6 +15,7 @@ type QuotaPolicy struct {
 	RequestQuotaDaily int         `json:"request_quota_daily"`
 	Models            StringArray `json:"models"`
 	Description       string      `json:"description"`
+	DefaultModel      string      `json:"default_model"`
 	CreatedAt         time.Time   `json:"created_at"`
 	UpdatedAt         time.Time   `json:"updated_at"`
 }
@@ -37,6 +38,7 @@ type QuotaCheckResult struct {
 	RateRemaining     int    `json:"rate_remaining"`
 	RateLimit         int    `json:"rate_limit"`
 	RateLimitWindow   int    `json:"rate_limit_window"`
+	DefaultModel      string `json:"default_model,omitempty"`
 }
 
 type UsageStats struct {
@@ -66,6 +68,7 @@ func (s *QuotaStore) configToPolicy(cfg config.PolicyConfig) *QuotaPolicy {
 		RequestQuotaDaily: cfg.RequestQuotaDaily,
 		Models:            cfg.Models,
 		Description:       cfg.Description,
+		DefaultModel:      cfg.DefaultModel,
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
 	}
@@ -80,6 +83,7 @@ func (s *QuotaStore) policyToConfig(policy *QuotaPolicy) config.PolicyConfig {
 		RequestQuotaDaily: policy.RequestQuotaDaily,
 		Models:            policy.Models,
 		Description:       policy.Description,
+		DefaultModel:      policy.DefaultModel,
 	}
 }
 
