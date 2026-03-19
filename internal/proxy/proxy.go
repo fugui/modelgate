@@ -560,22 +560,56 @@ func (p *Proxy) handleConvertedStreamResponse(
 }
 
 // extractContentFromSSE 从 SSE 格式的 data 行中粗略提取文本以估算 Token
+// 支持 OpenAI 格式 (choices[0].delta.content) 和 Anthropic 格式 (delta.text, delta.thinking, delta.partial_json)
 func extractContentFromSSE(line string) string {
-	line = strings.TrimSpace(line)
-	if !strings.HasPrefix(line, "data: ") || line == "data: [DONE]" {
-		return ""
-	}
-	
-	jsonStr := strings.TrimPrefix(line, "data: ")
-	var streamResp StreamResponse
-	if err := json.Unmarshal([]byte(jsonStr), &streamResp); err == nil {
-		if len(streamResp.Choices) > 0 {
+	var result strings.Builder
+	// 处理可能包含多个 SSE 事件的转换输出（lineConverter 可能将一行转换为多个事件）
+	for _, segment := range strings.Split(line, "\n") {
+		segment = strings.TrimSpace(segment)
+		if !strings.HasPrefix(segment, "data: ") || segment == "data: [DONE]" {
+			continue
+		}
+
+		jsonStr := strings.TrimPrefix(segment, "data: ")
+
+		// 尝试 OpenAI 格式
+		var streamResp StreamResponse
+		if err := json.Unmarshal([]byte(jsonStr), &streamResp); err == nil && len(streamResp.Choices) > 0 {
 			if content, ok := streamResp.Choices[0].Delta["content"].(string); ok {
-				return content
+				result.WriteString(content)
+			}
+			// 提取 tool_calls arguments
+			if toolCalls, ok := streamResp.Choices[0].Delta["tool_calls"].([]interface{}); ok {
+				for _, tc := range toolCalls {
+					if tcMap, ok := tc.(map[string]interface{}); ok {
+						if fn, ok := tcMap["function"].(map[string]interface{}); ok {
+							if args, ok := fn["arguments"].(string); ok {
+								result.WriteString(args)
+							}
+						}
+					}
+				}
+			}
+			continue
+		}
+
+		// 尝试 Anthropic 格式 (delta.text, delta.thinking, delta.partial_json)
+		var event map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonStr), &event); err == nil {
+			if delta, ok := event["delta"].(map[string]interface{}); ok {
+				if text, ok := delta["text"].(string); ok {
+					result.WriteString(text)
+				}
+				if thinking, ok := delta["thinking"].(string); ok {
+					result.WriteString(thinking)
+				}
+				if partialJSON, ok := delta["partial_json"].(string); ok {
+					result.WriteString(partialJSON)
+				}
 			}
 		}
 	}
-	return ""
+	return result.String()
 }
 
 func (p *Proxy) HandleListModels(c *gin.Context) {

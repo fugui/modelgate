@@ -6,6 +6,7 @@ const (
 	ErrCodeQuotaExceeded      = "QUOTA_EXCEEDED"
 	ErrCodeRateLimitExceeded  = "RATE_LIMIT_EXCEEDED"
 	ErrCodeDailyQuotaExceeded = "DAILY_QUOTA_EXCEEDED"
+	ErrCodeOutsideTimeRange  = "OUTSIDE_TIME_RANGE"
 
 	// Backend Errors
 	ErrCodeNoBackendAvailable = "NO_BACKEND_AVAILABLE"
@@ -44,6 +45,7 @@ const (
 	MsgQuotaExceeded      = "quota exceeded"
 	MsgRateLimitExceeded  = "rate limit exceeded"
 	MsgDailyQuotaExceeded = "daily quota exceeded"
+	MsgOutsideTimeRange  = "outside available time range"
 
 	// Backend Messages
 	MsgNoBackendAvailable = "no backend available for model"

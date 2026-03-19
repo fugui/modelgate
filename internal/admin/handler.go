@@ -405,6 +405,9 @@ func (h *PolicyHandler) UpdatePolicy(c *gin.Context) {
 	// Allow updating default model (including clearing it if req.DefaultModel is empty)
 	policy.DefaultModel = req.DefaultModel
 
+	// 始终同步 available_time_ranges（包括清空）
+	policy.AvailableTimeRanges = req.AvailableTimeRanges
+
 	if err := h.quotaStore.CreateOrUpdatePolicy(policy); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

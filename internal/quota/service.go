@@ -219,6 +219,13 @@ func (s *Service) CheckQuota(userID uuid.UUID, policyName string, modelID string
 		return result, nil
 	}
 
+	// 检查可用时间段
+	if !isWithinAvailableTime(policy.AvailableTimeRanges, time.Now()) {
+		result.Allowed = false
+		result.Reason = "outside available time range"
+		return result, nil
+	}
+
 	// 检查速率限制（0 表示无限制）
 	current := s.rateCounter.GetCount(userID.String(), policy.RateLimitWindow)
 
@@ -253,6 +260,58 @@ func (s *Service) CheckQuota(userID uuid.UUID, policyName string, modelID string
 	}
 
 	return result, nil
+}
+
+// isWithinAvailableTime 检查指定时间是否在可用时间段内
+// 空列表表示全天可用
+func isWithinAvailableTime(ranges []entity.TimeRange, now time.Time) bool {
+	if len(ranges) == 0 {
+		return true
+	}
+
+	currentMinutes := now.Hour()*60 + now.Minute()
+
+	for _, tr := range ranges {
+		startH, startM, err1 := parseTimeOfDay(tr.Start)
+		endH, endM, err2 := parseTimeOfDay(tr.End)
+		if err1 != nil || err2 != nil {
+			continue // 忽略无效的时间段配置
+		}
+
+		startMinutes := startH*60 + startM
+		endMinutes := endH*60 + endM
+
+		if startMinutes <= endMinutes {
+			// 非跨午夜：如 08:00-18:00
+			if currentMinutes >= startMinutes && currentMinutes < endMinutes {
+				return true
+			}
+		} else {
+			// 跨午夜：如 22:00-06:00 → [22:00, 24:00) ∪ [00:00, 06:00)
+			if currentMinutes >= startMinutes || currentMinutes < endMinutes {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// parseTimeOfDay 解析 "HH:MM" 格式的时间字符串
+// 支持 "24:00" 表示一天结束
+func parseTimeOfDay(s string) (int, int, error) {
+	if len(s) != 5 || s[2] != ':' {
+		return 0, 0, fmt.Errorf("invalid time format: %s", s)
+	}
+	h := int(s[0]-'0')*10 + int(s[1]-'0')
+	m := int(s[3]-'0')*10 + int(s[4]-'0')
+	if h < 0 || h > 24 || m < 0 || m > 59 {
+		return 0, 0, fmt.Errorf("invalid time: %s", s)
+	}
+	if h == 24 && m != 0 {
+		return 0, 0, fmt.Errorf("invalid time: %s (only 24:00 is allowed)", s)
+	}
+	return h, m, nil
 }
 
 // getDailyRequestCountWithCache 获取每日请求数（带缓存）

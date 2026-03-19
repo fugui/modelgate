@@ -66,14 +66,20 @@ type BackendConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 }
 
+type TimeRangeConfig struct {
+	Start string `yaml:"start"` // "HH:MM" 格式, e.g. "00:00"
+	End   string `yaml:"end"`   // "HH:MM" 格式, e.g. "10:00"
+}
+
 type PolicyConfig struct {
-	Name              string   `yaml:"name"`
-	RateLimit         int      `yaml:"rate_limit"`
-	RateLimitWindow   int      `yaml:"rate_limit_window"`
-	RequestQuotaDaily int      `yaml:"request_quota_daily"`
-	Models            []string `yaml:"models"`
-	Description       string   `yaml:"description"`
-	DefaultModel      string   `yaml:"default_model"`
+	Name                string            `yaml:"name"`
+	RateLimit           int               `yaml:"rate_limit"`
+	RateLimitWindow     int               `yaml:"rate_limit_window"`
+	RequestQuotaDaily   int               `yaml:"request_quota_daily"`
+	AvailableTimeRanges []TimeRangeConfig `yaml:"available_time_ranges"`
+	Models              []string          `yaml:"models"`
+	Description         string            `yaml:"description"`
+	DefaultModel        string            `yaml:"default_model"`
 }
 
 type AdminConfig struct {

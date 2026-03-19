@@ -8,16 +8,23 @@ import (
 	"modelgate/internal/config"
 )
 
+// TimeRange 可用时间段
+type TimeRange struct {
+	Start string `json:"start"` // "HH:MM" 格式
+	End   string `json:"end"`   // "HH:MM" 格式
+}
+
 type QuotaPolicy struct {
-	Name              string      `json:"name"`
-	RateLimit         int         `json:"rate_limit"`
-	RateLimitWindow   int         `json:"rate_limit_window"`
-	RequestQuotaDaily int         `json:"request_quota_daily"`
-	Models            StringArray `json:"models"`
-	Description       string      `json:"description"`
-	DefaultModel      string      `json:"default_model"`
-	CreatedAt         time.Time   `json:"created_at"`
-	UpdatedAt         time.Time   `json:"updated_at"`
+	Name                string      `json:"name"`
+	RateLimit           int         `json:"rate_limit"`
+	RateLimitWindow     int         `json:"rate_limit_window"`
+	RequestQuotaDaily   int         `json:"request_quota_daily"`
+	AvailableTimeRanges []TimeRange `json:"available_time_ranges"`
+	Models              StringArray `json:"models"`
+	Description         string      `json:"description"`
+	DefaultModel        string      `json:"default_model"`
+	CreatedAt           time.Time   `json:"created_at"`
+	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
 type QuotaUsageDaily struct {
@@ -61,29 +68,43 @@ func NewQuotaStore(cm *config.ConfigManager, db *sql.DB) *QuotaStore {
 
 // configToPolicy 将配置策略转换为数据策略
 func (s *QuotaStore) configToPolicy(cfg config.PolicyConfig) *QuotaPolicy {
+	// 转换时间段
+	var timeRanges []TimeRange
+	for _, tr := range cfg.AvailableTimeRanges {
+		timeRanges = append(timeRanges, TimeRange{Start: tr.Start, End: tr.End})
+	}
+
 	return &QuotaPolicy{
-		Name:              cfg.Name,
-		RateLimit:         cfg.RateLimit,
-		RateLimitWindow:   cfg.RateLimitWindow,
-		RequestQuotaDaily: cfg.RequestQuotaDaily,
-		Models:            cfg.Models,
-		Description:       cfg.Description,
-		DefaultModel:      cfg.DefaultModel,
-		CreatedAt:         time.Now(),
-		UpdatedAt:         time.Now(),
+		Name:                cfg.Name,
+		RateLimit:           cfg.RateLimit,
+		RateLimitWindow:     cfg.RateLimitWindow,
+		RequestQuotaDaily:   cfg.RequestQuotaDaily,
+		AvailableTimeRanges: timeRanges,
+		Models:              cfg.Models,
+		Description:         cfg.Description,
+		DefaultModel:        cfg.DefaultModel,
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 }
 
 // policyToConfig 将数据策略转换为配置策略
 func (s *QuotaStore) policyToConfig(policy *QuotaPolicy) config.PolicyConfig {
+	// 转换时间段
+	var timeRanges []config.TimeRangeConfig
+	for _, tr := range policy.AvailableTimeRanges {
+		timeRanges = append(timeRanges, config.TimeRangeConfig{Start: tr.Start, End: tr.End})
+	}
+
 	return config.PolicyConfig{
-		Name:              policy.Name,
-		RateLimit:         policy.RateLimit,
-		RateLimitWindow:   policy.RateLimitWindow,
-		RequestQuotaDaily: policy.RequestQuotaDaily,
-		Models:            policy.Models,
-		Description:       policy.Description,
-		DefaultModel:      policy.DefaultModel,
+		Name:                policy.Name,
+		RateLimit:           policy.RateLimit,
+		RateLimitWindow:     policy.RateLimitWindow,
+		RequestQuotaDaily:   policy.RequestQuotaDaily,
+		AvailableTimeRanges: timeRanges,
+		Models:              policy.Models,
+		Description:         policy.Description,
+		DefaultModel:        policy.DefaultModel,
 	}
 }
 

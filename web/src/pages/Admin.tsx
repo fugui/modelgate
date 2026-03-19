@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, Tag, message, Tabs, Modal, Form, Input, Space, Popconfirm, Statistic, Row, Col, Tooltip, Switch, Drawer, InputNumber, Select } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SettingOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SettingOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, ArrowLeftOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
 
@@ -51,11 +51,17 @@ interface User {
   last_login_at?: string;
 }
 
+interface TimeRange {
+  start: string;
+  end: string;
+}
+
 interface Policy {
   name: string;
   rate_limit: number;
   rate_limit_window: number;
   request_quota_daily: number;
+  available_time_ranges?: TimeRange[];
   models: string[];
   description: string;
   default_model?: string;
@@ -97,6 +103,7 @@ interface PolicyFormValues {
   rate_limit: number;
   rate_limit_window: number;
   request_quota_daily: number;
+  available_time_ranges?: TimeRange[];
   models: string[];
   default_model?: string;
 }
@@ -540,6 +547,7 @@ const Admin: React.FC = () => {
       rate_limit: 60,
       rate_limit_window: 60,
       request_quota_daily: 1000,
+      available_time_ranges: [],
       default_model: '',
     });
     setPolicyModalVisible(true);
@@ -554,6 +562,7 @@ const Admin: React.FC = () => {
       rate_limit: policy.rate_limit,
       rate_limit_window: policy.rate_limit_window,
       request_quota_daily: policy.request_quota_daily,
+      available_time_ranges: policy.available_time_ranges || [],
       models: policy.models || [],
       default_model: policy.default_model,
     });
@@ -580,6 +589,7 @@ const Admin: React.FC = () => {
           rate_limit: values.rate_limit,
           rate_limit_window: values.rate_limit_window,
           request_quota_daily: values.request_quota_daily,
+          available_time_ranges: values.available_time_ranges || [],
           models: values.models,
           default_model: values.default_model,
         });
@@ -592,6 +602,7 @@ const Admin: React.FC = () => {
           rate_limit: values.rate_limit,
           rate_limit_window: values.rate_limit_window,
           request_quota_daily: values.request_quota_daily,
+          available_time_ranges: values.available_time_ranges || [],
           models: values.models,
           default_model: values.default_model,
         });
@@ -739,6 +750,14 @@ const Admin: React.FC = () => {
         models?.length > 0
           ? <Space size="small">{models.map(m => <Tag key={m}>{m}</Tag>)}</Space>
           : '-',
+    },
+    {
+      title: '可用时段',
+      dataIndex: 'available_time_ranges',
+      render: (ranges: TimeRange[]) =>
+        ranges && ranges.length > 0
+          ? <Space size="small" wrap>{ranges.map((r, i) => <Tag key={i} color="cyan">{r.start}-{r.end}</Tag>)}</Space>
+          : <Tag>全天</Tag>,
     },
     {
       title: '默认模型',
@@ -1525,6 +1544,40 @@ const Admin: React.FC = () => {
             extra="每天允许的请求次数（0表示无限制）"
           >
             <InputNumber min={0} max={1000000} style={{ width: '100%' }} placeholder="如：1000" />
+          </Form.Item>
+
+          <Form.Item label="可用时段" extra="不添加任何时段表示全天可用，支持跨午夜（如 22:00-06:00）">
+            <Form.List name="available_time_ranges">
+              {(fields, { add, remove }) => (
+                <>
+                  {fields.map(({ key, name, ...restField }) => (
+                    <Space key={key} style={{ display: 'flex', marginBottom: 8 }} align="baseline">
+                      <Form.Item
+                        {...restField}
+                        name={[name, 'start']}
+                        rules={[{ required: true, message: '请输入开始时间' }, { pattern: /^([01]\d|2[0-4]):([0-5]\d)$/, message: 'HH:MM 格式' }]}
+                        style={{ marginBottom: 0 }}
+                      >
+                        <Input placeholder="00:00" style={{ width: 90 }} />
+                      </Form.Item>
+                      <span>-</span>
+                      <Form.Item
+                        {...restField}
+                        name={[name, 'end']}
+                        rules={[{ required: true, message: '请输入结束时间' }, { pattern: /^([01]\d|2[0-4]):([0-5]\d)$/, message: 'HH:MM 格式' }]}
+                        style={{ marginBottom: 0 }}
+                      >
+                        <Input placeholder="24:00" style={{ width: 90 }} />
+                      </Form.Item>
+                      <MinusCircleOutlined onClick={() => remove(name)} style={{ color: '#ff4d4f' }} />
+                    </Space>
+                  ))}
+                  <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                    添加时段
+                  </Button>
+                </>
+              )}
+            </Form.List>
           </Form.Item>
 
           <Form.Item
