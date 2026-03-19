@@ -10,16 +10,16 @@ import (
 )
 
 // HourlyCounter 内存小时级计数器
+// 保留今天和昨天的数据以支持跨天的 24 小时查询
 type HourlyCounter struct {
-	date   string                      // 当前日期，用于检测日期变化
-	counts map[string]map[int]int      // userID -> hour(0-23) -> count
+	// date -> userID -> hour(0-23) -> count
+	counts map[string]map[string]map[int]int
 	mu     sync.RWMutex
 }
 
 func NewHourlyCounter() *HourlyCounter {
 	return &HourlyCounter{
-		date:   time.Now().Format("2006-01-02"),
-		counts: make(map[string]map[int]int),
+		counts: make(map[string]map[string]map[int]int),
 	}
 }
 
@@ -28,29 +28,28 @@ func (hc *HourlyCounter) Increment(userID string) {
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
 
-	// 检查日期是否变化
 	today := time.Now().Format("2006-01-02")
-	if hc.date != today {
-		// 跨天了，重置所有数据
-		hc.date = today
-		hc.counts = make(map[string]map[int]int)
-	}
-
 	hour := time.Now().Hour()
 
-	if hc.counts[userID] == nil {
-		hc.counts[userID] = make(map[int]int)
+	if hc.counts[today] == nil {
+		hc.counts[today] = make(map[string]map[int]int)
 	}
-	hc.counts[userID][hour]++
+	if hc.counts[today][userID] == nil {
+		hc.counts[today][userID] = make(map[int]int)
+	}
+	hc.counts[today][userID][hour]++
 }
 
 // GetLast24Hours 获取最近24小时的总请求数（按小时汇总）
+// 正确跨天：例如当前 8:00，返回昨天 9:00 到今天 8:00 的数据
 func (hc *HourlyCounter) GetLast24Hours() []HourlyStat {
 	hc.mu.RLock()
 	defer hc.mu.RUnlock()
 
 	now := time.Now()
 	currentHour := now.Hour()
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
 
 	// 初始化24小时的数据（从24小时前到现在）
 	stats := make([]HourlyStat, 24)
@@ -63,21 +62,25 @@ func (hc *HourlyCounter) GetLast24Hours() []HourlyStat {
 		}
 	}
 
-	// 如果跨天了，只返回今天的数据
-	today := now.Format("2006-01-02")
-	if hc.date != today {
-		return stats
-	}
+	// 确定哪些小时属于昨天、哪些属于今天
+	// 例如当前 08:00，那么 stats[0]=09:00(昨天), stats[1]=10:00(昨天), ..., stats[14]=23:00(昨天), stats[15]=00:00(今天), ..., stats[23]=08:00(今天)
+	for i := 0; i < 24; i++ {
+		hour := (currentHour - 23 + i + 24) % 24
+		// 判断这个小时属于昨天还是今天
+		var date string
+		if i < (23 - currentHour) {
+			// 属于昨天
+			date = yesterday
+		} else {
+			// 属于今天
+			date = today
+		}
 
-	// 按小时汇总所有用户的请求
-	for _, userCounts := range hc.counts {
-		for hour, count := range userCounts {
-			// 找到对应的小时位置
-			for i := 0; i < 24; i++ {
-				statHour := (currentHour - 23 + i + 24) % 24
-				if statHour == hour {
+		// 汇总该日期所有用户在此小时的请求数
+		if dayData, ok := hc.counts[date]; ok {
+			for _, userCounts := range dayData {
+				if count, ok := userCounts[hour]; ok {
 					stats[i].Requests += count
-					break
 				}
 			}
 		}
@@ -98,12 +101,12 @@ func NewService(db *sql.DB) *Service {
 		db:            db,
 		hourlyCounter: NewHourlyCounter(),
 	}
-	// 启动日期检查任务
+	// 启动清理任务
 	go s.dateCheckLoop()
 	return s
 }
 
-// dateCheckLoop 每小时检查一次日期变化
+// dateCheckLoop 每小时清理过期数据（只保留今天和昨天）
 func (s *Service) dateCheckLoop() {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
@@ -111,9 +114,11 @@ func (s *Service) dateCheckLoop() {
 	for range ticker.C {
 		s.hourlyCounter.mu.Lock()
 		today := time.Now().Format("2006-01-02")
-		if s.hourlyCounter.date != today {
-			s.hourlyCounter.date = today
-			s.hourlyCounter.counts = make(map[string]map[int]int)
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+		for date := range s.hourlyCounter.counts {
+			if date != today && date != yesterday {
+				delete(s.hourlyCounter.counts, date)
+			}
 		}
 		s.hourlyCounter.mu.Unlock()
 	}
