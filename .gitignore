@@ -72,18 +72,6 @@ config.yaml
 *.db.backup
 .gitnexus
 
-# Ignore all files without an extension in the root directory
-/*
-!/*/
-!/*.*
-# Whitelist essential root files without extensions
-!Makefile
-!LICENSE
-
-# Re-exclude directories that were whitelisted by !/*/
-logs/
-releases/
-tmp/
-temp/
-vendor/
-internal/static/dist/
+# 本地运行时文件
+*.service
+test_*.go
