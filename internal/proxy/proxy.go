@@ -493,13 +493,35 @@ func (p *Proxy) handleConvertedStreamResponse(
 	// 创建该流的状态跟踪器
 	streamState := make(map[string]interface{})
 	var fullCollectedText strings.Builder
-	outputTokens := 0
+
+	// 使用 defer 确保无论流式循环如何退出（正常 EOF、错误、ctx 取消），都记录 Token
+	defer func() {
+		outputTokens := utils.EstimateTokens(fullCollectedText.String())
+		latency := int(time.Since(startTime).Milliseconds())
+
+		c.Set("input_tokens", inputTokens)
+		c.Set("output_tokens", outputTokens)
+
+		p.usageService.RecordUsageDetailed(&usage.Record{
+			UserID:       req.UserID,
+			ModelID:      req.ModelID,
+			LatencyMs:    latency,
+			ClientIP:     req.ClientIP,
+			UserAgent:    req.UserAgent,
+			BackendID:    backendID,
+			StatusCode:   resp.StatusCode,
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+		})
+
+		_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens)
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Warn("Stream processing timeout or cancelled")
-			return
+			return // defer 会确保记录 Token
 		default:
 		}
 
@@ -537,46 +559,40 @@ func (p *Proxy) handleConvertedStreamResponse(
 			fullCollectedText.WriteString(contentDelta)
 		}
 	}
-
-	outputTokens = utils.EstimateTokens(fullCollectedText.String())
-	latency := int(time.Since(startTime).Milliseconds())
-
-	c.Set("input_tokens", inputTokens)
-	c.Set("output_tokens", outputTokens)
-
-	p.usageService.RecordUsageDetailed(&usage.Record{
-		UserID:       req.UserID,
-		ModelID:      req.ModelID,
-		LatencyMs:    latency,
-		ClientIP:     req.ClientIP,
-		UserAgent:    req.UserAgent,
-		BackendID:    backendID,
-		StatusCode:   resp.StatusCode,
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
-	})
-
-	_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens)
 }
 
 // extractContentFromSSE 从 SSE 格式的 data 行中粗略提取文本以估算 Token
-// 支持 OpenAI 格式 (choices[0].delta.content) 和 Anthropic 格式 (delta.text, delta.thinking, delta.partial_json)
+// 支持 OpenAI 格式 (choices[0].delta.content / reasoning_content) 和 Anthropic 格式 (delta.text, delta.thinking, delta.partial_json)
 func extractContentFromSSE(line string) string {
 	var result strings.Builder
 	// 处理可能包含多个 SSE 事件的转换输出（lineConverter 可能将一行转换为多个事件）
 	for _, segment := range strings.Split(line, "\n") {
 		segment = strings.TrimSpace(segment)
-		if !strings.HasPrefix(segment, "data: ") || segment == "data: [DONE]" {
+
+		// 兼容 "data: {...}" 和 "data:{...}" 两种格式
+		var jsonStr string
+		if strings.HasPrefix(segment, "data: ") {
+			jsonStr = strings.TrimPrefix(segment, "data: ")
+		} else if strings.HasPrefix(segment, "data:") {
+			jsonStr = strings.TrimPrefix(segment, "data:")
+		} else {
 			continue
 		}
 
-		jsonStr := strings.TrimPrefix(segment, "data: ")
+		jsonStr = strings.TrimSpace(jsonStr)
+		if jsonStr == "[DONE]" || jsonStr == "" {
+			continue
+		}
 
 		// 尝试 OpenAI 格式
 		var streamResp StreamResponse
 		if err := json.Unmarshal([]byte(jsonStr), &streamResp); err == nil && len(streamResp.Choices) > 0 {
 			if content, ok := streamResp.Choices[0].Delta["content"].(string); ok {
 				result.WriteString(content)
+			}
+			// 提取 reasoning_content（思考模型如 Kimi、DeepSeek R1 等使用）
+			if reasoning, ok := streamResp.Choices[0].Delta["reasoning_content"].(string); ok {
+				result.WriteString(reasoning)
 			}
 			// 提取 tool_calls arguments
 			if toolCalls, ok := streamResp.Choices[0].Delta["tool_calls"].([]interface{}); ok {
