@@ -130,6 +130,7 @@ concurrency:
 frontend:
   feedback_url: "https://feedback.example.com"      # 用户反馈链接
   dev_manual_url: "https://docs.example.com"        # 开发手册链接
+  registration_enabled: false                        # 是否开放用户自助注册（注册后需管理员审核）
 
 # SSO 单点登录配置（可选）
 sso:

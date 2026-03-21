@@ -168,8 +168,8 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	// 检查邮箱是否已存在
-	existing, err := h.store.GetByEmail(req.Email)
+	// 检查邮箱是否已存在（包括待审核的用户）
+	existing, err := h.store.GetByEmailAll(req.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -197,7 +197,7 @@ func (h *Handler) Register(c *gin.Context) {
 		Role:         req.Role,
 		Department:   req.Department,
 		QuotaPolicy:  req.QuotaPolicy,
-		Enabled:      true,
+		Enabled:      false, // 注册后默认禁用，需管理员审核
 	}
 
 	if user.QuotaPolicy == "" {
@@ -209,17 +209,8 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	token, err := h.jwtManager.Generate(user)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
 	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"token": token,
-			"user":  user.ToResponse(),
-		},
+		"message": "注册成功，请等待管理员审核",
 	})
 }
 

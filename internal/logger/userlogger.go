@@ -11,11 +11,13 @@ import (
 
 // UsageLogEntry 使用日志条目
 type UsageLogEntry struct {
-	Time      string `json:"time"`
-	Model     string `json:"model"`
-	LatencyMs int    `json:"latency_ms"`
-	ClientIP  string `json:"client_ip,omitempty"`
-	UserAgent string `json:"user_agent,omitempty"`
+	Time       string `json:"time"`
+	UserName   string `json:"user_name,omitempty"`
+	UserEmail  string `json:"user_email,omitempty"`
+	Model      string `json:"model"`
+	LatencyMs  int    `json:"latency_ms"`
+	ClientIP   string `json:"client_ip,omitempty"`
+	ClientType string `json:"client_type,omitempty"`
 	StatusCode   int    `json:"status_code,omitempty"`
 	Error        string `json:"error,omitempty"`
 	BackendID    string `json:"backend_id,omitempty"`

@@ -7,7 +7,7 @@
 
 ## 核心功能
 
-- **用户管理**：JWT 认证、角色管理（管理员/经理/普通用户）
+- **用户管理**：JWT 认证、角色管理（管理员/经理/普通用户）、自助注册 + 管理员审核
 - **API Key 管理**：用户自助创建/删除 API Key，支持过期时间和模型限制
 - **多后端架构**：一个模型可配置多个后端实例，支持权重轮询负载均衡
 - **健康检查**：自动检测后端可用性，自动剔除故障节点
@@ -178,6 +178,7 @@ quota_policies:
 frontend:
   feedback_url: "https://feedback.example.com"
   dev_manual_url: "https://docs.example.com"
+  registration_enabled: false   # 开放用户自助注册（注册后需管理员审核）
 
 # 并发控制
 concurrency:
@@ -259,6 +260,21 @@ Content-Type: application/json
       "role": "user"
     }
   }
+}
+
+# 用户自助注册（需开启 registration_enabled）
+POST /api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "newuser@example.com",
+  "password": "password123",
+  "name": "新用户"
+}
+
+# 响应（注册后需管理员审核才能登录）
+{
+  "message": "注册成功，请等待管理员审核"
 }
 ```
 
@@ -568,6 +584,15 @@ server {
 8. **SSO 配置**：如启用 SSO，确保正确配置 issuer_url 和 client_secret
 
 ## 版本历史
+
+### v0.6.0 (2026-03)
+- ✨ 新增用户自助注册功能（需管理员审核后方可使用）
+- ✨ 前端新增注册页面，登录页条件显示注册入口
+- ✨ 管理员用户列表显示“待审核”标签
+- ✨ 新增 `frontend.registration_enabled` 配置项控制注册开关
+- 🐛 修复流式响应下行 Token 统计为 0 的问题
+- 🐛 修复 SSE 解析不兼容 `data:` 无空格格式的问题
+- 🐛 修复思考模型 `reasoning_content` 未计入 Token 统计
 
 ### v0.5.0 (2025-03)
 - ✨ 新增配额策略「可用时间段」功能（`available_time_ranges`）

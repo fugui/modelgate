@@ -630,11 +630,16 @@ const Admin: React.FC = () => {
       title: '启用状态',
       dataIndex: 'enabled',
       render: (enabled: boolean, record: User) => (
-        <Switch
-          checked={enabled}
-          onChange={() => handleToggleUserEnabled(record)}
-          size="small"
-        />
+        <Space size="small">
+          <Switch
+            checked={enabled}
+            onChange={() => handleToggleUserEnabled(record)}
+            size="small"
+          />
+          {!enabled && !record.last_login_at && (
+            <Tag color="orange">待审核</Tag>
+          )}
+        </Space>
       ),
     },
     {

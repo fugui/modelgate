@@ -1,19 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Form, Input, Button, Card, message } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import api from '../api';
 
 const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const navigate = useNavigate();
+  const [messageApi, contextHolder] = message.useMessage();
 
-  // 如果已登录则直接跳转
-  React.useEffect(() => {
+  useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
       navigate('/chat');
     }
+    // 获取前端配置，检查是否开放注册
+    api.get('/api/v1/config/frontend').then(res => {
+      setRegistrationEnabled(res.data.data?.registration_enabled || false);
+    }).catch(() => {});
   }, [navigate]);
 
   const onFinish = async (values: { email: string; password: string }) => {
@@ -25,13 +30,17 @@ const Login: React.FC = () => {
       messageApi.success('登录成功');
       navigate('/chat');
     } catch (err: any) {
-      messageApi.error(err.response?.data?.error || '登录失败');
+      const status = err.response?.status;
+      const errMsg = err.response?.data?.error;
+      if (status === 403 && errMsg === 'account disabled') {
+        messageApi.warning('您的账号正在等待管理员审核，请稍后再试');
+      } else {
+        messageApi.error(errMsg || '登录失败');
+      }
     } finally {
       setLoading(false);
     }
   };
-
-  const [messageApi, contextHolder] = message.useMessage();
 
   return (
     <div style={{ 
@@ -61,6 +70,11 @@ const Login: React.FC = () => {
               登录
             </Button>
           </Form.Item>
+          {registrationEnabled && (
+            <div style={{ textAlign: 'center' }}>
+              还没有账号？<Link to="/register">立即注册</Link>
+            </div>
+          )}
         </Form>
       </Card>
     </div>

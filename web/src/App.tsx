@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-route
 import { ConfigProvider, theme, Spin } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import Login from './pages/Login';
+import Register from './pages/Register';
 import MainLayout from './components/MainLayout';
 import Chat from './pages/Chat';
 import UsageStats from './pages/UsageStats';
@@ -27,6 +28,7 @@ const App: React.FC = () => {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
           <Route
             path="/"
             element={

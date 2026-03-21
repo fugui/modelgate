@@ -172,6 +172,28 @@ func (s *UserStore) GetByEmail(email string) (*User, error) {
 	return user, nil
 }
 
+// GetByEmailAll 查询用户（不过滤 enabled 状态），用于注册时检测邮箱是否已被占用
+func (s *UserStore) GetByEmailAll(email string) (*User, error) {
+	user := &User{}
+	query := `
+		SELECT id, email, password_hash, name, role, department, quota_policy,
+		       auth_source, enabled, created_at, updated_at, last_login_at
+		FROM users WHERE email = ?`
+
+	err := s.db.QueryRow(query, email).Scan(
+		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
+		&user.Department, &user.QuotaPolicy, &user.AuthSource, &user.Enabled,
+		&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 func (s *UserStore) List(limit, offset int) ([]*User, error) {
 	query := `
 		SELECT id, email, password_hash, name, role, department, quota_policy,

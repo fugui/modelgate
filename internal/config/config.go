@@ -88,8 +88,9 @@ type AdminConfig struct {
 }
 
 type FrontendConfig struct {
-	FeedbackURL  string `yaml:"feedback_url"`
-	DevManualURL string `yaml:"dev_manual_url"`
+	FeedbackURL         string `yaml:"feedback_url" json:"feedback_url"`
+	DevManualURL        string `yaml:"dev_manual_url" json:"dev_manual_url"`
+	RegistrationEnabled bool   `yaml:"registration_enabled" json:"registration_enabled"`
 }
 
 // SSOConfig 企业 SSO 配置

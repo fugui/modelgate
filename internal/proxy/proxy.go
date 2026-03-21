@@ -124,6 +124,8 @@ func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID
 type BackendRequest struct {
 	ModelID     string
 	UserID      uuid.UUID
+	UserName    string
+	UserEmail   string
 	APIKeyID    uuid.UUID
 	RequestBody []byte
 	IsStream    bool
@@ -160,6 +162,10 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		return
 	}
 
+	// 将用户信息填充到请求中，便于后续日志记录
+	req.UserName = user.Name
+	req.UserEmail = user.Email
+
 	// 检查配额
 	quotaResult, err := p.quotaService.CheckQuota(req.UserID, user.QuotaPolicy, req.ModelID)
 	if err != nil {
@@ -193,6 +199,8 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	if !ok {
 		p.usageService.RecordUsageDetailed(&usage.Record{
 			UserID:     req.UserID,
+			UserName:   req.UserName,
+			UserEmail:  req.UserEmail,
 			ModelID:    req.ModelID,
 			ClientIP:   req.ClientIP,
 			UserAgent:  req.UserAgent,
@@ -288,6 +296,8 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		c.Set("output_tokens", outputTokens)
 		p.usageService.RecordUsageDetailed(&usage.Record{
 			UserID:       req.UserID,
+			UserName:     req.UserName,
+			UserEmail:    req.UserEmail,
 			ModelID:      req.ModelID,
 			LatencyMs:    int(time.Since(startTime).Milliseconds()),
 			ClientIP:     req.ClientIP,
@@ -330,6 +340,8 @@ func (p *Proxy) handleConvertedNormalResponse(
 	if err != nil {
 		p.usageService.RecordUsageDetailed(&usage.Record{
 			UserID:      req.UserID,
+			UserName:    req.UserName,
+			UserEmail:   req.UserEmail,
 			ModelID:     req.ModelID,
 			ClientIP:    req.ClientIP,
 			UserAgent:   req.UserAgent,
@@ -380,6 +392,8 @@ func (p *Proxy) handleConvertedNormalResponse(
 	// 记录使用日志
 	p.usageService.RecordUsageDetailed(&usage.Record{
 		UserID:       req.UserID,
+		UserName:     req.UserName,
+		UserEmail:    req.UserEmail,
 		ModelID:      req.ModelID,
 		LatencyMs:    latency,
 		ClientIP:     req.ClientIP,
@@ -504,6 +518,8 @@ func (p *Proxy) handleConvertedStreamResponse(
 
 		p.usageService.RecordUsageDetailed(&usage.Record{
 			UserID:       req.UserID,
+			UserName:     req.UserName,
+			UserEmail:    req.UserEmail,
 			ModelID:      req.ModelID,
 			LatencyMs:    latency,
 			ClientIP:     req.ClientIP,
