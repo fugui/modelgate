@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -225,11 +226,31 @@ func (h *Handler) Profile(c *gin.Context) {
 }
 
 func (h *Handler) List(c *gin.Context) {
-	// 支持分页
-	limit := 100
-	offset := 0
+	// 分页参数
+	page := 1
+	pageSize := 20
+	if p, err := strconv.Atoi(c.DefaultQuery("page", "1")); err == nil && p > 0 {
+		page = p
+	}
+	if ps, err := strconv.Atoi(c.DefaultQuery("page_size", "20")); err == nil && ps > 0 && ps <= 100 {
+		pageSize = ps
+	}
 
-	users, err := h.store.List(limit, offset)
+	// 排序参数
+	sortBy := c.DefaultQuery("sort_by", "created_at")
+	sortOrder := c.DefaultQuery("sort_order", "desc")
+
+	offset := (page - 1) * pageSize
+
+	// 查询总数
+	total, err := h.store.Count()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 查询分页数据
+	users, err := h.store.ListPaginated(pageSize, offset, sortBy, sortOrder)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -240,7 +261,12 @@ func (h *Handler) List(c *gin.Context) {
 		responses = append(responses, u.ToResponse())
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": responses})
+	c.JSON(http.StatusOK, gin.H{
+		"data":      responses,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
 }
 
 func (h *Handler) Create(c *gin.Context) {

@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -222,6 +223,63 @@ func (s *UserStore) List(limit, offset int) ([]*User, error) {
 	return users, rows.Err()
 }
 
+// validSortColumns 允许排序的列白名单（防 SQL 注入）
+var validSortColumns = map[string]string{
+	"email":         "email",
+	"quota_policy":  "quota_policy",
+	"enabled":       "enabled",
+	"last_login_at": "last_login_at",
+	"created_at":    "created_at",
+	"name":          "name",
+	"role":          "role",
+}
+
+// ListPaginated 分页且可排序的用户列表
+func (s *UserStore) ListPaginated(limit, offset int, sortBy, sortOrder string) ([]*User, error) {
+	// 安全的排序列
+	col, ok := validSortColumns[sortBy]
+	if !ok {
+		col = "created_at"
+	}
+	order := "DESC"
+	if sortOrder == "asc" {
+		order = "ASC"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, email, password_hash, name, role, department, quota_policy,
+		       auth_source, enabled, created_at, updated_at, last_login_at
+		FROM users ORDER BY %s %s LIMIT ? OFFSET ?`, col, order)
+
+	rows, err := s.db.Query(query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []*User
+	for rows.Next() {
+		user := &User{}
+		err := rows.Scan(
+			&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
+			&user.Department, &user.QuotaPolicy, &user.AuthSource, &user.Enabled,
+			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+// Count 返回用户总数
+func (s *UserStore) Count() (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	return count, err
+}
+
 func (s *UserStore) Update(user *User) error {
 	query := `
 		UPDATE users SET
@@ -244,12 +302,6 @@ func (s *UserStore) UpdateLastLogin(id uuid.UUID) error {
 func (s *UserStore) Delete(id uuid.UUID) error {
 	_, err := s.db.Exec("DELETE FROM users WHERE id = ?", id.String())
 	return err
-}
-
-func (s *UserStore) Count() (int, error) {
-	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
-	return count, err
 }
 
 func (s *UserStore) UpdatePassword(userID uuid.UUID, passwordHash string) error {

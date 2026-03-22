@@ -120,6 +120,10 @@ const Admin: React.FC = () => {
   const [healthStatus, setHealthStatus] = useState<Record<string, BackendHealth>>({});
   const [loading, setLoading] = useState(false);
 
+  // 用户表分页和排序状态
+  const [userPagination, setUserPagination] = useState({ current: 1, pageSize: 20, total: 0 });
+  const [userSort, setUserSort] = useState({ field: 'created_at', order: 'desc' });
+
   // Backend drawer states
   const [backendDrawerVisible, setBackendDrawerVisible] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
@@ -176,15 +180,28 @@ const Admin: React.FC = () => {
     }
   };
 
+  // 获取用户列表（支持分页和排序）
+  const fetchUsers = async (page = userPagination.current, pageSize = userPagination.pageSize, sortBy = userSort.field, sortOrder = userSort.order) => {
+    try {
+      const res = await api.get('/api/v1/admin/users', {
+        params: { page, page_size: pageSize, sort_by: sortBy, sort_order: sortOrder }
+      });
+      setUsers(res.data.data || []);
+      setUserPagination(prev => ({ ...prev, current: res.data.page, total: res.data.total }));
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      messageApi.error(error.response?.data?.error || '获取用户列表失败');
+    }
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [usersRes, modelsRes, policiesRes] = await Promise.all([
-        api.get('/api/v1/admin/users'),
+      const [, modelsRes, policiesRes] = await Promise.all([
+        fetchUsers(),
         api.get('/api/v1/admin/models'),
         api.get('/api/v1/admin/policies'),
       ]);
-      setUsers(usersRes.data.data || []);
       setPolicies(policiesRes.data.data || []);
 
       // Fetch backend counts for each model
@@ -617,18 +634,20 @@ const Admin: React.FC = () => {
   };
 
   const userColumns = [
-    { title: '邮箱', dataIndex: 'email' },
+    { title: '邮箱', dataIndex: 'email', sorter: true },
     { title: '姓名', dataIndex: 'name' },
-    { title: '角色', dataIndex: 'role' },
+    { title: '角色', dataIndex: 'role', render: (role: string) => <Tag color={role === 'admin' ? 'red' : 'default'}>{role}</Tag> },
     { title: '部门', dataIndex: 'department' },
     {
       title: '配额策略',
       dataIndex: 'quota_policy',
+      sorter: true,
       render: (policy: string) => policy ? <Tag color="blue">{policy}</Tag> : '-',
     },
     {
       title: '启用状态',
       dataIndex: 'enabled',
+      sorter: true,
       render: (enabled: boolean, record: User) => (
         <Space size="small">
           <Switch
@@ -645,6 +664,7 @@ const Admin: React.FC = () => {
     {
       title: '最后登录',
       dataIndex: 'last_login_at',
+      sorter: true,
       render: (time: string) => time ? new Date(time).toLocaleString() : '-',
     },
     {
@@ -1008,6 +1028,24 @@ const Admin: React.FC = () => {
               columns={userColumns}
               rowKey="id"
               loading={loading}
+              pagination={{
+                current: userPagination.current,
+                pageSize: userPagination.pageSize,
+                total: userPagination.total,
+                showSizeChanger: true,
+                pageSizeOptions: ['20', '30', '50'],
+                showTotal: (total) => `共 ${total} 个用户`,
+              }}
+              onChange={(pagination, _filters, sorter) => {
+                const s = Array.isArray(sorter) ? sorter[0] : sorter;
+                const newPage = pagination.current || 1;
+                const newPageSize = pagination.pageSize || 20;
+                const newSortField = (s?.field as string) || 'created_at';
+                const newSortOrder = s?.order === 'ascend' ? 'asc' : 'desc';
+                setUserPagination(prev => ({ ...prev, current: newPage, pageSize: newPageSize }));
+                setUserSort({ field: newSortField, order: newSortOrder });
+                fetchUsers(newPage, newPageSize, newSortField, newSortOrder);
+              }}
             />
           </Tabs.TabPane>
           <Tabs.TabPane tab="模型管理" key="models">

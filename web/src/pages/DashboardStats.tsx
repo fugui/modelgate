@@ -67,8 +67,30 @@ const DashboardStats: React.FC = () => {
 
   const fetchStats = async () => {
     try {
-      const response = await api.get('/admin/stats');
-      setData(response.data);
+      const [statsRes, hourlyRes, topUsersRes, modelRes, deptRes] = await Promise.all([
+        api.get('/api/v1/dashboard/stats'),
+        api.get('/api/v1/dashboard/hourly'),
+        api.get('/api/v1/dashboard/top-users'),
+        api.get('/api/v1/dashboard/models'),
+        api.get('/api/v1/dashboard/departments'),
+      ]);
+      const stats = statsRes.data.data || {};
+      setData({
+        summary: {
+          total_users: stats.total_users || 0,
+          total_models: stats.department_count || 0,
+          today_requests: stats.today_total_requests || 0,
+          today_tokens: (stats.today_input_tokens || 0) + (stats.today_output_tokens || 0),
+        },
+        hourly_stats: hourlyRes.data.data || [],
+        top_users: (topUsersRes.data.data || []).map((u: any) => ({
+          user_id: u.user_id,
+          username: u.name || u.user_id,
+          request_count: u.request_count,
+        })),
+        model_stats: modelRes.data.data || [],
+        department_stats: deptRes.data.data || [],
+      });
     } catch (error: any) {
       message.error('获取统计数据失败: ' + (error.response?.data?.error || error.message));
     } finally {
