@@ -195,7 +195,7 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	_ = p.quotaService.IncrementRate(req.UserID, quotaResult.RateLimitWindow)
 
 	// 选择后端
-	backend, ok := p.lb.Next(req.ModelID, quotaResult.DefaultModel)
+	backend, actualModelID, ok := p.lb.Next(req.ModelID, quotaResult.DefaultModel)
 	if !ok {
 		p.usageService.RecordUsageDetailed(&usage.Record{
 			UserID:     req.UserID,
@@ -210,6 +210,9 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no backend available for model: " + req.ModelID})
 		return
 	}
+
+	// 使用实际的模型 ID（可能是 fallback 后的模型）
+	req.ModelID = actualModelID
 
 	// 获取模型配置并注入参数
 	modelConfig, _ := p.modelStore.GetByID(req.ModelID)

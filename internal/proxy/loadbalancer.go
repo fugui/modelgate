@@ -82,7 +82,7 @@ func (lb *RoundRobinBalancer) AddBackend(modelID string, backend Backend) {
 	}
 }
 
-func (lb *RoundRobinBalancer) Next(modelID string, defaultModel string) (*Backend, bool) {
+func (lb *RoundRobinBalancer) Next(modelID string, defaultModel string) (*Backend, string, bool) {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
 
@@ -94,7 +94,7 @@ func (lb *RoundRobinBalancer) Next(modelID string, defaultModel string) (*Backen
 			return lb.tryGetBackend(defaultModel, modelID)
 		}
 		logger.Infof("Next: no backends found for model %s (not in map)", modelID)
-		return nil, false
+		return nil, modelID, false
 	}
 
 	return lb.tryGetBackend(modelID, modelID)
@@ -103,10 +103,10 @@ func (lb *RoundRobinBalancer) Next(modelID string, defaultModel string) (*Backen
 // tryGetBackend 尝试获取指定 model 的 backend
 // requestedModel 是原始请求的 model（用于日志）
 // lookupModel 是要查找 backend 的 model
-func (lb *RoundRobinBalancer) tryGetBackend(lookupModel string, requestedModel string) (*Backend, bool) {
+func (lb *RoundRobinBalancer) tryGetBackend(lookupModel string, requestedModel string) (*Backend, string, bool) {
 	backends := lb.backends[lookupModel]
 	if len(backends) == 0 {
-		return nil, false
+		return nil, requestedModel, false
 	}
 
 	// 找到健康的后端
@@ -123,7 +123,7 @@ func (lb *RoundRobinBalancer) tryGetBackend(lookupModel string, requestedModel s
 			if lookupModel != requestedModel {
 				logger.Infof("Next: using fallback model %s for request model %s (backend: %s)", lookupModel, requestedModel, backend.ID)
 			}
-			return &backend, true
+			return &backend, lookupModel, true
 		}
 	}
 
@@ -133,7 +133,7 @@ func (lb *RoundRobinBalancer) tryGetBackend(lookupModel string, requestedModel s
 	} else {
 		logger.Infof("Next: all %d backends for model %s are unhealthy, using first backend", len(backends), lookupModel)
 	}
-	return &backends[0], true
+	return &backends[0], lookupModel, true
 }
 
 func (lb *RoundRobinBalancer) MarkFailed(backendID string) {
