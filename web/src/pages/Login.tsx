@@ -20,7 +20,7 @@ const Login: React.FC = () => {
     }
     api.get('/api/v1/config/frontend').then(res => {
       setRegistrationEnabled(res.data.data?.registration_enabled || false);
-    }).catch(() => {});
+    }).catch(() => { });
   }, [navigate]);
 
   const onFinish = async (values: { email: string; password: string }) => {
@@ -35,7 +35,7 @@ const Login: React.FC = () => {
       const status = err.response?.status;
       const errMsg = err.response?.data?.error;
       if (status === 403 && errMsg === 'account disabled') {
-        messageApi.warning('您的账号正在等待管理员审核，请稍后再试');
+        navigate('/register?pending=true');
       } else {
         messageApi.error(errMsg || '登录失败');
       }
@@ -88,8 +88,8 @@ const Login: React.FC = () => {
             src={logo}
             alt="Model Gate"
             style={{
-              width: '80px',
-              height: '80px',
+              width: '180px',
+              height: '60px',
               marginBottom: '32px',
               filter: 'drop-shadow(0 4px 20px rgba(139, 92, 246, 0.3))',
             }}
@@ -108,7 +108,9 @@ const Login: React.FC = () => {
           }}>
             企业级大模型统一接入网关
             <br />
-            多后端负载均衡 · 配额管控 · 审计追踪
+            多后端负载均衡 · 灵活配额管控(模型/用户/时间) · 审计追踪
+            <br />
+            让 AI 触手可及，使能工作效率倍增新时代
           </Paragraph>
 
           {/* 特性标签 */}

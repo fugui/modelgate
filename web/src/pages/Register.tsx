@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { Form, Input, Button, message, Typography, Result } from 'antd';
 import { UserOutlined, LockOutlined, MailOutlined } from '@ant-design/icons';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import api from '../api';
 import logo from '../assets/modelgate.png';
 
 const { Title, Text, Paragraph } = Typography;
 
 const Register: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
-  const [registered, setRegistered] = useState(false);
+  const [registered, setRegistered] = useState(searchParams.get('pending') === 'true');
   const navigate = useNavigate();
   const [messageApi, contextHolder] = message.useMessage();
 

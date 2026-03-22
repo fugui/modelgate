@@ -128,7 +128,7 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	user, err := h.store.GetByEmail(req.Email)
+	user, err := h.store.GetByEmailAll(req.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
