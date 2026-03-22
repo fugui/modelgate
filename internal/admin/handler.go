@@ -2,6 +2,7 @@ package admin
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -262,7 +263,7 @@ func (h *ModelHandler) UpdateBackend(c *gin.Context) {
 	if req.BaseURL != "" {
 		backend.BaseURL = req.BaseURL
 	}
-	if req.APIKey != "" {
+	if req.APIKey != "" && !strings.HasPrefix(req.APIKey, "***") {
 		backend.APIKey = req.APIKey
 	}
 	if req.ModelName != "" {

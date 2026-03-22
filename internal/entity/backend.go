@@ -9,19 +9,20 @@ import (
 
 // Backend represents a backend instance for a model
 type Backend struct {
-	ID          string       `json:"id"`
-	ModelID     string       `json:"model_id"`
-	Name        string       `json:"name"`
-	BaseURL     string       `json:"base_url"`
-	APIKey      string       `json:"-"` // Never return API key in JSON
-	ModelName   string       `json:"model_name"`
-	Weight      int          `json:"weight"`
-	Region      string       `json:"region"`
-	Enabled     bool         `json:"enabled"`
-	Healthy     bool         `json:"healthy"`
-	LastCheckAt sql.NullTime `json:"last_check_at"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
+	ID           string       `json:"id"`
+	ModelID      string       `json:"model_id"`
+	Name         string       `json:"name"`
+	BaseURL      string       `json:"base_url"`
+	APIKey       string       `json:"-"`            // Never return API key in JSON
+	APIKeyMasked string       `json:"api_key"`       // Masked version for display
+	ModelName    string       `json:"model_name"`
+	Weight       int          `json:"weight"`
+	Region       string       `json:"region"`
+	Enabled      bool         `json:"enabled"`
+	Healthy      bool         `json:"healthy"`
+	LastCheckAt  sql.NullTime `json:"last_check_at"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
 }
 
 // BackendCreateRequest represents a request to create a backend
@@ -58,19 +59,29 @@ func NewBackendStore(cm *config.ConfigManager) *BackendStore {
 
 // configToBackend 将配置后端转换为数据后端
 func (s *BackendStore) configToBackend(modelID string, cfg config.BackendConfig) *Backend {
+	// 生成脱敏后的 API Key
+	masked := ""
+	if cfg.APIKey != "" {
+		if len(cfg.APIKey) > 4 {
+			masked = "***" + cfg.APIKey[len(cfg.APIKey)-4:]
+		} else {
+			masked = "***"
+		}
+	}
 	return &Backend{
-		ID:        cfg.ID,
-		ModelID:   modelID,
-		Name:      cfg.Name,
-		BaseURL:   cfg.BaseURL,
-		APIKey:    cfg.APIKey,
-		ModelName: cfg.ModelName,
-		Weight:    cfg.Weight,
-		Region:    cfg.Region,
-		Enabled:   cfg.Enabled,
-		Healthy:   true, // 默认健康
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:           cfg.ID,
+		ModelID:      modelID,
+		Name:         cfg.Name,
+		BaseURL:      cfg.BaseURL,
+		APIKey:       cfg.APIKey,
+		APIKeyMasked: masked,
+		ModelName:    cfg.ModelName,
+		Weight:       cfg.Weight,
+		Region:       cfg.Region,
+		Enabled:      cfg.Enabled,
+		Healthy:      true,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 }
 
