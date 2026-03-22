@@ -231,6 +231,10 @@ model_params:
 model_params:
   __user_agent__: "ModelGate/1.0"      # 自定义 User-Agent
   __header_x_source__: "modelgate"     # 自定义 X-Source 头
+
+# 强制设置 User-Agent 为 Claude Code CLI 的例子：
+model_params:
+  __user_agent__: "claude-cli/2.1.74 (external, cli)"    # 转发时将强制使用该 User-Agent
 ```
 
 Header 命名转换规则：`__user_agent__` → `User-Agent`
