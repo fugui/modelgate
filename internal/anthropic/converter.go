@@ -6,7 +6,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 )
+
+// thoughtSignatureCache 缓存 Gemini 返回的 thought_signature（按 tool_call_id 索引）
+var thoughtSignatureCache sync.Map
+
+// CacheThoughtSignature 存储 tool_call 的 thought_signature
+func CacheThoughtSignature(toolCallID string, extraContent interface{}) {
+	if toolCallID != "" && extraContent != nil {
+		thoughtSignatureCache.Store(toolCallID, extraContent)
+	}
+}
+
+// GetThoughtSignature 获取缓存的 thought_signature
+func GetThoughtSignature(toolCallID string) (interface{}, bool) {
+	return thoughtSignatureCache.Load(toolCallID)
+}
 
 // ToolUse 表示 Anthropic 的 tool_use 块
 type ToolUse struct {
@@ -203,14 +219,19 @@ func buildOpenAIMessages(role string, parsed parsedAnthropicContent) []map[strin
 			}
 			var toolCalls []map[string]interface{}
 			for _, toolUse := range parsed.toolUses {
-				toolCalls = append(toolCalls, map[string]interface{}{
+				tc := map[string]interface{}{
 					"id":   toolUse.ID,
 					"type": "function",
 					"function": map[string]interface{}{
 						"name":      toolUse.Name,
 						"arguments": string(toolUse.Input),
 					},
-				})
+				}
+				// 注入缓存的 Gemini thought_signature
+				if extra, ok := GetThoughtSignature(toolUse.ID); ok {
+					tc["extra_content"] = extra
+				}
+				toolCalls = append(toolCalls, tc)
 			}
 			openaiMsg["tool_calls"] = toolCalls
 		}
@@ -312,6 +333,12 @@ func ConvertFromOpenAI(body []byte, originalReq *MessagesRequest) ([]byte, error
 	// 提取 finish_reason
 	var stopReason *string
 	if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
+		// Gemini 在有 tool_calls 时仍返回 "stop"，需要修正
+		if fr == "stop" {
+			if toolCalls, ok := message["tool_calls"].([]interface{}); ok && len(toolCalls) > 0 {
+				fr = "tool_calls"
+			}
+		}
 		anthropicStop := convertStopReason(fr)
 		stopReason = &anthropicStop
 	}
@@ -348,6 +375,10 @@ func ConvertFromOpenAI(body []byte, originalReq *MessagesRequest) ([]byte, error
 				// 提取 tool call 信息
 				toolID, _ := toolCall["id"].(string)
 				
+				// 缓存 Gemini 的 extra_content（含 thought_signature）
+				if extraContent, ok := toolCall["extra_content"]; ok {
+					CacheThoughtSignature(toolID, extraContent)
+				}
 				// 提取 function 信息
 				if function, ok := toolCall["function"].(map[string]interface{}); ok {
 					name, _ := function["name"].(string)
@@ -552,6 +583,10 @@ func (p *StreamParser) handleTextDelta(delta map[string]interface{}) {
 
 func (p *StreamParser) handleToolCalls(delta map[string]interface{}) {
 	if toolCalls, ok := delta["tool_calls"].([]interface{}); ok {
+		// 在发出 tool_use 块之前，停止当前活跃的 text/thinking 块
+		p.stopActiveBlock()
+		p.state["tool_calls_seen"] = true
+
 		for _, tc := range toolCalls {
 			if tcMap, ok := tc.(map[string]interface{}); ok {
 				idx, _ := tcMap["index"].(float64)
@@ -560,13 +595,22 @@ func (p *StreamParser) handleToolCalls(delta map[string]interface{}) {
 				if function, ok := tcMap["function"].(map[string]interface{}); ok {
 					if name, ok := function["name"].(string); ok && name != "" {
 						toolID, _ := tcMap["id"].(string)
+						if toolID == "" {
+							toolID = "toolu_" + generateID()
+						}
+						// 缓存 Gemini 的 extra_content（含 thought_signature）
+						if extraContent, ok := tcMap["extra_content"]; ok {
+							CacheThoughtSignature(toolID, extraContent)
+						}
+						p.state["active_block_index"] = anthropicIdx
 						p.emitEvent("content_block_start", map[string]interface{}{
 							"type":  "content_block_start",
 							"index": anthropicIdx,
 							"content_block": map[string]interface{}{
-								"type": "tool_use",
-								"id":   toolID,
-								"name": name,
+								"type":  "tool_use",
+								"id":    toolID,
+								"name":  name,
+								"input": map[string]interface{}{},
 							},
 						})
 					}
@@ -588,6 +632,12 @@ func (p *StreamParser) handleToolCalls(delta map[string]interface{}) {
 
 func (p *StreamParser) handleFinishReason(choice map[string]interface{}) {
 	if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
+		// Gemini 在有 tool_calls 时仍返回 "stop"，需要修正为 "tool_calls"
+		if fr == "stop" {
+			if seen, _ := p.state["tool_calls_seen"].(bool); seen {
+				fr = "tool_calls"
+			}
+		}
 		p.stopActiveBlock()
 		p.emitEvent("message_delta", map[string]interface{}{
 			"type": "message_delta",

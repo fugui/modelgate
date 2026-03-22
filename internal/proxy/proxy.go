@@ -229,8 +229,14 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		requestBody = modifyRequestModel(requestBody, backend.ModelName)
 	}
 
-	// 转发请求
-	url := strings.TrimSuffix(backend.URL, "/") + "/v1/chat/completions"
+	// 构造目标 URL：如果 base_url 已含 /openai 路径（如 Gemini），只追加 /chat/completions
+	baseURL := strings.TrimSuffix(backend.URL, "/")
+	var url string
+	if strings.HasSuffix(baseURL, "/openai") {
+		url = baseURL + "/chat/completions"
+	} else {
+		url = baseURL + "/v1/chat/completions"
+	}
 	proxyReq, err := http.NewRequest(c.Request.Method, url, bytes.NewReader(requestBody))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
