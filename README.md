@@ -1,9 +1,9 @@
-# 模界（Model Gate）- 企业大模型管理平台
+# 模界（Model Gate）- 企业大模型统一接入网关
 
 [![Go Version](https://img.shields.io/badge/Go-1.22+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-模界（Model Gate）是一个为企业内部提供统一大模型服务入口的管理平台，实现用户管理、权限控制、配额计费、多后端负载均衡和审计追踪。
+模界（Model Gate）是一个为企业内部提供统一大模型服务入口的接入网关，实现用户管理、权限控制、配额计费、多后端负载均衡和审计追踪。
 
 ## 核心功能
 

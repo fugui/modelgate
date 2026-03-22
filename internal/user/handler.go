@@ -454,9 +454,10 @@ func (h *Handler) GetFrontendConfig(c *gin.Context) {
 	cfg := h.cm.GetConfig()
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"feedback_url":   cfg.Frontend.FeedbackURL,
-			"dev_manual_url": cfg.Frontend.DevManualURL,
-			"sso_enabled":    cfg.SSO.Enabled,
+			"feedback_url":         cfg.Frontend.FeedbackURL,
+			"dev_manual_url":       cfg.Frontend.DevManualURL,
+			"sso_enabled":          cfg.SSO.Enabled,
+			"registration_enabled": cfg.Frontend.RegistrationEnabled,
 		},
 	})
 }
