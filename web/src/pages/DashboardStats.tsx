@@ -207,7 +207,7 @@ const DashboardStats: React.FC = () => {
                   <YAxis yAxisId="left" orientation="left" stroke="#1890ff" label={{ value: '请求数', angle: -90, position: 'insideLeft', offset: 10 }} />
                   <YAxis yAxisId="right" orientation="right" stroke="#f5222d" tickFormatter={(v: number) => formatTokens(v)} label={{ value: 'Token', angle: 90, position: 'insideRight', offset: 10 }} />
                   <Tooltip
-                    formatter={(value: any, name: string) => {
+                    formatter={(value: any, name: any) => {
                       if (name === '请求数') return [`${value ?? 0}`, '请求数'];
                       return [formatTokens(Number(value ?? 0)), 'Token 总量'];
                     }}
