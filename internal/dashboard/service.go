@@ -9,22 +9,29 @@ import (
 	"github.com/google/uuid"
 )
 
+// HourlyData 每小时统计数据
+type HourlyData struct {
+	Count        int
+	InputTokens  int64
+	OutputTokens int64
+}
+
 // HourlyCounter 内存小时级计数器
 // 保留今天和昨天的数据以支持跨天的 24 小时查询
 type HourlyCounter struct {
-	// date -> userID -> hour(0-23) -> count
-	counts map[string]map[string]map[int]int
+	// date -> userID -> hour(0-23) -> HourlyData
+	counts map[string]map[string]map[int]*HourlyData
 	mu     sync.RWMutex
 }
 
 func NewHourlyCounter() *HourlyCounter {
 	return &HourlyCounter{
-		counts: make(map[string]map[string]map[int]int),
+		counts: make(map[string]map[string]map[int]*HourlyData),
 	}
 }
 
-// Increment 增加指定用户当前小时的计数
-func (hc *HourlyCounter) Increment(userID string) {
+// Increment 增加指定用户当前小时的计数和 Token
+func (hc *HourlyCounter) Increment(userID string, inputTokens, outputTokens int) {
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
 
@@ -32,12 +39,17 @@ func (hc *HourlyCounter) Increment(userID string) {
 	hour := time.Now().Hour()
 
 	if hc.counts[today] == nil {
-		hc.counts[today] = make(map[string]map[int]int)
+		hc.counts[today] = make(map[string]map[int]*HourlyData)
 	}
 	if hc.counts[today][userID] == nil {
-		hc.counts[today][userID] = make(map[int]int)
+		hc.counts[today][userID] = make(map[int]*HourlyData)
 	}
-	hc.counts[today][userID][hour]++
+	if hc.counts[today][userID][hour] == nil {
+		hc.counts[today][userID][hour] = &HourlyData{}
+	}
+	hc.counts[today][userID][hour].Count++
+	hc.counts[today][userID][hour].InputTokens += int64(inputTokens)
+	hc.counts[today][userID][hour].OutputTokens += int64(outputTokens)
 }
 
 // GetLast24Hours 获取最近24小时的总请求数（按小时汇总）
@@ -57,8 +69,10 @@ func (hc *HourlyCounter) GetLast24Hours() []HourlyStat {
 		hour := (currentHour - 23 + i + 24) % 24
 		timeStr := fmt.Sprintf("%02d:00", hour)
 		stats[i] = HourlyStat{
-			Hour:     timeStr,
-			Requests: 0,
+			Hour:         timeStr,
+			Requests:     0,
+			InputTokens:  0,
+			OutputTokens: 0,
 		}
 	}
 
@@ -76,11 +90,13 @@ func (hc *HourlyCounter) GetLast24Hours() []HourlyStat {
 			date = today
 		}
 
-		// 汇总该日期所有用户在此小时的请求数
+		// 汇总该日期所有用户在此小时的请求数和 Token
 		if dayData, ok := hc.counts[date]; ok {
-			for _, userCounts := range dayData {
-				if count, ok := userCounts[hour]; ok {
-					stats[i].Requests += count
+			for _, userData := range dayData {
+				if data, ok := userData[hour]; ok {
+					stats[i].Requests += data.Count
+					stats[i].InputTokens += data.InputTokens
+					stats[i].OutputTokens += data.OutputTokens
 				}
 			}
 		}
@@ -125,8 +141,8 @@ func (s *Service) dateCheckLoop() {
 }
 
 // RecordHourlyStat 记录小时级统计
-func (s *Service) RecordHourlyStat(userID string) {
-	s.hourlyCounter.Increment(userID)
+func (s *Service) RecordHourlyStat(userID string, inputTokens, outputTokens int) {
+	s.hourlyCounter.Increment(userID, inputTokens, outputTokens)
 }
 
 // DashboardStats 系统概览
@@ -152,8 +168,10 @@ type TopUser struct {
 
 // HourlyStat 小时统计
 type HourlyStat struct {
-	Hour     string `json:"hour"`      // 格式: "14:00"
-	Requests int    `json:"requests"`
+	Hour         string `json:"hour"`          // 格式: "14:00"
+	Requests     int    `json:"requests"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
 }
 
 // DepartmentStat 部门统计
@@ -161,6 +179,8 @@ type DepartmentStat struct {
 	Department   string `json:"department"`
 	UserCount    int    `json:"user_count"`    // 该部门用户数
 	RequestCount int    `json:"request_count"` // 该部门总请求
+	InputTokens  int64  `json:"input_tokens"`  // 该部门输入Token
+	OutputTokens int64  `json:"output_tokens"` // 该部门输出Token
 }
 
 // ModelStat 模型统计
@@ -267,7 +287,9 @@ func (s *Service) GetDepartmentStats() ([]DepartmentStat, error) {
 		SELECT
 			COALESCE(u.department, '未设置') as department,
 			COUNT(DISTINCT u.id) as user_count,
-			COALESCE(SUM(q.request_count), 0) as request_count
+			COALESCE(SUM(q.request_count), 0) as request_count,
+			COALESCE(SUM(q.input_tokens), 0) as input_tokens,
+			COALESCE(SUM(q.output_tokens), 0) as output_tokens
 		FROM users u
 		LEFT JOIN quota_usage_daily q ON u.id = q.user_id AND q.date = ?
 		GROUP BY u.department
@@ -282,7 +304,7 @@ func (s *Service) GetDepartmentStats() ([]DepartmentStat, error) {
 	var stats []DepartmentStat
 	for rows.Next() {
 		var stat DepartmentStat
-		err := rows.Scan(&stat.Department, &stat.UserCount, &stat.RequestCount)
+		err := rows.Scan(&stat.Department, &stat.UserCount, &stat.RequestCount, &stat.InputTokens, &stat.OutputTokens)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan department stat: %w", err)
 		}

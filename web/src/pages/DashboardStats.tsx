@@ -15,8 +15,8 @@ import {
   HistoryOutlined,
 } from '@ant-design/icons';
 import {
-  BarChart,
   Bar,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -26,6 +26,7 @@ import {
   Pie,
   Cell,
   Legend,
+  ComposedChart,
 } from 'recharts';
 import api from '../api';
 
@@ -39,11 +40,16 @@ interface DashboardData {
   hourly_stats: {
     hour: string;
     requests: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
   }[];
   top_users: {
     user_id: string;
     username: string;
     request_count: number;
+    input_tokens: number;
+    output_tokens: number;
   }[];
   model_stats: {
     model_id: string;
@@ -82,11 +88,16 @@ const DashboardStats: React.FC = () => {
           today_requests: stats.today_total_requests || 0,
           today_tokens: (stats.today_input_tokens || 0) + (stats.today_output_tokens || 0),
         },
-        hourly_stats: hourlyRes.data.data || [],
+        hourly_stats: (hourlyRes.data.data || []).map((h: any) => ({
+          ...h,
+          total_tokens: (h.input_tokens || 0) + (h.output_tokens || 0),
+        })),
         top_users: (topUsersRes.data.data || []).map((u: any) => ({
           user_id: u.user_id,
           username: u.name || u.user_id,
           request_count: u.request_count,
+          input_tokens: u.input_tokens || 0,
+          output_tokens: u.output_tokens || 0,
         })),
         model_stats: modelRes.data.data || [],
         department_stats: deptRes.data.data || [],
@@ -128,6 +139,7 @@ const DashboardStats: React.FC = () => {
   const topUserColumns = [
     { title: '用户名', dataKey: 'username', key: 'username', render: (_: any, record: any) => record.username || record.user_id },
     { title: '请求数', dataIndex: 'request_count', key: 'request_count', sorter: (a: any, b: any) => a.request_count - b.request_count },
+    { title: 'Token 消耗', key: 'total_tokens', render: (_: any, record: any) => formatTokens((record.input_tokens || 0) + (record.output_tokens || 0)), sorter: (a: any, b: any) => ((a.input_tokens || 0) + (a.output_tokens || 0)) - ((b.input_tokens || 0) + (b.output_tokens || 0)) },
   ];
 
   const modelTokenColumns = [
@@ -187,18 +199,24 @@ const DashboardStats: React.FC = () => {
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col xs={24} lg={14}>
           <Card title="最近24小时趋势">
-            {hourlyStats.length > 0 && hourlyStats.some(s => s.requests > 0) ? (
+            {hourlyStats.length > 0 && hourlyStats.some(s => s.requests > 0 || s.total_tokens > 0) ? (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={hourlyStats}>
+                <ComposedChart data={hourlyStats}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="hour" tick={{ fontSize: 12 }} />
-                  <YAxis />
+                  <YAxis yAxisId="left" orientation="left" stroke="#1890ff" label={{ value: '请求数', angle: -90, position: 'insideLeft', offset: 10 }} />
+                  <YAxis yAxisId="right" orientation="right" stroke="#f5222d" tickFormatter={(v: number) => formatTokens(v)} label={{ value: 'Token', angle: 90, position: 'insideRight', offset: 10 }} />
                   <Tooltip
-                    formatter={(value: any) => [`${value ?? 0} 请求`, '请求数']}
+                    formatter={(value: any, name: string) => {
+                      if (name === '请求数') return [`${value ?? 0}`, '请求数'];
+                      return [formatTokens(Number(value ?? 0)), 'Token 总量'];
+                    }}
                     labelFormatter={(label: any) => `${label}`}
                   />
-                  <Bar dataKey="requests" fill="#1890ff" name="请求数" />
-                </BarChart>
+                  <Legend />
+                  <Bar yAxisId="left" dataKey="requests" fill="#1890ff" name="请求数" />
+                  <Line yAxisId="right" type="monotone" dataKey="total_tokens" stroke="#f5222d" name="Token 总量" dot={false} strokeWidth={2} />
+                </ComposedChart>
               </ResponsiveContainer>
             ) : (
               <Empty description="暂无数据" style={{ padding: '60px 0' }} />
