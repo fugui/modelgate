@@ -136,22 +136,30 @@ const DashboardStats: React.FC = () => {
     return num.toString();
   };
 
+  const renderTokens = (_: any, record: any) => (
+    <span>
+      <span style={{ color: '#fa8c16' }}>↑{formatTokens(record.input_tokens || 0)}</span>
+      <span style={{ margin: '0 4px' }}>/</span>
+      <span style={{ color: '#722ed1' }}>↓{formatTokens(record.output_tokens || 0)}</span>
+    </span>
+  );
+
   const topUserColumns = [
     { title: '用户名', dataKey: 'username', key: 'username', render: (_: any, record: any) => record.username || record.user_id },
     { title: '请求数', dataIndex: 'request_count', key: 'request_count', sorter: (a: any, b: any) => a.request_count - b.request_count },
-    { title: 'Token 消耗', key: 'total_tokens', render: (_: any, record: any) => formatTokens((record.input_tokens || 0) + (record.output_tokens || 0)), sorter: (a: any, b: any) => ((a.input_tokens || 0) + (a.output_tokens || 0)) - ((b.input_tokens || 0) + (b.output_tokens || 0)) },
+    { title: 'Tokens', key: 'total_tokens', render: renderTokens, sorter: (a: any, b: any) => ((a.input_tokens || 0) + (a.output_tokens || 0)) - ((b.input_tokens || 0) + (b.output_tokens || 0)) },
   ];
 
   const modelTokenColumns = [
     { title: '模型', dataIndex: 'model_id', key: 'model_id' },
     { title: '请求', dataIndex: 'request_count', key: 'request_count' },
-    { title: '总 Token', key: 'total_tokens', render: (_: any, record: any) => formatTokens((record.input_tokens || 0) + (record.output_tokens || 0)) },
+    { title: 'Tokens', key: 'total_tokens', render: renderTokens },
   ];
 
   const departmentColumns = [
     { title: '部门', dataIndex: 'department', key: 'department', render: (text: string) => text || '未设置' },
     { title: '请求数', dataIndex: 'request_count', key: 'request_count' },
-    { title: 'Token 消耗', key: 'tokens', render: (_: any, record: any) => formatTokens((record.input_tokens || 0) + (record.output_tokens || 0)) },
+    { title: 'Tokens', key: 'tokens', render: renderTokens },
   ];
 
   return (
