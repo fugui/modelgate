@@ -176,12 +176,15 @@ const DashboardStats: React.FC = () => {
       return `${parts[1]}-${parts[2]}`;
     };
 
-    // 生成最近7天的日期列表
+    // 生成最近7天的日期列表（使用本地时区，与后端保持一致）
     const dates: string[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      dates.push(d.toISOString().split('T')[0]);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      dates.push(`${yyyy}-${mm}-${dd}`);
     }
 
     const dateColumns = dates.map((date) => ({
