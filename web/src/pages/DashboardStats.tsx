@@ -30,7 +30,7 @@ import api from '../api';
 interface DashboardData {
   summary: {
     total_users: number;
-    total_models: number;
+    department_count: number;
     today_requests: number;
     today_tokens: number;
   };
@@ -81,7 +81,7 @@ const DashboardStats: React.FC = () => {
       setData({
         summary: {
           total_users: stats.total_users || 0,
-          total_models: stats.department_count || 0,
+          department_count: stats.department_count || 0,
           today_requests: stats.today_total_requests || 0,
           today_tokens: (stats.today_input_tokens || 0) + (stats.today_output_tokens || 0),
         },
@@ -284,8 +284,8 @@ const DashboardStats: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card bordered={false} hoverable>
             <Statistic
-              title="已接入模型"
-              value={summary.total_models}
+              title="部门数量"
+              value={summary.department_count}
               prefix={<CloudServerOutlined style={{ color: '#52c41a' }} />}
             />
           </Card>
