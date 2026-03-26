@@ -321,7 +321,6 @@ func (s *Service) GetTopUsers7Days(limit int) ([]TopUser7Days, error) {
 
 	var users []TopUser7Days
 	userIDs := make([]string, 0)
-	userMap := make(map[string]*TopUser7Days)
 
 	for rows.Next() {
 		var user TopUser7Days
@@ -334,7 +333,12 @@ func (s *Service) GetTopUsers7Days(limit int) ([]TopUser7Days, error) {
 		user.DailyStats = make([]DailyStat, 0)
 		users = append(users, user)
 		userIDs = append(userIDs, user.UserID)
-		userMap[user.UserID] = &users[len(users)-1]
+	}
+
+	// 必须在 append 循环结束后再构建 map，否则 slice 扩容会导致指针失效
+	userMap := make(map[string]*TopUser7Days)
+	for i := range users {
+		userMap[users[i].UserID] = &users[i]
 	}
 
 	if len(userIDs) == 0 {
