@@ -22,6 +22,7 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/stats", h.GetDashboardStats)
 	r.GET("/top-users", h.GetTopUsers)
+	r.GET("/top-users-7d", h.GetTopUsers7Days)
 	r.GET("/hourly", h.GetHourlyStats)
 	r.GET("/departments", h.GetDepartmentStats)
 	r.GET("/models", h.GetModelStats)
@@ -51,6 +52,23 @@ func (h *Handler) GetTopUsers(c *gin.Context) {
 	}
 
 	users, err := h.service.GetTopUsers(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": users,
+	})
+}
+
+// GetTopUsers7Days 获取最近7天TOP20用户
+func (h *Handler) GetTopUsers7Days(c *gin.Context) {
+	limit := 20
+	// 简单实现支持自定义limit
+	users, err := h.service.GetTopUsers7Days(limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),

@@ -51,6 +51,18 @@ interface DashboardData {
     input_tokens: number;
     output_tokens: number;
   }[];
+  top_users_7d: {
+    user_id: string;
+    name: string;
+    department: string;
+    total_requests: number;
+    total_tokens: number;
+    daily_stats: {
+      date: string;
+      request_count: number;
+      total_tokens: number;
+    }[];
+  }[];
   model_stats: {
     model_id: string;
     request_count: number;
@@ -73,10 +85,11 @@ const DashboardStats: React.FC = () => {
 
   const fetchStats = async () => {
     try {
-      const [statsRes, hourlyRes, topUsersRes, modelRes, deptRes] = await Promise.all([
+      const [statsRes, hourlyRes, topUsersRes, topUsers7dRes, modelRes, deptRes] = await Promise.all([
         api.get('/api/v1/dashboard/stats'),
         api.get('/api/v1/dashboard/hourly'),
         api.get('/api/v1/dashboard/top-users'),
+        api.get('/api/v1/dashboard/top-users-7d'),
         api.get('/api/v1/dashboard/models'),
         api.get('/api/v1/dashboard/departments'),
       ]);
@@ -99,6 +112,7 @@ const DashboardStats: React.FC = () => {
           input_tokens: u.input_tokens || 0,
           output_tokens: u.output_tokens || 0,
         })),
+        top_users_7d: topUsers7dRes.data.data || [],
         model_stats: modelRes.data.data || [],
         department_stats: deptRes.data.data || [],
       });
@@ -124,7 +138,7 @@ const DashboardStats: React.FC = () => {
     return <Empty description="无法加载数据" />;
   }
 
-  const { summary, hourly_stats: hourlyStats, top_users: topUsers, model_stats: modelStats, department_stats: departmentStats } = data;
+  const { summary, hourly_stats: hourlyStats, top_users: topUsers, top_users_7d: topUsers7d, model_stats: modelStats, department_stats: departmentStats } = data;
 
   const formatTokens = (num: number) => {
     if (num >= 1000000) {
@@ -148,6 +162,20 @@ const DashboardStats: React.FC = () => {
     { title: '用户名', dataKey: 'username', key: 'username', render: (_: any, record: any) => record.username || record.user_id },
     { title: '请求数', dataIndex: 'request_count', key: 'request_count', sorter: (a: any, b: any) => a.request_count - b.request_count },
     { title: 'Tokens', key: 'total_tokens', render: renderTokens, sorter: (a: any, b: any) => ((a.input_tokens || 0) + (a.output_tokens || 0)) - ((b.input_tokens || 0) + (b.output_tokens || 0)) },
+  ];
+
+  const topUser7dColumns = [
+    { title: '排名', key: 'rank', width: 60, render: (_: any, __: any, index: number) => index + 1 },
+    { title: '用户名', dataIndex: 'name', key: 'name', render: (text: string, record: any) => text || record.user_id },
+    { title: '部门', dataIndex: 'department', key: 'department', render: (text: string) => text || '-' },
+    { title: '7天总请求', dataIndex: 'total_requests', key: 'total_requests', sorter: (a: any, b: any) => a.total_requests - b.total_requests },
+    { title: '7天总Tokens', dataIndex: 'total_tokens', key: 'total_tokens', render: (v: number) => formatTokens(v), sorter: (a: any, b: any) => a.total_tokens - b.total_tokens },
+  ];
+
+  const dailyStatColumns = [
+    { title: '日期', dataIndex: 'date', key: 'date' },
+    { title: '请求数', dataIndex: 'request_count', key: 'request_count' },
+    { title: '总Tokens', dataIndex: 'total_tokens', key: 'total_tokens', render: (v: number) => formatTokens(v) },
   ];
 
   const modelTokenColumns = [
@@ -241,6 +269,38 @@ const DashboardStats: React.FC = () => {
                 pagination={false}
                 size="small"
                 scroll={{ y: 300 }}
+              />
+            ) : (
+              <Empty description="暂无数据" style={{ padding: '60px 0' }} />
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 最近7天 TOP 20 用户 */}
+      <Row gutter={16} style={{ marginBottom: 24 }}>
+        <Col xs={24}>
+          <Card title="最近7天 TOP 20 用户">
+            {topUsers7d.length > 0 ? (
+              <Table
+                dataSource={topUsers7d}
+                columns={topUser7dColumns}
+                rowKey="user_id"
+                pagination={false}
+                size="small"
+                expandable={{
+                  expandedRowRender: (record) => (
+                    <div style={{ padding: '8px 48px' }}>
+                      <Table
+                        dataSource={record.daily_stats}
+                        columns={dailyStatColumns}
+                        rowKey="date"
+                        pagination={false}
+                        size="small"
+                      />
+                    </div>
+                  ),
+                }}
               />
             ) : (
               <Empty description="暂无数据" style={{ padding: '60px 0' }} />

@@ -191,6 +191,23 @@ type ModelStat struct {
 	OutputTokens int64  `json:"output_tokens"`
 }
 
+// TopUser7Days 最近7天TOP用户
+type TopUser7Days struct {
+	UserID        string      `json:"user_id"`
+	Name          string      `json:"name"`
+	Department    string      `json:"department"`
+	TotalRequests int         `json:"total_requests"`
+	TotalTokens   int64       `json:"total_tokens"`
+	DailyStats    []DailyStat `json:"daily_stats"`
+}
+
+// DailyStat 每日明细
+type DailyStat struct {
+	Date         string `json:"date"`
+	RequestCount int    `json:"request_count"`
+	TotalTokens  int64  `json:"total_tokens"`
+}
+
 // GetDashboardStats 获取系统概览数据
 func (s *Service) GetDashboardStats() (*DashboardStats, error) {
 	today := time.Now().Format("2006-01-02")
@@ -272,6 +289,87 @@ func (s *Service) GetTopUsers(limit int) ([]TopUser, error) {
 	}
 
 	return users, rows.Err()
+}
+
+// GetTopUsers7Days 获取最近7天TOP20用户及其明细
+func (s *Service) GetTopUsers7Days(limit int) ([]TopUser7Days, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	// 计算7天前的日期
+	startDate := time.Now().AddDate(0, 0, -6).Format("2006-01-02")
+
+	// 1. 获取最近7天 Token 总量排名前20的用户
+	queryTop := `
+		SELECT u.id, u.name, u.department,
+		       COALESCE(SUM(q.request_count), 0) as total_requests,
+		       COALESCE(SUM(q.input_tokens + q.output_tokens), 0) as total_tokens
+		FROM users u
+		JOIN quota_usage_daily q ON u.id = q.user_id
+		WHERE q.date >= ?
+		GROUP BY u.id, u.name, u.department
+		ORDER BY total_tokens DESC
+		LIMIT ?`
+
+	rows, err := s.db.Query(queryTop, startDate, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query top users 7d: %w", err)
+	}
+	defer rows.Close()
+
+	var users []TopUser7Days
+	userIDs := make([]string, 0)
+	userMap := make(map[string]*TopUser7Days)
+
+	for rows.Next() {
+		var user TopUser7Days
+		var userID uuid.UUID
+		err := rows.Scan(&userID, &user.Name, &user.Department, &user.TotalRequests, &user.TotalTokens)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan top user 7d: %w", err)
+		}
+		user.UserID = userID.String()
+		user.DailyStats = make([]DailyStat, 0)
+		users = append(users, user)
+		userIDs = append(userIDs, user.UserID)
+		userMap[user.UserID] = &users[len(users)-1]
+	}
+
+	if len(userIDs) == 0 {
+		return users, nil
+	}
+
+	// 2. 获取这些用户最近7天的每日明细
+	// 为了简化，我们按用户和日期分组查询
+	queryDaily := `
+		SELECT user_id, date, SUM(request_count), SUM(input_tokens + output_tokens)
+		FROM quota_usage_daily
+		WHERE date >= ?
+		GROUP BY user_id, date
+		ORDER BY date ASC`
+
+	rowsDaily, err := s.db.Query(queryDaily, startDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query daily stats 7d: %w", err)
+	}
+	defer rowsDaily.Close()
+
+	for rowsDaily.Next() {
+		var userID uuid.UUID
+		var stat DailyStat
+		err := rowsDaily.Scan(&userID, &stat.Date, &stat.RequestCount, &stat.TotalTokens)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan daily stat 7d: %w", err)
+		}
+
+		uID := userID.String()
+		if user, ok := userMap[uID]; ok {
+			user.DailyStats = append(user.DailyStats, stat)
+		}
+	}
+
+	return users, nil
 }
 
 // GetHourlyStats 获取最近24小时每小时请求数
