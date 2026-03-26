@@ -192,7 +192,7 @@ const DashboardStats: React.FC = () => {
       key: `day_${date}`,
       width: 150,
       render: (_: any, record: any) => {
-        const stat = (record.daily_stats || []).find((s: any) => s.date === date);
+        const stat = (record.daily_stats || []).find((s: any) => (s.date || '').slice(0, 10) === date);
         if (!stat || (stat.request_count === 0 && (stat.input_tokens || 0) === 0 && (stat.output_tokens || 0) === 0)) {
           return <span style={{ color: '#ccc' }}>-</span>;
         }
@@ -211,7 +211,7 @@ const DashboardStats: React.FC = () => {
     return [
       { title: '#', key: 'rank', width: 50, fixed: 'left' as const, render: (_: any, __: any, index: number) => index + 1 },
       { title: '用户名', dataIndex: 'name', key: 'name', width: 120, fixed: 'left' as const, render: (text: string, record: any) => text || record.user_id },
-      { title: '部门', dataIndex: 'department', key: 'department', width: 100, render: (text: string) => text || '-' },
+
       ...dateColumns,
       {
         title: '总计',
