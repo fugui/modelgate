@@ -205,7 +205,8 @@ type TopUser7Days struct {
 type DailyStat struct {
 	Date         string `json:"date"`
 	RequestCount int    `json:"request_count"`
-	TotalTokens  int64  `json:"total_tokens"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
 }
 
 // GetDashboardStats 获取系统概览数据
@@ -341,9 +342,8 @@ func (s *Service) GetTopUsers7Days(limit int) ([]TopUser7Days, error) {
 	}
 
 	// 2. 获取这些用户最近7天的每日明细
-	// 为了简化，我们按用户和日期分组查询
 	queryDaily := `
-		SELECT user_id, date, SUM(request_count), SUM(input_tokens + output_tokens)
+		SELECT user_id, date, SUM(request_count), SUM(input_tokens), SUM(output_tokens)
 		FROM quota_usage_daily
 		WHERE date >= ?
 		GROUP BY user_id, date
@@ -358,7 +358,7 @@ func (s *Service) GetTopUsers7Days(limit int) ([]TopUser7Days, error) {
 	for rowsDaily.Next() {
 		var userID uuid.UUID
 		var stat DailyStat
-		err := rowsDaily.Scan(&userID, &stat.Date, &stat.RequestCount, &stat.TotalTokens)
+		err := rowsDaily.Scan(&userID, &stat.Date, &stat.RequestCount, &stat.InputTokens, &stat.OutputTokens)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan daily stat 7d: %w", err)
 		}

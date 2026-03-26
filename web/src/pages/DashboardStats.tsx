@@ -60,7 +60,8 @@ interface DashboardData {
     daily_stats: {
       date: string;
       request_count: number;
-      total_tokens: number;
+      input_tokens: number;
+      output_tokens: number;
     }[];
   }[];
   model_stats: {
@@ -164,19 +165,73 @@ const DashboardStats: React.FC = () => {
     { title: 'Tokens', key: 'total_tokens', render: renderTokens, sorter: (a: any, b: any) => ((a.input_tokens || 0) + (a.output_tokens || 0)) - ((b.input_tokens || 0) + (b.output_tokens || 0)) },
   ];
 
-  const topUser7dColumns = [
-    { title: '排名', key: 'rank', width: 60, render: (_: any, __: any, index: number) => index + 1 },
-    { title: '用户名', dataIndex: 'name', key: 'name', render: (text: string, record: any) => text || record.user_id },
-    { title: '部门', dataIndex: 'department', key: 'department', render: (text: string) => text || '-' },
-    { title: '7天总请求', dataIndex: 'total_requests', key: 'total_requests', sorter: (a: any, b: any) => a.total_requests - b.total_requests },
-    { title: '7天总Tokens', dataIndex: 'total_tokens', key: 'total_tokens', render: (v: number) => formatTokens(v), sorter: (a: any, b: any) => a.total_tokens - b.total_tokens },
-  ];
+  const topUser7dColumns = (() => {
+    const weekDayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const getWeekDayName = (dateStr: string) => {
+      const d = new Date(dateStr + 'T00:00:00');
+      return weekDayNames[d.getDay()];
+    };
+    const formatDate = (dateStr: string) => {
+      const parts = dateStr.split('-');
+      return `${parts[1]}-${parts[2]}`;
+    };
 
-  const dailyStatColumns = [
-    { title: '日期', dataIndex: 'date', key: 'date' },
-    { title: '请求数', dataIndex: 'request_count', key: 'request_count' },
-    { title: '总Tokens', dataIndex: 'total_tokens', key: 'total_tokens', render: (v: number) => formatTokens(v) },
-  ];
+    // 生成最近7天的日期列表
+    const dates: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+
+    const dateColumns = dates.map((date) => ({
+      title: `${getWeekDayName(date)} ${formatDate(date)}`,
+      key: `day_${date}`,
+      width: 150,
+      render: (_: any, record: any) => {
+        const stat = (record.daily_stats || []).find((s: any) => s.date === date);
+        if (!stat || (stat.request_count === 0 && (stat.input_tokens || 0) === 0 && (stat.output_tokens || 0) === 0)) {
+          return <span style={{ color: '#ccc' }}>-</span>;
+        }
+        return (
+          <span>
+            <span>{stat.request_count}次</span>
+            <br />
+            <span style={{ color: '#fa8c16', fontSize: 12 }}>↑{formatTokens(stat.input_tokens || 0)}</span>
+            <span style={{ margin: '0 2px', fontSize: 12 }}>/</span>
+            <span style={{ color: '#722ed1', fontSize: 12 }}>↓{formatTokens(stat.output_tokens || 0)}</span>
+          </span>
+        );
+      },
+    }));
+
+    return [
+      { title: '#', key: 'rank', width: 50, fixed: 'left' as const, render: (_: any, __: any, index: number) => index + 1 },
+      { title: '用户名', dataIndex: 'name', key: 'name', width: 120, fixed: 'left' as const, render: (text: string, record: any) => text || record.user_id },
+      { title: '部门', dataIndex: 'department', key: 'department', width: 100, render: (text: string) => text || '-' },
+      ...dateColumns,
+      {
+        title: '总计',
+        key: 'total',
+        width: 150,
+        fixed: 'right' as const,
+        render: (_: any, record: any) => {
+          const totalInput = (record.daily_stats || []).reduce((sum: number, s: any) => sum + (s.input_tokens || 0), 0);
+          const totalOutput = (record.daily_stats || []).reduce((sum: number, s: any) => sum + (s.output_tokens || 0), 0);
+          return (
+            <span>
+              <span>{record.total_requests}次</span>
+              <br />
+              <span style={{ color: '#fa8c16', fontSize: 12 }}>↑{formatTokens(totalInput)}</span>
+              <span style={{ margin: '0 2px', fontSize: 12 }}>/</span>
+              <span style={{ color: '#722ed1', fontSize: 12 }}>↓{formatTokens(totalOutput)}</span>
+            </span>
+          );
+        },
+        sorter: (a: any, b: any) => a.total_tokens - b.total_tokens,
+      },
+    ];
+  })();
 
   const modelTokenColumns = [
     { title: '模型', dataIndex: 'model_id', key: 'model_id' },
@@ -288,19 +343,7 @@ const DashboardStats: React.FC = () => {
                 rowKey="user_id"
                 pagination={false}
                 size="small"
-                expandable={{
-                  expandedRowRender: (record) => (
-                    <div style={{ padding: '8px 48px' }}>
-                      <Table
-                        dataSource={record.daily_stats}
-                        columns={dailyStatColumns}
-                        rowKey="date"
-                        pagination={false}
-                        size="small"
-                      />
-                    </div>
-                  ),
-                }}
+                scroll={{ x: 1500 }}
               />
             ) : (
               <Empty description="暂无数据" style={{ padding: '60px 0' }} />
