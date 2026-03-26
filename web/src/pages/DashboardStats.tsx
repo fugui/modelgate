@@ -22,9 +22,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
   Legend,
   ComposedChart,
 } from 'recharts';
@@ -64,21 +61,9 @@ interface DashboardData {
       output_tokens: number;
     }[];
   }[];
-  model_stats: {
-    model_id: string;
-    request_count: number;
-    input_tokens: number;
-    output_tokens: number;
-  }[];
-  department_stats: {
-    department: string;
-    request_count: number;
-    input_tokens: number;
-    output_tokens: number;
-  }[];
 }
 
-const PIE_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#8dd1e1', '#a4de6c', '#d0ed57'];
+
 
 const DashboardStats: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -86,13 +71,11 @@ const DashboardStats: React.FC = () => {
 
   const fetchStats = async () => {
     try {
-      const [statsRes, hourlyRes, topUsersRes, topUsers7dRes, modelRes, deptRes] = await Promise.all([
+      const [statsRes, hourlyRes, topUsersRes, topUsers7dRes] = await Promise.all([
         api.get('/api/v1/dashboard/stats'),
         api.get('/api/v1/dashboard/hourly'),
         api.get('/api/v1/dashboard/top-users'),
         api.get('/api/v1/dashboard/top-users-7d'),
-        api.get('/api/v1/dashboard/models'),
-        api.get('/api/v1/dashboard/departments'),
       ]);
       const stats = statsRes.data.data || {};
       setData({
@@ -114,8 +97,6 @@ const DashboardStats: React.FC = () => {
           output_tokens: u.output_tokens || 0,
         })),
         top_users_7d: topUsers7dRes.data.data || [],
-        model_stats: modelRes.data.data || [],
-        department_stats: deptRes.data.data || [],
       });
     } catch (error: any) {
       message.error('获取统计数据失败: ' + (error.response?.data?.error || error.message));
@@ -139,7 +120,7 @@ const DashboardStats: React.FC = () => {
     return <Empty description="无法加载数据" />;
   }
 
-  const { summary, hourly_stats: hourlyStats, top_users: topUsers, top_users_7d: topUsers7d, model_stats: modelStats, department_stats: departmentStats } = data;
+  const { summary, hourly_stats: hourlyStats, top_users: topUsers, top_users_7d: topUsers7d } = data;
 
   const formatTokens = (num: number) => {
     if (num >= 1000000) {
@@ -286,17 +267,7 @@ const DashboardStats: React.FC = () => {
     );
   };
 
-  const modelTokenColumns = [
-    { title: '模型', dataIndex: 'model_id', key: 'model_id' },
-    { title: '请求', dataIndex: 'request_count', key: 'request_count' },
-    { title: 'Tokens', key: 'total_tokens', render: renderTokens },
-  ];
 
-  const departmentColumns = [
-    { title: '部门', dataIndex: 'department', key: 'department', render: (text: string) => text || '未设置' },
-    { title: '请求数', dataIndex: 'request_count', key: 'request_count' },
-    { title: 'Tokens', key: 'tokens', render: renderTokens },
-  ];
 
   return (
     <div className="dashboard-stats">
@@ -399,127 +370,6 @@ const DashboardStats: React.FC = () => {
                 scroll={{ x: 1500 }}
                 summary={renderSummary7d}
               />
-            ) : (
-              <Empty description="暂无数据" style={{ padding: '60px 0' }} />
-            )}
-          </Card>
-        </Col>
-      </Row>
-
-      {/* 模型 Token 统计 */}
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col xs={24}>
-          <Card title="今日模型 Token 消耗">
-            {modelStats.length > 0 && modelStats.some(s => s.request_count > 0) ? (
-              <Row gutter={16}>
-                <Col xs={24} lg={12}>
-                  <Table
-                    dataSource={modelStats.filter(s => s.request_count > 0)}
-                    columns={modelTokenColumns}
-                    rowKey="model_id"
-                    pagination={false}
-                    size="small"
-                    scroll={{ y: 250 }}
-                  />
-                </Col>
-                <Col xs={24} lg={12}>
-                  <ResponsiveContainer width="100%" height={260}>
-                    <PieChart>
-                      <Pie
-                        data={modelStats.filter(s => (s.input_tokens || 0) + (s.output_tokens || 0) > 0).map(s => ({
-                          ...s,
-                          total_tokens: (s.input_tokens || 0) + (s.output_tokens || 0),
-                        }))}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={90}
-                        paddingAngle={2}
-                        dataKey="total_tokens"
-                        nameKey="model_id"
-                        label={({ payload, percent }: any) =>
-                          `${payload?.model_id || ''} ${(Number(percent || 0) * 100).toFixed(0)}%`
-                        }
-                      >
-                        {modelStats.map((_entry, index) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            fill={PIE_COLORS[index % PIE_COLORS.length]}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value: any, _name: any, props: any) => {
-                          return [`${formatTokens(Number(value || 0))} Tokens`, props.payload?.model_id || ''];
-                        }}
-                      />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Col>
-              </Row>
-            ) : (
-              <Empty description="暂无数据" style={{ padding: '40px 0' }} />
-            )}
-          </Card>
-        </Col>
-      </Row>
-
-      {/* 部门统计 + 模型请求分布 */}
-      <Row gutter={16}>
-        <Col xs={24} lg={12}>
-          <Card title="部门使用统计">
-            {departmentStats.length > 0 && departmentStats.some(s => s.request_count > 0) ? (
-              <Table
-                dataSource={departmentStats.filter(s => s.request_count > 0)}
-                columns={departmentColumns}
-                rowKey="department"
-                pagination={false}
-                size="small"
-                scroll={{ y: 300 }}
-              />
-            ) : (
-              <Empty description="暂无数据" style={{ padding: '60px 0' }} />
-            )}
-          </Card>
-        </Col>
-        <Col xs={24} lg={12}>
-          <Card title="模型请求分布">
-            {modelStats.length > 0 && modelStats.some(s => s.request_count > 0) ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={modelStats.filter(s => s.request_count > 0)}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    dataKey="request_count"
-                    nameKey="model_id"
-                    label={({ payload, percent }: any) =>
-                      `${payload?.model_id || ''} ${(Number(percent || 0) * 100).toFixed(0)}%`
-                    }
-                  >
-                    {modelStats
-                      .filter(s => s.request_count > 0)
-                      .map((_entry, index) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={PIE_COLORS[index % PIE_COLORS.length]}
-                        />
-                      ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value: any, _name: any, props: any) => {
-                      const total = modelStats.reduce((sum, s) => sum + s.request_count, 0);
-                      const percent = total > 0 ? ((Number(value || 0) / total) * 100).toFixed(1) : '0';
-                      return [`${value ?? 0} (${percent}%)`, props.payload?.model_id || ''];
-                    }}
-                  />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
             ) : (
               <Empty description="暂无数据" style={{ padding: '60px 0' }} />
             )}
