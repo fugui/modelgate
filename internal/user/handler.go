@@ -37,6 +37,7 @@ type QuotaStore interface {
 
 type UsageService interface {
 	GetRecentAccess(userID uuid.UUID, limit int) []usage.AccessLog
+	GetAllRecentAccess(limit int) []usage.AccessLog
 }
 
 type Cache interface {
@@ -116,6 +117,9 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 		// /admin/config
 		config := admin.Group("/config")
 		config.PUT("/frontend", h.UpdateFrontendConfig)
+
+		// /admin/access-logs
+		admin.GET("/access-logs", h.GetAllAccessLogs)
 	}
 }
 
@@ -446,6 +450,57 @@ func (h *Handler) GetAccessLogs(c *gin.Context) {
 	}
 
 	// 默认返回简化版本（不包含请求/响应体和头信息，保持兼容性）
+	type SimpleAccessLog struct {
+		UserID        string    `json:"user_id"`
+		Method        string    `json:"method"`
+		Path          string    `json:"path"`
+		ClientIP      string    `json:"client_ip"`
+		UserAgent     string    `json:"user_agent"`
+		Timestamp     time.Time `json:"timestamp"`
+		StatusCode    int       `json:"status_code"`
+		RequestBytes  int64     `json:"request_bytes"`
+		ResponseBytes int64     `json:"response_bytes"`
+	}
+
+	simpleLogs := make([]SimpleAccessLog, 0, len(logs))
+	for _, log := range logs {
+		simpleLogs = append(simpleLogs, SimpleAccessLog{
+			UserID:        log.UserID.String(),
+			Method:        log.Method,
+			Path:          log.Path,
+			ClientIP:      log.ClientIP,
+			UserAgent:     log.UserAgent,
+			Timestamp:     log.Timestamp,
+			StatusCode:    log.StatusCode,
+			RequestBytes:  log.RequestBytes,
+			ResponseBytes: log.ResponseBytes,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": simpleLogs})
+}
+
+func (h *Handler) GetAllAccessLogs(c *gin.Context) {
+	// 支持查询参数 ?detailed=true 返回完整信息
+	detailed := c.Query("detailed") == "true"
+
+	// 从查询参数获取 limit
+	limitStr := c.DefaultQuery("limit", "20")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 20
+	}
+
+	// 获取最近访问记录
+	logs := h.usageService.GetAllRecentAccess(limit)
+
+	if detailed {
+		// 返回完整信息
+		c.JSON(http.StatusOK, gin.H{"data": logs})
+		return
+	}
+
+	// 默认返回简化版本
 	type SimpleAccessLog struct {
 		UserID        string    `json:"user_id"`
 		Method        string    `json:"method"`

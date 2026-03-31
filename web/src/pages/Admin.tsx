@@ -3,6 +3,7 @@ import { Card, Table, Button, Tag, message, Tabs, Modal, Form, Input, Space, Pop
 import { PlusOutlined, EditOutlined, DeleteOutlined, SettingOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, ArrowLeftOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
+import AdminLogs from './AdminLogs';
 
 interface Model {
   id: string;
@@ -258,7 +259,7 @@ const Admin: React.FC = () => {
 
   // Validate and set active tab from URL
   useEffect(() => {
-    const validTabs = ['users', 'models', 'policies', 'health', 'system'];
+    const validTabs = ['users', 'models', 'policies', 'health', 'system', 'logs'];
     const currentTab = tab || 'users';
     if (!validTabs.includes(currentTab)) {
       navigate('/admin/users', { replace: true });
@@ -1215,6 +1216,9 @@ const Admin: React.FC = () => {
                 </Card>
               </Col>
             </Row>
+          </Tabs.TabPane>
+          <Tabs.TabPane tab="全员访问日志" key="logs">
+            <AdminLogs />
           </Tabs.TabPane>
         </Tabs>
       </Card>

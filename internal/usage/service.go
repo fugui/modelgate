@@ -2,6 +2,7 @@ package usage
 
 import (
 	"container/ring"
+	"sort"
 	"sync"
 	"time"
 
@@ -201,4 +202,36 @@ func (s *Service) GetRecentAccess(userID uuid.UUID, limit int) []AccessLog {
 	}
 
 	return logs
+}
+
+// GetAllRecentAccess 获取所有用户最近的访问记录（按时间倒序）
+func (s *Service) GetAllRecentAccess(limit int) []AccessLog {
+	s.logsMutex.RLock()
+	defer s.logsMutex.RUnlock()
+
+	var allLogs []AccessLog
+
+	for _, r := range s.accessLogs {
+		if r == nil {
+			continue
+		}
+		r.Do(func(p interface{}) {
+			if p != nil {
+				log := p.(AccessLog)
+				allLogs = append(allLogs, log)
+			}
+		})
+	}
+
+	// 按时间倒序排序（最新的在前）
+	sort.SliceStable(allLogs, func(i, j int) bool {
+		return allLogs[i].Timestamp.After(allLogs[j].Timestamp)
+	})
+
+	// 限制返回条数
+	if limit > 0 && len(allLogs) > limit {
+		allLogs = allLogs[:limit]
+	}
+
+	return allLogs
 }
