@@ -29,6 +29,7 @@ type AccessLog struct {
 	ResponseBody    string            `json:"response_body"`    // 响应体（限制大小）
 	InputTokens     int               `json:"input_tokens"`     // 请求Tokens
 	OutputTokens    int               `json:"output_tokens"`    // 响应Tokens
+	DurationMs      int64             `json:"duration_ms"`      // 请求持续时间(毫秒)
 }
 
 // Service 使用记录服务
@@ -105,8 +106,8 @@ func (s *Service) Flush() {
 }
 
 // RecordAccess 记录用户访问日志
-func (s *Service) RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64) {
-	s.RecordAccessDetailed(userID, method, path, clientIP, userAgent, statusCode, requestBytes, responseBytes, nil, "", nil, "", 0, 0)
+func (s *Service) RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, durationMs int64) {
+	s.RecordAccessDetailed(userID, method, path, clientIP, userAgent, statusCode, requestBytes, responseBytes, nil, "", nil, "", 0, 0, durationMs)
 }
 
 // RecordAccessDetailed 记录用户访问日志（包含详细信息）
@@ -121,6 +122,7 @@ func (s *Service) RecordAccessDetailed(
 	responseBody string,
 	inputTokens int,
 	outputTokens int,
+	durationMs int64,
 ) {
 	s.logsMutex.Lock()
 	defer s.logsMutex.Unlock()
@@ -149,6 +151,7 @@ func (s *Service) RecordAccessDetailed(
 		ResponseBody:    truncateString(responseBody, constants.MaxLogResponseBodySize),
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
+		DurationMs:      durationMs,
 	}
 
 	// 存入 ring buffer

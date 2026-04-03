@@ -17,25 +17,26 @@ func TestRecordAccessAndGetRecentAccess(t *testing.T) {
 
 	userID := uuid.New()
 
-	// 测试记录访问日志
-	service.RecordAccess(userID, "GET", "/api/v1/user/quota", "192.168.1.1", "TestAgent/1.0", 200, 100, 200)
-	service.RecordAccess(userID, "POST", "/api/v1/chat/completions", "192.168.1.1", "TestAgent/1.0", 200, 1000, 5000)
+	// 记录几条日志
+	service.RecordAccess(userID, "GET", "/api/v1/user/quota", "192.168.1.1", "TestAgent/1.0", 200, 100, 200, 50)
+	service.RecordAccess(userID, "POST", "/api/v1/chat/completions", "192.168.1.1", "TestAgent/1.0", 200, 1000, 5000, 120)
+	service.RecordAccess(userID, "GET", "/api/v1/models", "192.168.1.1", "TestAgent/1.0", 200, 50, 1000, 30)
 
 	// 获取访问日志
 	logs := service.GetRecentAccess(userID, 20)
 
 	// 验证结果
-	assert.Equal(t, 2, len(logs), "应该有2条访问日志")
+	assert.Equal(t, 3, len(logs), "应该有3条访问日志")
 
 	// 验证倒序排列（最新的在前）
-	assert.Equal(t, "POST", logs[0].Method, "第一条应该是最新的 POST 请求")
-	assert.Equal(t, "GET", logs[1].Method, "第二条应该是 GET 请求")
+	assert.Equal(t, "GET", logs[0].Method, "第一条应该是最新的 GET 请求")
+	assert.Equal(t, "POST", logs[1].Method, "第二条应该是 POST 请求")
 
 	// 验证字段
-	assert.Equal(t, "/api/v1/chat/completions", logs[0].Path)
+	assert.Equal(t, "/api/v1/models", logs[0].Path)
 	assert.Equal(t, 200, logs[0].StatusCode)
-	assert.Equal(t, int64(1000), logs[0].RequestBytes)
-	assert.Equal(t, int64(5000), logs[0].ResponseBytes)
+	assert.Equal(t, int64(50), logs[0].RequestBytes)
+	assert.Equal(t, int64(1000), logs[0].ResponseBytes)
 }
 
 func TestGetRecentAccessLimit(t *testing.T) {
@@ -48,7 +49,7 @@ func TestGetRecentAccessLimit(t *testing.T) {
 
 	// 记录25条日志（超过最大值20）
 	for i := 0; i < 25; i++ {
-		service.RecordAccess(userID, "GET", "/api/test", "127.0.0.1", "Test", 200, 100, 200)
+		service.RecordAccess(userID, "GET", "/api/test", "127.0.0.1", "Test", 200, 100, 200, 10)
 	}
 
 	// 获取所有日志
@@ -85,8 +86,8 @@ func TestConcurrentAccess(t *testing.T) {
 	// 并发记录日志
 	for i := 0; i < 10; i++ {
 		go func() {
-			for j := 0; j < 10; j++ {
-				service.RecordAccess(userID, "GET", "/api/test", "127.0.0.1", "Test", 200, 100, 200)
+			for i := 0; i < 1000; i++ {
+				service.RecordAccess(userID, "GET", "/api/test", "127.0.0.1", "Test", 200, 100, 200, 15)
 			}
 			done <- true
 		}()
@@ -113,13 +114,11 @@ func TestMultipleUsers(t *testing.T) {
 
 	// 为用户1记录日志
 	for i := 0; i < 5; i++ {
-		service.RecordAccess(user1, "GET", "/api/user1", "127.0.0.1", "Test", 200, 100, 200)
+		service.RecordAccess(user1, "GET", "/api/user1", "127.0.0.1", "Test", 200, 100, 200, 5)
 	}
-
-	// 为用户2记录日志
-	for i := 0; i < 3; i++ {
-		service.RecordAccess(user2, "POST", "/api/user2", "192.168.1.1", "Test", 200, 200, 300)
-	}
+	
+	// user2 访问一次
+	service.RecordAccess(user2, "POST", "/api/user2", "192.168.1.1", "Test", 200, 200, 300, 8)
 
 	// 验证用户1的日志
 	logs1 := service.GetRecentAccess(user1, 20)
@@ -128,6 +127,6 @@ func TestMultipleUsers(t *testing.T) {
 
 	// 验证用户2的日志
 	logs2 := service.GetRecentAccess(user2, 20)
-	assert.Equal(t, 3, len(logs2))
+	assert.Equal(t, 1, len(logs2))
 	assert.Equal(t, "POST", logs2[0].Method)
 }

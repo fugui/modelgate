@@ -47,6 +47,15 @@ const AdminLogs: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
+  const formatDuration = (ms: number): string => {
+    if (ms == null) return '-';
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    const minutes = Math.floor(ms / 60000);
+    const seconds = ((ms % 60000) / 1000).toFixed(1);
+    return seconds === '0.0' ? `${minutes}m` : `${minutes}m ${seconds}s`;
+  };
+
   const getMethodColor = (method: string): string => {
     const colorMap: { [key: string]: string } = {
       'GET': 'blue',
@@ -155,6 +164,13 @@ const AdminLogs: React.FC = () => {
       render: (status: number) => (
         <Tag color={getStatusColor(status)}>{status}</Tag>
       ),
+    },
+    {
+      title: '耗时',
+      dataIndex: 'duration_ms',
+      key: 'duration_ms',
+      width: 80,
+      render: (ms: number) => formatDuration(ms),
     },
     {
       title: '操作',

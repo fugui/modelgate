@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -80,8 +81,8 @@ func (r *responseRecorder) WriteHeader(code int) {
 
 // UsageRecorder 访问日志记录器接口
 type UsageRecorder interface {
-	RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64)
-	RecordAccessDetailed(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, requestHeaders map[string]string, requestBody string, responseHeaders map[string]string, responseBody string, inputTokens int, outputTokens int)
+	RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, durationMs int64)
+	RecordAccessDetailed(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, requestHeaders map[string]string, requestBody string, responseHeaders map[string]string, responseBody string, inputTokens int, outputTokens int, durationMs int64)
 }
 
 // AccessLogMiddleware 访问日志记录中间件
@@ -129,7 +130,9 @@ func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 		requestBytes := c.Request.ContentLength
 
 		// 4. 处理请求
+		startTime := time.Now()
 		c.Next()
+		durationMs := time.Since(startTime).Milliseconds()
 
 		// 5. 请求完成后记录访问日志（只记录已认证用户）
 		var userID uuid.UUID
@@ -203,6 +206,7 @@ func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 				responseBodyCopy,
 				inputTokens,
 				outputTokens,
+				durationMs,
 			)
 		}
 	}
