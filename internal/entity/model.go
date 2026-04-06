@@ -44,6 +44,12 @@ type BackendCreateInput struct {
 	Enabled   bool   `json:"enabled"`
 }
 
+type GatewayImportRequest struct {
+	BaseURL string `json:"base_url" binding:"required,url"`
+	APIKey  string `json:"api_key"`
+	Prefix  string `json:"prefix" binding:"required"`
+}
+
 // ModelStore 模型配置数据访问层 - 现在从 ConfigManager 读取
 type ModelStore struct {
 	cm *config.ConfigManager

@@ -1,8 +1,12 @@
 package admin
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -50,6 +54,7 @@ func (h *ModelHandler) RegisterRoutes(r *gin.RouterGroup, jwtManager *auth.JWTMa
 	{
 		admin.GET("", h.List)
 		admin.POST("", h.Create)
+		admin.POST("/import", h.ImportFromGateway)
 		admin.PUT("/:id", h.Update)
 		admin.DELETE("/:id", h.Delete)
 		admin.GET("/:id/backends", h.GetModelBackends)
@@ -313,6 +318,121 @@ func (h *ModelHandler) GetLoadBalancerStatus(c *gin.Context) {
 		"load_balancer": h.loadBalancer.String(),
 		"health_status": healthStatus,
 		"models":        modelStats,
+	})
+}
+
+type ModelInfo struct {
+	ID string `json:"id"`
+}
+
+type ModelsResponse struct {
+	Data []ModelInfo `json:"data"`
+}
+
+func (h *ModelHandler) ImportFromGateway(c *gin.Context) {
+	var req entity.GatewayImportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的参数内容: " + err.Error()})
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	url := fmt.Sprintf("%s/v1/models", strings.TrimRight(req.BaseURL, "/"))
+	httpReq, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "构建请求失败: " + err.Error()})
+		return
+	}
+
+	if req.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "请求上游网关失败: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("上游返回错误 (状态码: %d): %s", resp.StatusCode, string(bodyBytes))})
+		return
+	}
+
+	var modelsResp ModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "解析上游模型数据失败: " + err.Error()})
+		return
+	}
+
+	importedModelCount := 0
+	importedBackendCount := 0
+
+	for _, m := range modelsResp.Data {
+		modelID := m.ID
+		if modelID == "" {
+			continue
+		}
+
+		// Sanitize model ID: replace slashes with dashes to avoid URL routing path issues
+		sanitizedModelID := strings.ReplaceAll(modelID, "/", "-")
+
+		// Check if model exists
+		model, err := h.store.GetByID(sanitizedModelID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("检查模型 %s 失败: %s", sanitizedModelID, err.Error())})
+			return
+		}
+
+		if model == nil {
+			// Create new model
+			newModel := &entity.Model{
+				ID:      sanitizedModelID,
+				Name:    sanitizedModelID,
+				Enabled: true,
+			}
+			if err := h.store.Create(newModel); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("创建模型 %s 失败: %s", sanitizedModelID, err.Error())})
+				return
+			}
+			importedModelCount++
+		}
+
+		// Create backend. Loop to find next available sequential ID
+		seq := 1
+		for {
+			backendID := fmt.Sprintf("%s-%s-%d", req.Prefix, sanitizedModelID, seq)
+			existingBackend, _ := h.backendStore.GetByID(backendID)
+			if existingBackend == nil {
+				// We found an available ID
+				backend := &entity.Backend{
+					ID:        backendID,
+					ModelID:   sanitizedModelID,
+					Name:      fmt.Sprintf("%s Backend %d", req.Prefix, seq),
+					BaseURL:   req.BaseURL,
+					APIKey:    req.APIKey,
+					ModelName: modelID,
+					Weight:    1,
+					Enabled:   true,
+				}
+				if err := h.backendStore.Create(backend); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("为模型 %s 创建后端失败: %s", sanitizedModelID, err.Error())})
+					return
+				}
+				importedBackendCount++
+				break
+			}
+			seq++
+			if seq > 1000 { // fallback safety limit
+				break
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("成功导入 %d 个模型、%d 个后端实例", importedModelCount, importedBackendCount),
 	})
 }
 

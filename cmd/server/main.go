@@ -248,7 +248,7 @@ func createDefaultAdmin(store *entity.UserStore, email, password string) {
 	}
 
 	// 检查是否已存在
-	existing, err := store.GetByEmail(email)
+	existing, err := store.GetByEmailAll(email)
 	if err != nil {
 		log.Printf("Failed to check existing admin: %v", err)
 		return

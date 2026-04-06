@@ -144,6 +144,11 @@ const Admin: React.FC = () => {
   const [editingModel, setEditingModel] = useState<Model | null>(null);
   const [modelForm] = Form.useForm();
 
+  // Import gateway states
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importForm] = Form.useForm();
+
   // User modal states
   const [userModalVisible, setUserModalVisible] = useState(false);
   const [userModalTitle, setUserModalTitle] = useState('创建用户');
@@ -286,6 +291,22 @@ const Admin: React.FC = () => {
   }, [tab, models]);
 
   // Model management functions
+  const handleImportGatewaySubmit = async (values: { prefix: string; base_url: string; api_key?: string }) => {
+    setImportLoading(true);
+    try {
+      const res = await api.post('/api/v1/admin/models/import', values);
+      messageApi.success(res.data.message || '导入成功');
+      setImportModalVisible(false);
+      importForm.resetFields();
+      fetchData();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      messageApi.error(error.response?.data?.error || '导入失败');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   const handleCreateModel = () => {
     setEditingModel(null);
     setModelModalTitle('创建模型');
@@ -1051,13 +1072,24 @@ const Admin: React.FC = () => {
           </Tabs.TabPane>
           <Tabs.TabPane tab="模型管理" key="models">
             <div style={{ marginBottom: 16 }}>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={handleCreateModel}
-              >
-                创建模型
-              </Button>
+              <Space>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={handleCreateModel}
+                >
+                  创建模型
+                </Button>
+                <Button
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    importForm.resetFields();
+                    setImportModalVisible(true);
+                  }}
+                >
+                  从网关导入
+                </Button>
+              </Space>
             </div>
             <Table
               dataSource={models}
@@ -1650,6 +1682,56 @@ const Admin: React.FC = () => {
               style={{ width: '100%' }}
               options={models.map(model => ({ label: model.name, value: model.id }))}
             />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Import Gateway Modal */}
+      <Modal
+        title="从网关批量导入模型"
+        open={importModalVisible}
+        onCancel={() => setImportModalVisible(false)}
+        onOk={() => importForm.submit()}
+        confirmLoading={importLoading}
+        okText="导入"
+        width={600}
+      >
+        <Form
+          form={importForm}
+          onFinish={handleImportGatewaySubmit}
+          layout="vertical"
+          style={{ marginTop: 24 }}
+        >
+          <Form.Item
+            name="prefix"
+            label="前缀 (Prefix)"
+            rules={[
+              { required: true, message: '请输入前缀' },
+              { pattern: /^[a-zA-Z0-9]+$/, message: '前缀只能包含英文字母和数字' }
+            ]}
+            extra="用于生成后端ID（格式：前缀-模型名-序号），例如：google"
+          >
+            <Input placeholder="输入服务提供商前缀，如 google, azure, openai" />
+          </Form.Item>
+
+          <Form.Item
+            name="base_url"
+            label="BaseURL"
+            rules={[
+              { required: true, message: '请输入上游网关 BaseURL' },
+              { type: 'url', message: '请输入有效的 URL' }
+            ]}
+            extra="上游网关服务地址，系统会调用 {BaseURL}/v1/models"
+          >
+            <Input placeholder="例如 https://api.openai.com" />
+          </Form.Item>
+
+          <Form.Item
+            name="api_key"
+            label="API Key"
+            extra="访问上游网关所需的 API Key（可选）"
+          >
+            <Input.Password placeholder="API Key" />
           </Form.Item>
         </Form>
       </Modal>

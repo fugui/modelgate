@@ -36,7 +36,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc) 
 	v1 := r.Group("/v1")
 	v1.Use(authMiddleware)
 	{
-		v1.POST("/messages", middleware.AccessLogMiddleware(h.usageService), h.HandleMessages)
+		v1.POST("/messages", middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.HandleMessages)
 		v1.POST("/messages/count_tokens", h.HandleCountTokens)
 	}
 }

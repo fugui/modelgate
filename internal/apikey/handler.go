@@ -153,7 +153,7 @@ func (h *ProxyHandler) RegisterRoutes(r *gin.Engine, concurrencyLimiter *concurr
 	v1 := r.Group("/v1")
 	{
 		v1.GET("/models", h.AuthMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.ListModels)
-		v1.POST("/chat/completions", h.AuthMiddleware(), h.ChatCompletionsMiddleware(concurrencyLimiter), middleware.AccessLogMiddleware(h.usageService), h.ChatCompletions)
+		v1.POST("/chat/completions", h.AuthMiddleware(), h.ChatCompletionsMiddleware(concurrencyLimiter), middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.ChatCompletions)
 	}
 }
 
