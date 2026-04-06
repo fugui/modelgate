@@ -376,8 +376,12 @@ func (h *ModelHandler) ImportFromGateway(c *gin.Context) {
 			continue
 		}
 
-		// Sanitize model ID: replace slashes with dashes to avoid URL routing path issues
-		sanitizedModelID := strings.ReplaceAll(modelID, "/", "-")
+		// Sanitize model ID: Remove 'models/' prefix if present, then replace slashes with dashes
+		sanitizedModelID := modelID
+		if strings.HasPrefix(sanitizedModelID, "models/") {
+			sanitizedModelID = strings.TrimPrefix(sanitizedModelID, "models/")
+		}
+		sanitizedModelID = strings.ReplaceAll(sanitizedModelID, "/", "-")
 
 		// Check if model exists
 		model, err := h.store.GetByID(sanitizedModelID)
