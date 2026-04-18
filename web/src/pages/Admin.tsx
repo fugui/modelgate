@@ -421,12 +421,20 @@ const Admin: React.FC = () => {
     }
   };
 
-  // Backend management functions
+  const generateBackendId = () => {
+    const existingIds = new Set(modelBackends.map(b => b.id));
+    let seq = 1;
+    while (existingIds.has(`${selectedModelId}-${seq}`)) {
+      seq++;
+    }
+    return `${selectedModelId}-${seq}`;
+  };
+
   const handleCreateBackend = () => {
     setEditingBackend(null);
     setBackendModalTitle('创建后端');
     backendForm.resetFields();
-    backendForm.setFieldsValue({ weight: 1, enabled: true });
+    backendForm.setFieldsValue({ id: generateBackendId(), weight: 1, enabled: true });
     setBackendModalVisible(true);
   };
 

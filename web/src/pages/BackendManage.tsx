@@ -87,11 +87,20 @@ const BackendManage: React.FC = () => {
     fetchBackends();
   }, [modelId]);
 
+  const generateBackendId = () => {
+    const existingIds = new Set(backends.map(b => b.id));
+    let seq = 1;
+    while (existingIds.has(`${modelId}-${seq}`)) {
+      seq++;
+    }
+    return `${modelId}-${seq}`;
+  };
+
   const handleCreateBackend = () => {
     setEditingBackend(null);
     setBackendModalTitle('创建后端');
     backendForm.resetFields();
-    backendForm.setFieldsValue({ weight: 1, enabled: true });
+    backendForm.setFieldsValue({ id: generateBackendId(), weight: 1, enabled: true });
     setBackendModalVisible(true);
   };
 
