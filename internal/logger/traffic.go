@@ -14,6 +14,7 @@ type TrafficEntry struct {
 	TraceID        string                 `json:"trace_id"`
 	UserID         string                 `json:"user_id"`
 	RequestPayload map[string]interface{} `json:"request_payload"`
+	ResponsePayload string                `json:"response_payload,omitempty"`
 	Metrics        TrafficMetrics         `json:"metrics"`
 }
 

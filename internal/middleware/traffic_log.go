@@ -18,6 +18,7 @@ type trafficRecorder struct {
 	gin.ResponseWriter
 	startTime      time.Time
 	firstTokenTime time.Time
+	body           *bytes.Buffer
 }
 
 func (r *trafficRecorder) Write(b []byte) (int, error) {
@@ -29,6 +30,7 @@ func (r *trafficRecorder) Write(b []byte) (int, error) {
 			r.firstTokenTime = time.Now()
 		}
 	}
+	r.body.Write(b)
 	return r.ResponseWriter.Write(b)
 }
 
@@ -38,6 +40,7 @@ func (r *trafficRecorder) WriteString(s string) (int, error) {
 			r.firstTokenTime = time.Now()
 		}
 	}
+	r.body.WriteString(s)
 	return r.ResponseWriter.WriteString(s)
 }
 
@@ -66,6 +69,7 @@ func TrafficLogMiddleware() gin.HandlerFunc {
 		recorder := &trafficRecorder{
 			ResponseWriter: c.Writer,
 			startTime:      startTime,
+			body:           bytes.NewBuffer(nil),
 		}
 		c.Writer = recorder
 
@@ -124,6 +128,7 @@ func TrafficLogMiddleware() gin.HandlerFunc {
 			TraceID:        traceID,
 			UserID:         userID,
 			RequestPayload: requestPayload,
+			ResponsePayload: recorder.body.String(),
 			Metrics: logger.TrafficMetrics{
 				PromptTokens:     inputTokens,
 				CompletionTokens: outputTokens,
