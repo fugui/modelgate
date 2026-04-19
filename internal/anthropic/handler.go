@@ -108,16 +108,16 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 	h.proxy.ExecuteCoreWorkflow(
 		c,
 		backendReq,
-		&anthropicProtocol{ClientReq: &anthropicReq},
+		&Protocol{ClientReq: &anthropicReq},
 	)
 }
 
-// anthropicProtocol 实现了 proxy.Protocol 接口
-type anthropicProtocol struct {
+// Protocol 实现了 proxy.Protocol 接口
+type Protocol struct {
 	ClientReq *MessagesRequest
 }
 
-func (p *anthropicProtocol) FormatResponse(backendResp []byte) ([]byte, int, int, error) {
+func (p *Protocol) FormatResponse(backendResp []byte) ([]byte, int, int, error) {
 	// 提前解析原始 backendResp 获取精确 Token
 	var normalResp proxy.OpenAIResponse
 	var preciseInput, preciseOutput int
@@ -130,7 +130,7 @@ func (p *anthropicProtocol) FormatResponse(backendResp []byte) ([]byte, int, int
 	return clientResp, preciseInput, preciseOutput, err
 }
 
-func (p *anthropicProtocol) FormatStreamLine(line string, state map[string]interface{}) (string, int, int, string, error) {
+func (p *Protocol) FormatStreamLine(line string, state map[string]interface{}) (string, int, int, string, error) {
 	clientLine, err := ConvertStreamLine(line, p.ClientReq, state)
 	if err != nil {
 		return "", 0, 0, "", err
@@ -142,11 +142,11 @@ func (p *anthropicProtocol) FormatStreamLine(line string, state map[string]inter
 	return clientLine, preciseInput, preciseOutput, content, nil
 }
 
-func (p *anthropicProtocol) PingMessage() string {
+func (p *Protocol) PingMessage() string {
 	return "event: ping\ndata: {\"type\": \"ping\"}\n\n"
 }
 
-func (p *anthropicProtocol) BuildErrorResponse(errType, message string) []byte {
+func (p *Protocol) BuildErrorResponse(errType, message string) []byte {
 	resp := map[string]interface{}{
 		"type": "error",
 		"error": map[string]interface{}{

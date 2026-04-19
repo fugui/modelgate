@@ -24,6 +24,7 @@ import (
 	"modelgate/internal/entity"
 	"modelgate/internal/logger"
 	"modelgate/internal/middleware"
+	"modelgate/internal/openai"
 	"modelgate/internal/proxy"
 	"modelgate/internal/quota"
 	"modelgate/internal/static"
@@ -204,12 +205,14 @@ func main() {
 	}
 
 	// OpenAI 兼容代理接口
-	proxyHandler := apikey.NewProxyHandler(apiKeyService, proxyInstance, jwtManager, userStore, usageService)
-	proxyHandler.RegisterRoutes(r, concurrencyLimiter)
+	openaiAuth := middleware.ProxyAuthMiddleware(apiKeyService, jwtManager, userStore, &openai.Protocol{})
+	openaiHandler := openai.NewHandler(proxyInstance, usageService)
+	openaiHandler.RegisterRoutes(r, openaiAuth, concurrencyLimiter)
 
 	// Anthropic 兼容代理接口
+	anthropicAuth := middleware.ProxyAuthMiddleware(apiKeyService, jwtManager, userStore, &anthropic.Protocol{})
 	anthropicHandler := anthropic.NewHandler(proxyInstance, usageService)
-	anthropicHandler.RegisterRoutes(r, proxyHandler.AuthMiddleware(), concurrencyLimiter)
+	anthropicHandler.RegisterRoutes(r, anthropicAuth, concurrencyLimiter)
 
 	log.Println("Anthropic API support enabled at /v1/messages")
 
