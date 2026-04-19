@@ -12,13 +12,14 @@ import (
 
 // Limiter 并发限制器
 type Limiter struct {
-	globalLimit int                   // 全局并发限制
-	userLimit   int                   // 每个用户的并发限制
-	globalSem   chan struct{}         // 全局信号量
-	userSemMap  map[string]chan struct{} // 用户信号量映射
-	mu          sync.RWMutex
-	peakToday   int    // 今日最高并发数
-	peakDate    string // 峰值对应日期
+	globalLimit   int                   // 全局并发限制
+	userLimit     int                   // 每个用户的并发限制
+	globalSem     chan struct{}         // 全局信号量
+	userSemMap    map[string]chan struct{} // 用户信号量映射
+	mu            sync.RWMutex
+	peakToday     int    // 今日最高并发数
+	peakDate      string // 峰值对应日期
+	peakInterval  int    // 当前采样窗口内的最高并发数
 }
 
 // NewLimiter 创建新的并发限制器
@@ -56,6 +57,10 @@ func (l *Limiter) Acquire(userID string) bool {
 			}
 			if current > l.peakToday {
 				l.peakToday = current
+			}
+			// 更新当前采样窗口内的峰值
+			if current > l.peakInterval {
+				l.peakInterval = current
 			}
 			l.mu.Unlock()
 		default:
@@ -163,6 +168,23 @@ func (l *Limiter) GetStats() map[string]interface{} {
 	}
 }
 
+// GetAndResetIntervalPeak 获取当前采样窗口内的最高并发数并重置
+// 用于 5 分钟级图表的并发数据采集，比瞬时采样更准确
+func (l *Limiter) GetAndResetIntervalPeak() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	peak := l.peakInterval
+	// 如果窗口内没有请求但当前有并发，至少返回当前值
+	if l.globalSem != nil {
+		current := len(l.globalSem)
+		if current > peak {
+			peak = current
+		}
+	}
+	l.peakInterval = 0
+	return peak
+}
 // UpdateLimits 动态更新并发限制
 // 注意：会重建信号量，已在飞行中的请求仍会正常释放旧信号量
 func (l *Limiter) UpdateLimits(globalLimit, userLimit int) {

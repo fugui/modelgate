@@ -106,9 +106,10 @@ func (hc *HourlyCounter) GetLast24Hours() []HourlyStat {
 	return stats
 }
 
-// ConcurrencyStatsProvider 并发统计接口（仅需 GetStats 方法）
+// ConcurrencyStatsProvider 并发统计接口
 type ConcurrencyStatsProvider interface {
 	GetStats() map[string]interface{}
+	GetAndResetIntervalPeak() int // 获取当前采样窗口内的最高并发数并重置
 }
 
 // MetricsSnapshot 5分钟级指标快照
@@ -235,12 +236,8 @@ func (s *Service) metricsLoop() {
 	for range ticker.C {
 		concurrency := 0
 		if s.concurrencyLimiter != nil {
-			stats := s.concurrencyLimiter.GetStats()
-			if v, ok := stats["global_current"]; ok {
-				if n, ok := v.(int); ok {
-					concurrency = n
-				}
-			}
+			// 使用窗口峰值而非瞬时值，确保短命请求不会被遗漏
+			concurrency = s.concurrencyLimiter.GetAndResetIntervalPeak()
 		}
 		s.metricsCollector.SnapshotConcurrency(concurrency)
 	}
