@@ -583,14 +583,18 @@ func (p *StreamParser) handleTextDelta(delta map[string]interface{}) {
 
 func (p *StreamParser) handleToolCalls(delta map[string]interface{}) {
 	if toolCalls, ok := delta["tool_calls"].([]interface{}); ok {
-		// 在发出 tool_use 块之前，停止当前活跃的 text/thinking 块
-		p.stopActiveBlock()
 		p.state["tool_calls_seen"] = true
 
 		for _, tc := range toolCalls {
 			if tcMap, ok := tc.(map[string]interface{}); ok {
 				idx, _ := tcMap["index"].(float64)
 				anthropicIdx := int(idx) + 2
+
+				// Stop the active block if we are transitioning from a different block
+				// (e.g. from text, thinking, or a previous tool call)
+				if active, ok := p.state["active_block_index"].(int); ok && active >= 0 && active != anthropicIdx {
+					p.stopActiveBlock()
+				}
 
 				if function, ok := tcMap["function"].(map[string]interface{}); ok {
 					if name, ok := function["name"].(string); ok && name != "" {
