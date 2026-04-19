@@ -4,6 +4,7 @@ package concurrency
 import (
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -16,6 +17,8 @@ type Limiter struct {
 	globalSem   chan struct{}         // 全局信号量
 	userSemMap  map[string]chan struct{} // 用户信号量映射
 	mu          sync.RWMutex
+	peakToday   int    // 今日最高并发数
+	peakDate    string // 峰值对应日期
 }
 
 // NewLimiter 创建新的并发限制器
@@ -43,7 +46,18 @@ func (l *Limiter) Acquire(userID string) bool {
 	if l.globalSem != nil {
 		select {
 		case l.globalSem <- struct{}{}:
-			// 获取成功
+			// 获取成功，检查是否创新高
+			current := len(l.globalSem)
+			l.mu.Lock()
+			today := time.Now().Format("2006-01-02")
+			if today != l.peakDate {
+				l.peakToday = 0
+				l.peakDate = today
+			}
+			if current > l.peakToday {
+				l.peakToday = current
+			}
+			l.mu.Unlock()
 		default:
 			// 全局并发已满
 			return false
@@ -132,12 +146,20 @@ func (l *Limiter) GetStats() map[string]interface{} {
 		}
 	}
 
+	// 检查 peak 日期
+	today := time.Now().Format("2006-01-02")
+	peakToday := l.peakToday
+	if l.peakDate != today {
+		peakToday = globalCurrent // 今天还没有峰值记录，用当前值
+	}
+
 	return map[string]interface{}{
 		"global_limit":   l.globalLimit,
 		"global_current": globalCurrent,
 		"user_limit":     l.userLimit,
 		"active_users":   len(userStats),
 		"user_stats":     userStats,
+		"peak_today":     peakToday,
 	}
 }
 

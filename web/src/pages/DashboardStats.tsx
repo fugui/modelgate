@@ -31,7 +31,7 @@ import api from '../api';
 interface DashboardData {
   summary: {
     total_users: number;
-    department_count: number;
+    peak_concurrency: number;
     today_requests: number;
     today_tokens: number;
   };
@@ -90,7 +90,7 @@ const DashboardStats: React.FC = () => {
       setData({
         summary: {
           total_users: stats.total_users || 0,
-          department_count: stats.department_count || 0,
+          peak_concurrency: stats.peak_concurrency || 0,
           today_requests: stats.today_total_requests || 0,
           today_tokens: (stats.today_input_tokens || 0) + (stats.today_output_tokens || 0),
         },
@@ -297,8 +297,8 @@ const DashboardStats: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card bordered={false} hoverable>
             <Statistic
-              title="部门数量"
-              value={summary.department_count}
+              title="今日最高并发"
+              value={summary.peak_concurrency}
               prefix={<CloudServerOutlined style={{ color: '#52c41a' }} />}
             />
           </Card>

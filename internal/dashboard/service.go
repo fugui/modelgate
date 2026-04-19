@@ -285,7 +285,7 @@ type DashboardStats struct {
 	TodayOutputTokens  int64   `json:"today_output_tokens"`   // 今日输出Token
 	ActiveUsers        int     `json:"active_users"`          // 今日活跃用户
 	TotalUsers         int     `json:"total_users"`           // 总用户数
-	DepartmentCount    int     `json:"department_count"`      // 部门数量
+	PeakConcurrency    int     `json:"peak_concurrency"`      // 今日最高并发
 	AvgRequestsPerUser float64 `json:"avg_requests_per_user"` // 人均请求数
 }
 
@@ -370,11 +370,14 @@ func (s *Service) GetDashboardStats() (*DashboardStats, error) {
 		return nil, fmt.Errorf("failed to get total users: %w", err)
 	}
 
-	// 部门数量（排除空部门）
-	query = `SELECT COUNT(DISTINCT department) FROM users WHERE department != '' AND department IS NOT NULL`
-	err = s.db.QueryRow(query).Scan(&stats.DepartmentCount)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get department count: %w", err)
+	// 今日最高并发数
+	if s.concurrencyLimiter != nil {
+		limiterStats := s.concurrencyLimiter.GetStats()
+		if peak, ok := limiterStats["peak_today"]; ok {
+			if p, ok := peak.(int); ok {
+				stats.PeakConcurrency = p
+			}
+		}
 	}
 
 	// 计算人均请求数
