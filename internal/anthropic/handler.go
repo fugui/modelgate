@@ -30,8 +30,8 @@ func NewHandler(proxyInst *proxy.Proxy, usageService *usage.Service) *Handler {
 // RegisterRoutes 注册 Anthropic 路由
 func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc, concurrencyLimiter *concurrency.Limiter) {
 	v1 := r.Group("/v1")
-	v1.Use(authMiddleware)
 	v1.Use(middleware.ProtocolInjectionMiddleware(&Protocol{}))
+	v1.Use(authMiddleware)
 	{
 		v1.POST("/messages", middleware.ConcurrencyLimitMiddleware(concurrencyLimiter), middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.HandleMessages)
 		v1.POST("/messages/count_tokens", h.HandleCountTokens)

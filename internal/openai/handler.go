@@ -26,8 +26,8 @@ func NewHandler(proxyInst *proxy.Proxy, usageService *usage.Service) *Handler {
 func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc, concurrencyLimiter *concurrency.Limiter) {
 	// OpenAI 兼容接口
 	v1 := r.Group("/v1")
-	v1.Use(authMiddleware)
 	v1.Use(middleware.ProtocolInjectionMiddleware(&Protocol{}))
+	v1.Use(authMiddleware)
 	{
 		v1.GET("/models", middleware.AccessLogMiddleware(h.usageService), h.ListModels)
 		v1.POST("/chat/completions", middleware.ConcurrencyLimitMiddleware(concurrencyLimiter), middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.ChatCompletions)
