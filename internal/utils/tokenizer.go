@@ -1,5 +1,10 @@
 package utils
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 // EstimateTokens provides a fast, heuristic-based estimate of token counts.
 // It avoids the heavy dependency and initialization cost of tiktoken,
 // making it suitable for high-throughput proxy interceptors.
@@ -29,4 +34,51 @@ func EstimateTokens(text string) int {
 	estimated := int(total)
 	// Add a small safety buffer for metadata overhead in typical chat models
 	return estimated + 20
+}
+
+// EstimateTokensFromOpenAIRequest extracts string content from a standard OpenAI request JSON body
+// (including messages, system prompts, and tools) and estimates the total token count.
+func EstimateTokensFromOpenAIRequest(body []byte) int {
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return 0
+	}
+
+	var contentBuilder strings.Builder
+
+	// Traverse messages (which may contain the system prompt in OpenAI format)
+	if messages, ok := payload["messages"].([]interface{}); ok {
+		for _, msgObj := range messages {
+			if msgMap, ok := msgObj.(map[string]interface{}); ok {
+				if content, ok := msgMap["content"]; ok {
+					switch v := content.(type) {
+					case string:
+						contentBuilder.WriteString(v)
+					case []interface{}:
+						// Handle complex content arrays (like vision/multi-modal text blocks)
+						for _, blockObj := range v {
+							if blockMap, ok := blockObj.(map[string]interface{}); ok {
+								if bType, _ := blockMap["type"].(string); bType == "text" {
+									if bText, _ := blockMap["text"].(string); bText != "" {
+										contentBuilder.WriteString(bText)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Traverse tools/functions to account for their schema token cost
+	if tools, ok := payload["tools"].([]interface{}); ok {
+		for _, toolObj := range tools {
+			if b, err := json.Marshal(toolObj); err == nil {
+				contentBuilder.Write(b)
+			}
+		}
+	}
+
+	return EstimateTokens(contentBuilder.String())
 }

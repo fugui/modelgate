@@ -190,60 +190,15 @@ func (h *Handler) HandleCountTokens(c *gin.Context) {
 		return
 	}
 
-	// 抽出文本以估算 Tokens
-	var contentBuilder bytes.Buffer
-
-	// 1. 尝试追加 System Prompt
-	if anthropicReq.System != nil {
-		switch v := anthropicReq.System.(type) {
-		case string:
-			contentBuilder.WriteString(v)
-		case []interface{}: // System messages can be an array of blocks
-			for _, blockObj := range v {
-				if blockMap, ok := blockObj.(map[string]interface{}); ok {
-					if bText, _ := blockMap["text"].(string); bText != "" {
-						contentBuilder.WriteString(bText)
-					}
-				}
-			}
-		}
-	}
-
-	// 2. 追加 Messages
-	for _, msg := range anthropicReq.Messages {
-		switch v := msg.Content.(type) {
-		case string:
-			contentBuilder.WriteString(v)
-		case []interface{}:
-			for _, blockObj := range v {
-				if blockMap, ok := blockObj.(map[string]interface{}); ok {
-					if bType, _ := blockMap["type"].(string); bType == "text" {
-						if bText, _ := blockMap["text"].(string); bText != "" {
-							contentBuilder.WriteString(bText)
-						}
-					} else if bType == "tool_result" {
-						if cObj, ok := blockMap["content"].(string); ok {
-							contentBuilder.WriteString(cObj)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// 3. 追加 Tools 的结构和描述占用的 tokens
-	if len(anthropicReq.Tools) > 0 {
-		for _, tool := range anthropicReq.Tools {
-			contentBuilder.WriteString(tool.Name)
-			contentBuilder.WriteString(tool.Description)
-			if b, err := json.Marshal(tool.InputSchema); err == nil {
-				contentBuilder.Write(b)
-			}
-		}
+	// 统一转换为 OpenAI 格式，复用底层的标准 Token 估算器
+	openaiBody, err := ConvertToOpenAI(&anthropicReq)
+	if err != nil {
+		sendAnthropicError(c, http.StatusInternalServerError, "api_error", "failed to convert request for token counting: "+err.Error())
+		return
 	}
 
 	// 估算总 Token
-	inputTokens := utils.EstimateTokens(contentBuilder.String())
+	inputTokens := utils.EstimateTokensFromOpenAIRequest(openaiBody)
 
 	// Anthropic Count Tokens Response 结构
 	c.JSON(http.StatusOK, gin.H{
