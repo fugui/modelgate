@@ -222,6 +222,13 @@ func buildOpenAIMessages(role string, parsed parsedAnthropicContent) []map[strin
 			"role":    "assistant",
 			"content": parsed.openaiContent,
 		}
+		if len(parsed.openaiContent) == 1 {
+			if block, ok := parsed.openaiContent[0].(map[string]interface{}); ok {
+				if block["type"] == "text" {
+					openaiMsg["content"] = block["text"]
+				}
+			}
+		}
 		if parsed.thinkingContent != "" {
 			openaiMsg["reasoning_content"] = parsed.thinkingContent
 		}
@@ -270,10 +277,18 @@ func buildOpenAIMessages(role string, parsed parsedAnthropicContent) []map[strin
 			messages = append(messages, toolMsg)
 		}
 		if len(parsed.openaiContent) > 0 {
-			messages = append(messages, map[string]interface{}{
+			userMsg := map[string]interface{}{
 				"role":    "user",
 				"content": parsed.openaiContent,
-			})
+			}
+			if len(parsed.openaiContent) == 1 {
+				if block, ok := parsed.openaiContent[0].(map[string]interface{}); ok {
+					if block["type"] == "text" {
+						userMsg["content"] = block["text"]
+					}
+				}
+			}
+			messages = append(messages, userMsg)
 		}
 	} else {
 		openaiMsg := map[string]interface{}{
