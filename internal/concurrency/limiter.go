@@ -12,14 +12,15 @@ import (
 
 // Limiter 并发限制器
 type Limiter struct {
-	globalLimit   int                   // 全局并发限制
-	userLimit     int                   // 每个用户的并发限制
-	globalSem     chan struct{}         // 全局信号量
-	userSemMap    map[string]chan struct{} // 用户信号量映射
-	mu            sync.RWMutex
-	peakToday     int    // 今日最高并发数
-	peakDate      string // 峰值对应日期
-	peakInterval  int    // 当前采样窗口内的最高并发数
+	globalLimit       int                      // 全局并发限制
+	userLimit         int                      // 每个用户的并发限制
+	globalSem         chan struct{}             // 全局信号量
+	userSemMap        map[string]chan struct{}  // 用户信号量映射
+	mu                sync.RWMutex
+	activeConcurrency int    // 当前活跃并发数（始终追踪，不受 globalLimit 影响）
+	peakToday         int    // 今日最高并发数
+	peakDate          string // 峰值对应日期
+	peakInterval      int    // 当前采样窗口内的最高并发数
 }
 
 // NewLimiter 创建新的并发限制器
@@ -47,22 +48,7 @@ func (l *Limiter) Acquire(userID string) bool {
 	if l.globalSem != nil {
 		select {
 		case l.globalSem <- struct{}{}:
-			// 获取成功，检查是否创新高
-			current := len(l.globalSem)
-			l.mu.Lock()
-			today := time.Now().Format("2006-01-02")
-			if today != l.peakDate {
-				l.peakToday = 0
-				l.peakDate = today
-			}
-			if current > l.peakToday {
-				l.peakToday = current
-			}
-			// 更新当前采样窗口内的峰值
-			if current > l.peakInterval {
-				l.peakInterval = current
-			}
-			l.mu.Unlock()
+			// 获取成功
 		default:
 			// 全局并发已满
 			return false
@@ -84,18 +70,41 @@ func (l *Limiter) Acquire(userID string) bool {
 		}
 	}
 
+	// 许可获取成功，更新并发计数和峰值（始终执行，不受 globalLimit 影响）
+	l.mu.Lock()
+	l.activeConcurrency++
+	current := l.activeConcurrency
+	today := time.Now().Format("2006-01-02")
+	if today != l.peakDate {
+		l.peakToday = 0
+		l.peakDate = today
+	}
+	if current > l.peakToday {
+		l.peakToday = current
+	}
+	if current > l.peakInterval {
+		l.peakInterval = current
+	}
+	l.mu.Unlock()
+
 	return true
 }
 
 // Release 释放并发许可
 func (l *Limiter) Release(userID string) {
+	// 减少活跃并发计数
+	l.mu.Lock()
+	if l.activeConcurrency > 0 {
+		l.activeConcurrency--
+	}
+	l.mu.Unlock()
+
 	// 释放用户许可
 	if l.userLimit > 0 {
 		userSem := l.getUserSemaphore(userID)
 		select {
 		case <-userSem:
 		default:
-			// 信号量为空，忽略
 		}
 	}
 
@@ -104,7 +113,6 @@ func (l *Limiter) Release(userID string) {
 		select {
 		case <-l.globalSem:
 		default:
-			// 信号量为空，忽略
 		}
 	}
 }
@@ -138,10 +146,7 @@ func (l *Limiter) GetStats() map[string]interface{} {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	globalCurrent := 0
-	if l.globalSem != nil {
-		globalCurrent = len(l.globalSem)
-	}
+	globalCurrent := l.activeConcurrency
 
 	userStats := make(map[string]int)
 	for userID, sem := range l.userSemMap {
@@ -155,7 +160,7 @@ func (l *Limiter) GetStats() map[string]interface{} {
 	today := time.Now().Format("2006-01-02")
 	peakToday := l.peakToday
 	if l.peakDate != today {
-		peakToday = globalCurrent // 今天还没有峰值记录，用当前值
+		peakToday = globalCurrent
 	}
 
 	return map[string]interface{}{
@@ -175,12 +180,9 @@ func (l *Limiter) GetAndResetIntervalPeak() int {
 	defer l.mu.Unlock()
 
 	peak := l.peakInterval
-	// 如果窗口内没有请求但当前有并发，至少返回当前值
-	if l.globalSem != nil {
-		current := len(l.globalSem)
-		if current > peak {
-			peak = current
-		}
+	current := l.activeConcurrency
+	if current > peak {
+		peak = current
 	}
 	l.peakInterval = 0
 	return peak
