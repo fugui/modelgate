@@ -153,7 +153,7 @@ func (h *ProxyHandler) RegisterRoutes(r *gin.Engine, concurrencyLimiter *concurr
 	v1 := r.Group("/v1")
 	{
 		v1.GET("/models", h.AuthMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.ListModels)
-		v1.POST("/chat/completions", h.AuthMiddleware(), h.ChatCompletionsMiddleware(concurrencyLimiter), middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.ChatCompletions)
+		v1.POST("/chat/completions", h.AuthMiddleware(), middleware.ConcurrencyLimitMiddleware(concurrencyLimiter), middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.ChatCompletions)
 	}
 }
 
@@ -219,37 +219,6 @@ func (h *ProxyHandler) AuthMiddleware() gin.HandlerFunc {
 
 func (h *ProxyHandler) ListModels(c *gin.Context) {
 	h.proxy.HandleListModels(c)
-}
-
-// ChatCompletionsMiddleware 并发限制中间件
-func (h *ProxyHandler) ChatCompletionsMiddleware(limiter *concurrency.Limiter) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if limiter == nil {
-			c.Next()
-			return
-		}
-
-		userID, exists := c.Get(string(contextKeyUserID))
-		if !exists {
-			c.Next()
-			return
-		}
-
-		uid := userID.(uuid.UUID)
-
-		if !limiter.Acquire(uid.String()) {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error":   "concurrency limit exceeded",
-				"message": "too many concurrent requests, please try again later",
-			})
-			return
-		}
-
-		// 确保在请求结束后释放
-		defer limiter.Release(uid.String())
-
-		c.Next()
-	}
 }
 
 func (h *ProxyHandler) ChatCompletions(c *gin.Context) {

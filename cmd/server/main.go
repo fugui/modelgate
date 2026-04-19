@@ -209,7 +209,7 @@ func main() {
 
 	// Anthropic 兼容代理接口
 	anthropicHandler := anthropic.NewHandler(proxyInstance, usageService)
-	anthropicHandler.RegisterRoutes(r, proxyHandler.AuthMiddleware())
+	anthropicHandler.RegisterRoutes(r, proxyHandler.AuthMiddleware(), concurrencyLimiter)
 
 	log.Println("Anthropic API support enabled at /v1/messages")
 

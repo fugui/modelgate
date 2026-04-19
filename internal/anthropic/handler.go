@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"modelgate/internal/concurrency"
 	"modelgate/internal/middleware"
 	"modelgate/internal/proxy"
 	"modelgate/internal/utils"
@@ -32,11 +33,11 @@ func NewHandler(proxy *proxy.Proxy, usageService UsageService) *Handler {
 }
 
 // RegisterRoutes 注册 Anthropic 路由
-func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc) {
+func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc, concurrencyLimiter *concurrency.Limiter) {
 	v1 := r.Group("/v1")
 	v1.Use(authMiddleware)
 	{
-		v1.POST("/messages", middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.HandleMessages)
+		v1.POST("/messages", middleware.ConcurrencyLimitMiddleware(concurrencyLimiter), middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.HandleMessages)
 		v1.POST("/messages/count_tokens", h.HandleCountTokens)
 	}
 }
@@ -85,10 +86,19 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 		return
 	}
 
+	// 获取 API Key ID（由认证中间件设置）
+	var akid uuid.UUID
+	if apiKeyID, exists := c.Get("api_key_id"); exists {
+		if id, ok := apiKeyID.(uuid.UUID); ok {
+			akid = id
+		}
+	}
+
 	// 执行核心工作流
 	backendReq := &proxy.BackendRequest{
 		ModelID:     anthropicReq.Model,
 		UserID:      uid,
+		APIKeyID:    akid,
 		RequestBody: openaiBody,
 		IsStream:    anthropicReq.Stream,
 		ClientIP:    c.ClientIP(),

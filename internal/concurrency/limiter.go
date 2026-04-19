@@ -2,12 +2,8 @@
 package concurrency
 
 import (
-	"net/http"
 	"sync"
 	"time"
-
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // Limiter 并发限制器
@@ -205,60 +201,4 @@ func (l *Limiter) UpdateLimits(globalLimit, userLimit int) {
 
 	// 清空用户信号量映射（会按需重新创建）
 	l.userSemMap = make(map[string]chan struct{})
-}
-
-// Middleware 创建 Gin 中间件
-// 注意：这个中间件需要在认证中间件之后使用，因为需要 userID
-func (l *Limiter) Middleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 只限制 LLM 代理接口
-		if c.Request.URL.Path != "/v1/chat/completions" {
-			c.Next()
-			return
-		}
-
-		// 从上下文中获取用户ID
-		userID := getUserIDFromContext(c)
-		if userID == "" {
-			// 没有用户ID，可能是未认证的请求
-			c.Next()
-			return
-		}
-
-		// 尝试获取许可
-		if !l.Acquire(userID) {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error": "concurrency limit exceeded",
-				"message": "too many concurrent requests, please try again later",
-			})
-			return
-		}
-
-		// 确保在请求结束后释放
-		defer l.Release(userID)
-
-		c.Next()
-	}
-}
-
-// getUserIDFromContext 从 Gin 上下文中获取用户ID
-func getUserIDFromContext(c *gin.Context) string {
-	// 尝试从 context 中获取 user_id（由认证中间件设置）
-	if userID, exists := c.Get("user_id"); exists {
-		if id, ok := userID.(uuid.UUID); ok {
-			return id.String()
-		}
-		if id, ok := userID.(string); ok {
-			return id
-		}
-	}
-
-	// 尝试获取 currentUser（JWT claims）
-	if claims, exists := c.Get("currentUser"); exists {
-		if c, ok := claims.(*struct{ UserID uuid.UUID }); ok {
-			return c.UserID.String()
-		}
-	}
-
-	return ""
 }
