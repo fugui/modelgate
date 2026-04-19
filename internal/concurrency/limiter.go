@@ -141,6 +141,26 @@ func (l *Limiter) GetStats() map[string]interface{} {
 	}
 }
 
+// UpdateLimits 动态更新并发限制
+// 注意：会重建信号量，已在飞行中的请求仍会正常释放旧信号量
+func (l *Limiter) UpdateLimits(globalLimit, userLimit int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.globalLimit = globalLimit
+	l.userLimit = userLimit
+
+	// 重建全局信号量
+	if globalLimit > 0 {
+		l.globalSem = make(chan struct{}, globalLimit)
+	} else {
+		l.globalSem = nil
+	}
+
+	// 清空用户信号量映射（会按需重新创建）
+	l.userSemMap = make(map[string]chan struct{})
+}
+
 // Middleware 创建 Gin 中间件
 // 注意：这个中间件需要在认证中间件之后使用，因为需要 userID
 func (l *Limiter) Middleware() gin.HandlerFunc {

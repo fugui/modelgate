@@ -165,6 +165,7 @@ const Admin: React.FC = () => {
 
   // System config states
   const [configForm] = Form.useForm();
+  const [concurrencyForm] = Form.useForm();
 
   const [messageApi, contextHolder] = message.useMessage();
 
@@ -177,6 +178,15 @@ const Admin: React.FC = () => {
     }
   };
 
+  const fetchConcurrencyConfig = async () => {
+    try {
+      const res = await api.get('/api/v1/admin/config/concurrency');
+      concurrencyForm.setFieldsValue(res.data.data);
+    } catch {
+      messageApi.error('获取并发配置失败');
+    }
+  };
+
   const handleSystemConfigSubmit = async (values: any) => {
     try {
       await api.put('/api/v1/admin/config/frontend', values);
@@ -185,6 +195,17 @@ const Admin: React.FC = () => {
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       messageApi.error(error.response?.data?.error || '保存系统配置失败');
+    }
+  };
+
+  const handleConcurrencyConfigSubmit = async (values: { global_limit: number; user_limit: number }) => {
+    try {
+      await api.put('/api/v1/admin/config/concurrency', values);
+      messageApi.success('并发配置保存成功，已动态生效');
+      fetchConcurrencyConfig();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      messageApi.error(error.response?.data?.error || '保存并发配置失败');
     }
   };
 
@@ -289,6 +310,7 @@ const Admin: React.FC = () => {
       return () => clearInterval(interval);
     } else if (currentTab === 'system') {
       fetchSystemConfig();
+      fetchConcurrencyConfig();
     }
   }, [tab, models]);
 
@@ -1232,6 +1254,45 @@ const Admin: React.FC = () => {
                         <Button
                           icon={<ReloadOutlined />}
                           onClick={fetchSystemConfig}
+                        >
+                          刷新
+                        </Button>
+                      </Space>
+                    </Form.Item>
+                  </Form>
+                </Card>
+                <Card title="并发控制" style={{ marginBottom: 16 }}>
+                  <Form
+                    form={concurrencyForm}
+                    layout="horizontal"
+                    labelCol={{ span: 8 }}
+                    wrapperCol={{ span: 16 }}
+                    onFinish={handleConcurrencyConfigSubmit}
+                  >
+                    <Form.Item
+                      name="global_limit"
+                      label="全局并发限制"
+                      rules={[{ required: true, message: '请输入全局并发限制' }]}
+                      extra="全局最大并发请求数，0 表示不限制"
+                    >
+                      <InputNumber min={0} max={10000} style={{ width: '100%' }} placeholder="如：100" />
+                    </Form.Item>
+                    <Form.Item
+                      name="user_limit"
+                      label="用户并发限制"
+                      rules={[{ required: true, message: '请输入用户并发限制' }]}
+                      extra="每个用户最大并发请求数，0 表示不限制"
+                    >
+                      <InputNumber min={0} max={1000} style={{ width: '100%' }} placeholder="如：10" />
+                    </Form.Item>
+                    <Form.Item wrapperCol={{ offset: 8, span: 16 }}>
+                      <Space>
+                        <Button type="primary" onClick={() => concurrencyForm.submit()}>
+                          保存
+                        </Button>
+                        <Button
+                          icon={<ReloadOutlined />}
+                          onClick={fetchConcurrencyConfig}
                         >
                           刷新
                         </Button>

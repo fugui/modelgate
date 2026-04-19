@@ -198,6 +198,28 @@ func (cm *ConfigManager) UpdateFrontend(frontend FrontendConfig) error {
 	return nil
 }
 
+// GetConcurrency 获取并发控制配置
+func (cm *ConfigManager) GetConcurrency() ConcurrencyConfig {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return cm.cfg.Concurrency
+}
+
+// UpdateConcurrency 更新并发控制配置
+func (cm *ConfigManager) UpdateConcurrency(concurrency ConcurrencyConfig) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	cm.cfg.Concurrency = concurrency
+	if err := cm.saveLocked(); err != nil {
+		return err
+	}
+
+	// 异步通知订阅者
+	go cm.notifyWatchers(ConfigEvent{Type: "concurrency", Data: concurrency})
+	return nil
+}
+
 // Reload 从文件重新加载配置（用于外部修改后）
 func (cm *ConfigManager) Reload() error {
 	cm.mu.Lock()

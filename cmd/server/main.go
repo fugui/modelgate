@@ -106,6 +106,13 @@ func main() {
 
 	// 设置配置变更监听 - 热重载支持
 	configChanges := cfgManager.Subscribe()
+	// 初始化并发限制器（始终创建，以支持动态配置）
+	concurrencyLimiter := concurrency.NewLimiter(cfg.Concurrency.GlobalLimit, cfg.Concurrency.UserLimit)
+	if cfg.Concurrency.GlobalLimit > 0 || cfg.Concurrency.UserLimit > 0 {
+		log.Printf("Concurrency limiter enabled: global=%d, user=%d",
+			cfg.Concurrency.GlobalLimit, cfg.Concurrency.UserLimit)
+	}
+
 	go func() {
 		for event := range configChanges {
 			switch event.Type {
@@ -113,18 +120,21 @@ func main() {
 				log.Println("Config reload detected: updating load balancer")
 				lb.ReloadConfig(cfgManager.GetModels())
 				log.Printf("Load balancer updated with %d models", len(cfgManager.GetModels()))
+			case "concurrency":
+				if cc, ok := event.Data.(config.ConcurrencyConfig); ok {
+					concurrencyLimiter.UpdateLimits(cc.GlobalLimit, cc.UserLimit)
+					log.Printf("Concurrency limiter updated: global=%d, user=%d", cc.GlobalLimit, cc.UserLimit)
+				}
+			}
+			// Handle concurrency update on "all" event too
+			if event.Type == "all" {
+				cc := cfgManager.GetConcurrency()
+				concurrencyLimiter.UpdateLimits(cc.GlobalLimit, cc.UserLimit)
+				log.Printf("Concurrency limiter updated (full reload): global=%d, user=%d", cc.GlobalLimit, cc.UserLimit)
 			}
 		}
 	}()
 	log.Println("Config hot-reload listener started")
-
-	// 初始化并发限制器
-	var concurrencyLimiter *concurrency.Limiter
-	if cfg.Concurrency.GlobalLimit > 0 || cfg.Concurrency.UserLimit > 0 {
-		concurrencyLimiter = concurrency.NewLimiter(cfg.Concurrency.GlobalLimit, cfg.Concurrency.UserLimit)
-		log.Printf("Concurrency limiter enabled: global=%d, user=%d",
-			cfg.Concurrency.GlobalLimit, cfg.Concurrency.UserLimit)
-	}
 
 	// 注意：配额策略现在直接从 config.yaml 读取，无需初始化到数据库
 	log.Printf("Loaded %d quota policies from config", len(cfgManager.GetPolicies()))
@@ -173,7 +183,7 @@ func main() {
 	log.Println("Dashboard routes registered at /api/v1/dashboard")
 
 	// 并发状态管理 API（管理员）
-	if concurrencyLimiter != nil {
+	{
 		adminAPI := api.Group("/admin")
 		adminAPI.Use(middleware.AuthMiddlewareWithUserValidation(jwtManager, userStore))
 		adminAPI.Use(middleware.AdminRequired())
