@@ -74,6 +74,8 @@ interface ModelFormValues {
   description: string;
   enabled: boolean;
   model_params?: string;
+  base_url?: string;
+  api_key?: string;
 }
 
 interface BackendFormValues {
@@ -412,6 +414,23 @@ const Admin: React.FC = () => {
           model_params: modelParams,
         });
         messageApi.success('模型创建成功');
+
+        // If base_url is provided, also create a backend
+        if (values.base_url) {
+          try {
+            await api.post(`/api/v1/admin/models/${values.id}/backends`, {
+              id: `${values.id}-1`,
+              base_url: values.base_url,
+              api_key: values.api_key || '',
+              weight: 1,
+              enabled: true,
+            });
+            messageApi.success('后端创建成功');
+          } catch (backendErr: unknown) {
+            const backendError = backendErr as { response?: { data?: { error?: string } } };
+            messageApi.warning('模型已创建，但后端创建失败：' + (backendError.response?.data?.error || '未知错误'));
+          }
+        }
       }
       setModelModalVisible(false);
       fetchData();
@@ -1469,6 +1488,33 @@ const Admin: React.FC = () => {
 }`}
             />
           </Form.Item>
+
+          {!editingModel && (
+            <>
+              <Form.Item style={{ marginBottom: 8 }}>
+                <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16, color: '#8c8c8c', fontSize: 13 }}>
+                  以下为可选项，填写后将同时创建一个后端实例
+                </div>
+              </Form.Item>
+              <Form.Item
+                name="base_url"
+                label="BaseURL"
+                rules={[
+                  { type: 'url', message: '请输入有效的URL' },
+                ]}
+                extra="后端服务地址，如：https://api.openai.com"
+              >
+                <Input placeholder="如：https://api.openai.com" />
+              </Form.Item>
+              <Form.Item
+                name="api_key"
+                label="API Key"
+                extra="后端服务的API密钥（可选）"
+              >
+                <Input.Password placeholder="API Key（可选）" />
+              </Form.Item>
+            </>
+          )}
         </Form>
       </Modal>
 
