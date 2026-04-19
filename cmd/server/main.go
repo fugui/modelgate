@@ -116,6 +116,9 @@ func main() {
 	// 将并发限制器传给 Dashboard 服务，启动定时采样
 	dashboardService.SetConcurrencyLimiter(concurrencyLimiter)
 
+	// 将并发限制器传给 Proxy，用于统计所有协议的并发数
+	proxyInstance.SetConcurrencyTracker(concurrencyLimiter)
+
 	go func() {
 		for event := range configChanges {
 			switch event.Type {

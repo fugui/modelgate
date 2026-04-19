@@ -21,15 +21,22 @@ import (
 	"modelgate/internal/utils"
 )
 
+// ConcurrencyTracker 并发追踪接口
+type ConcurrencyTracker interface {
+	Acquire(userID string) bool
+	Release(userID string)
+}
+
 // Proxy LLM 代理
 type Proxy struct {
-	lb           *RoundRobinBalancer
-	quotaService *quota.Service
-	usageService *usage.Service
-	httpClient   *http.Client
-	modelStore   *entity.ModelStore
-	backendStore *entity.BackendStore
-	userStore    *entity.UserStore
+	lb                 *RoundRobinBalancer
+	quotaService       *quota.Service
+	usageService       *usage.Service
+	httpClient         *http.Client
+	modelStore         *entity.ModelStore
+	backendStore       *entity.BackendStore
+	userStore          *entity.UserStore
+	concurrencyTracker ConcurrencyTracker
 }
 
 func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService *usage.Service, modelStore *entity.ModelStore, backendStore *entity.BackendStore, userStore *entity.UserStore) *Proxy {
@@ -42,6 +49,11 @@ func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService 
 		backendStore: backendStore,
 		userStore:    userStore,
 	}
+}
+
+// SetConcurrencyTracker 设置并发追踪器（用于统计并发数）
+func (p *Proxy) SetConcurrencyTracker(tracker ConcurrencyTracker) {
+	p.concurrencyTracker = tracker
 }
 
 // OpenAIRequest OpenAI 兼容的请求格式
@@ -150,6 +162,12 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	pingMessage string,
 ) {
 	startTime := time.Now()
+
+	// 追踪并发数（所有协议统一追踪，不仅限 OpenAI 中间件）
+	if p.concurrencyTracker != nil {
+		p.concurrencyTracker.Acquire(req.UserID.String())
+		defer p.concurrencyTracker.Release(req.UserID.String())
+	}
 
 	// 获取用户信息
 	user, err := p.userStore.GetByID(req.UserID)
