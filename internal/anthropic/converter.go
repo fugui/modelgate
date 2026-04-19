@@ -38,6 +38,7 @@ type ToolResult struct {
 	ToolUseID  string      `json:"tool_use_id"`
 	Content    interface{} `json:"content"`
 	IsError    bool        `json:"is_error,omitempty"`
+	Name       string      `json:"-"` // Internal use for OpenAI tool message name
 }
 
 // ConvertToOpenAI 将 Anthropic 请求转换为 OpenAI 格式
@@ -49,10 +50,22 @@ func ConvertToOpenAI(req *MessagesRequest) ([]byte, error) {
 		messages = append(messages, sysMsgs...)
 	}
 
+	toolNameMap := make(map[string]string)
+
 	// 转换 messages
 	for _, msg := range req.Messages {
 		if contentArray, ok := msg.Content.([]interface{}); ok {
 			parsed := parseAnthropicContentElements(contentArray)
+			
+			for _, tu := range parsed.toolUses {
+				toolNameMap[tu.ID] = tu.Name
+			}
+			for i, tr := range parsed.toolResults {
+				if name, ok := toolNameMap[tr.ToolUseID]; ok {
+					parsed.toolResults[i].Name = name
+				}
+			}
+
 			msgs := buildOpenAIMessages(msg.Role, parsed)
 			messages = append(messages, msgs...)
 		} else if contentStr, ok := msg.Content.(string); ok {
@@ -242,11 +255,15 @@ func buildOpenAIMessages(role string, parsed parsedAnthropicContent) []map[strin
 			if strings.HasPrefix(toolID, "toolu_") {
 				toolID = strings.TrimPrefix(toolID, "toolu_")
 			}
-			messages = append(messages, map[string]interface{}{
+			toolMsg := map[string]interface{}{
 				"role":         "tool",
 				"content":      convertToolResultContent(toolResult.Content),
 				"tool_call_id": toolID,
-			})
+			}
+			if toolResult.Name != "" {
+				toolMsg["name"] = toolResult.Name
+			}
+			messages = append(messages, toolMsg)
 		}
 		if len(parsed.openaiContent) > 0 {
 			messages = append(messages, map[string]interface{}{
