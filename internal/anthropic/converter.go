@@ -570,17 +570,8 @@ func (p *StreamParser) handleDone() string {
 }
 
 func (p *StreamParser) handleUsageOrOther(stream map[string]interface{}, originalLine string) string {
-	if usage, ok := stream["usage"].(map[string]interface{}); ok {
-		var input, output int
-		if pt, ok := usage["prompt_tokens"].(float64); ok { input = int(pt) }
-		if ct, ok := usage["completion_tokens"].(float64); ok { output = int(ct) }
-		p.emitEvent("message_delta", map[string]interface{}{
-			"type": "message_delta",
-			"usage": map[string]interface{}{
-				"output_tokens": output,
-				"input_tokens":  input,
-			},
-		})
+	if _, ok := stream["usage"].(map[string]interface{}); ok {
+		// Just drop it to prevent sending a malformed message_delta
 		return p.sb.String()
 	}
 	return originalLine
@@ -723,7 +714,13 @@ func (p *StreamParser) handleFinishReason(choice map[string]interface{}) {
 		p.stopActiveBlock()
 		p.emitEvent("message_delta", map[string]interface{}{
 			"type": "message_delta",
-			"delta": map[string]interface{}{"stop_reason": convertStopReason(fr)},
+			"delta": map[string]interface{}{
+				"stop_reason":   convertStopReason(fr),
+				"stop_sequence": nil,
+			},
+			"usage": map[string]interface{}{
+				"output_tokens": 0,
+			},
 		})
 	}
 }
