@@ -26,6 +26,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/hourly", h.GetHourlyStats)
 	r.GET("/departments", h.GetDepartmentStats)
 	r.GET("/models", h.GetModelStats)
+	r.GET("/metrics", h.GetMetrics)
 }
 
 // GetDashboardStats 获取系统概览数据
@@ -116,5 +117,16 @@ func (h *Handler) GetModelStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": stats,
+	})
+}
+
+// GetMetrics 获取最近24小时的并发数&时延指标
+func (h *Handler) GetMetrics(c *gin.Context) {
+	metrics := h.service.GetMetricsHistory()
+	if metrics == nil {
+		metrics = []MetricsSnapshot{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data": metrics,
 	})
 }

@@ -61,7 +61,7 @@ func TestScenario_UserEndToEndFlow(t *testing.T) {
 	t.Logf("✓ 配额检查通过: %d/%d 请求", quotaResult.DailyRequests, quotaResult.DailyRequestLimit)
 
 	// Step 7: 模拟调用模型，记录请求
-	err = scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b")
+	err = scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b", 0)
 	require.NoError(t, err)
 	t.Logf("✓ 请求已记录")
 

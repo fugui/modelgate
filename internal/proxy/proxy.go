@@ -414,7 +414,7 @@ func (p *Proxy) handleConvertedNormalResponse(
 	})
 
 	// 记录请求并扣除 Token
-	_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens)
+	_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens, int64(latency))
 
 	// 只有在成功解压后才删除 Content-Encoding header
 	if decompressed {
@@ -539,7 +539,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 			OutputTokens: outputTokens,
 		})
 
-		_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens)
+		_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens, int64(latency))
 	}()
 
 	for {

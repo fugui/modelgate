@@ -15,6 +15,7 @@ import {
   HistoryOutlined,
 } from '@ant-design/icons';
 import {
+  Area,
   Bar,
   Line,
   XAxis,
@@ -61,6 +62,13 @@ interface DashboardData {
       output_tokens: number;
     }[];
   }[];
+  metrics_history: {
+    timestamp: string;
+    time_label: string;
+    concurrency: number;
+    avg_latency_ms: number;
+    request_count: number;
+  }[];
 }
 
 
@@ -71,11 +79,12 @@ const DashboardStats: React.FC = () => {
 
   const fetchStats = async () => {
     try {
-      const [statsRes, hourlyRes, topUsersRes, topUsers7dRes] = await Promise.all([
+      const [statsRes, hourlyRes, topUsersRes, topUsers7dRes, metricsRes] = await Promise.all([
         api.get('/api/v1/dashboard/stats'),
         api.get('/api/v1/dashboard/hourly'),
         api.get('/api/v1/dashboard/top-users'),
         api.get('/api/v1/dashboard/top-users-7d'),
+        api.get('/api/v1/dashboard/metrics'),
       ]);
       const stats = statsRes.data.data || {};
       setData({
@@ -97,6 +106,10 @@ const DashboardStats: React.FC = () => {
           output_tokens: u.output_tokens || 0,
         })),
         top_users_7d: topUsers7dRes.data.data || [],
+        metrics_history: (metricsRes.data.data || []).map((m: any) => ({
+          ...m,
+          avg_latency_ms: Math.round((m.avg_latency_ms || 0) * 100) / 100,
+        })),
       });
     } catch (error: any) {
       message.error('获取统计数据失败: ' + (error.response?.data?.error || error.message));
@@ -120,7 +133,7 @@ const DashboardStats: React.FC = () => {
     return <Empty description="无法加载数据" />;
   }
 
-  const { summary, hourly_stats: hourlyStats, top_users: topUsers, top_users_7d: topUsers7d } = data;
+  const { summary, hourly_stats: hourlyStats, top_users: topUsers, top_users_7d: topUsers7d, metrics_history: metricsHistory } = data;
 
   const formatTokens = (num: number) => {
     if (num >= 1000000) {
@@ -351,6 +364,68 @@ const DashboardStats: React.FC = () => {
               />
             ) : (
               <Empty description="暂无数据" style={{ padding: '60px 0' }} />
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 并发数 & 响应时延 */}
+      <Row gutter={16} style={{ marginBottom: 24 }}>
+        <Col xs={24}>
+          <Card title="并发请求 & 响应时延（最近24小时，5分钟粒度）">
+            {metricsHistory.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={metricsHistory}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="time_label"
+                    tick={{ fontSize: 11 }}
+                    interval={11}
+                  />
+                  <YAxis
+                    yAxisId="left"
+                    orientation="left"
+                    stroke="#1890ff"
+                    label={{ value: '并发数', angle: -90, position: 'insideLeft', offset: 10 }}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    stroke="#fa8c16"
+                    label={{ value: '时延(ms)', angle: 90, position: 'insideRight', offset: 10 }}
+                  />
+                  <Tooltip
+                    formatter={(value: any, name: any) => {
+                      if (name === '并发数') return [`${value ?? 0}`, '并发数'];
+                      if (name === '平均时延') return [`${value ?? 0} ms`, '平均时延'];
+                      return [value, name];
+                    }}
+                    labelFormatter={(label: any) => `时间: ${label}`}
+                  />
+                  <Legend />
+                  <Area
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="concurrency"
+                    fill="#1890ff"
+                    fillOpacity={0.3}
+                    stroke="#1890ff"
+                    name="并发数"
+                    strokeWidth={2}
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="avg_latency_ms"
+                    stroke="#fa8c16"
+                    name="平均时延"
+                    dot={false}
+                    strokeWidth={2}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <Empty description="暂无数据（系统启动后每5分钟采样一次）" style={{ padding: '60px 0' }} />
             )}
           </Card>
         </Col>

@@ -113,6 +113,9 @@ func main() {
 			cfg.Concurrency.GlobalLimit, cfg.Concurrency.UserLimit)
 	}
 
+	// 将并发限制器传给 Dashboard 服务，启动定时采样
+	dashboardService.SetConcurrencyLimiter(concurrencyLimiter)
+
 	go func() {
 		for event := range configChanges {
 			switch event.Type {

@@ -90,7 +90,7 @@ func (rc *RateCounter) GetCount(userID string, window int) int {
 
 // DashboardRecorder 用于记录仪表板统计的接口
 type DashboardRecorder interface {
-	RecordHourlyStat(userID string, inputTokens, outputTokens int)
+	RecordHourlyStat(userID string, inputTokens, outputTokens int, durationMs int64)
 }
 
 type Service struct {
@@ -339,7 +339,7 @@ func (s *Service) IncrementRate(userID uuid.UUID, window int) error {
 }
 
 // RecordRequest 记录一次请求（增加请求计数）
-func (s *Service) RecordRequest(userID uuid.UUID, modelID string) error {
+func (s *Service) RecordRequest(userID uuid.UUID, modelID string, durationMs int64) error {
 	// 增加请求计数
 	err := s.store.IncrementRequestCount(userID, modelID)
 	if err != nil {
@@ -351,14 +351,14 @@ func (s *Service) RecordRequest(userID uuid.UUID, modelID string) error {
 
 	// 记录小时级统计（用于仪表板）
 	if s.dashboardRecorder != nil {
-		s.dashboardRecorder.RecordHourlyStat(userID.String(), 0, 0)
+		s.dashboardRecorder.RecordHourlyStat(userID.String(), 0, 0, durationMs)
 	}
 
 	return nil
 }
 
 // RecordRequestTokens 记录一次请求并记录消耗的 Token
-func (s *Service) RecordRequestTokens(userID uuid.UUID, modelID string, apiKeyID uuid.UUID, inputTokens, outputTokens int) error {
+func (s *Service) RecordRequestTokens(userID uuid.UUID, modelID string, apiKeyID uuid.UUID, inputTokens, outputTokens int, durationMs int64) error {
 	// 增加请求计数及 Token (每日配额)
 	err := s.store.IncrementUsage(userID, modelID, inputTokens, outputTokens)
 	if err != nil {
@@ -375,7 +375,7 @@ func (s *Service) RecordRequestTokens(userID uuid.UUID, modelID string, apiKeyID
 
 	// 记录小时级统计（用于仪表板）
 	if s.dashboardRecorder != nil {
-		s.dashboardRecorder.RecordHourlyStat(userID.String(), inputTokens, outputTokens)
+		s.dashboardRecorder.RecordHourlyStat(userID.String(), inputTokens, outputTokens, durationMs)
 	}
 
 	return nil

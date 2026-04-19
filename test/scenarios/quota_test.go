@@ -23,7 +23,7 @@ func TestScenario_QuotaExceedsDailyLimit(t *testing.T) {
 
 	// 先消耗 900 个请求（模拟已使用）
 	for i := 0; i < 900; i++ {
-		err := scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b")
+		err := scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b", 0)
 		require.NoError(t, err)
 	}
 
@@ -36,7 +36,7 @@ func TestScenario_QuotaExceedsDailyLimit(t *testing.T) {
 
 	// 再消耗 100 个请求，达到 1000
 	for i := 0; i < 100; i++ {
-		err = scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b")
+		err = scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b", 0)
 		require.NoError(t, err)
 	}
 
@@ -62,7 +62,7 @@ func TestScenario_QuotaMultipleModels(t *testing.T) {
 
 	// 在模型 A 上消耗 4 个请求
 	for i := 0; i < 4; i++ {
-		err := scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b")
+		err := scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b", 0)
 		require.NoError(t, err)
 	}
 

@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"container/ring"
 	"database/sql"
 	"fmt"
 	"sync"
@@ -105,21 +106,144 @@ func (hc *HourlyCounter) GetLast24Hours() []HourlyStat {
 	return stats
 }
 
+// ConcurrencyStatsProvider 并发统计接口（仅需 GetStats 方法）
+type ConcurrencyStatsProvider interface {
+	GetStats() map[string]interface{}
+}
+
+// MetricsSnapshot 5分钟级指标快照
+type MetricsSnapshot struct {
+	Timestamp    time.Time `json:"timestamp"`
+	TimeLabel    string    `json:"time_label"`     // "HH:MM" 格式
+	Concurrency  int       `json:"concurrency"`    // 瞬时并发数
+	AvgLatencyMs float64   `json:"avg_latency_ms"` // 平均响应时延
+	RequestCount int       `json:"request_count"`  // 该区间请求数
+}
+
+// metricsSlot 内部使用的可变槽位
+type metricsSlot struct {
+	timestamp     time.Time
+	concurrency   int
+	totalDuration int64 // 总耗时(ms)
+	requestCount  int   // 请求数
+}
+
+// MetricsCollector 5分钟级指标采集器
+type MetricsCollector struct {
+	slots *ring.Ring // ring of *metricsSlot
+	mu    sync.RWMutex
+	// 当前正在累积的槽位（尚未被快照确认）
+	currentSlot *metricsSlot
+}
+
+const metricsSlotCount = 288 // 24h × 12 (每5分钟一个)
+
+// NewMetricsCollector 创建指标采集器
+func NewMetricsCollector() *MetricsCollector {
+	r := ring.New(metricsSlotCount)
+	return &MetricsCollector{
+		slots:       r,
+		currentSlot: &metricsSlot{timestamp: time.Now()},
+	}
+}
+
+// RecordDuration 记录一次请求的耗时（在请求完成时调用）
+func (mc *MetricsCollector) RecordDuration(durationMs int64) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.currentSlot.totalDuration += durationMs
+	mc.currentSlot.requestCount++
+}
+
+// SnapshotConcurrency 快照当前并发数并推进到下一个区间
+func (mc *MetricsCollector) SnapshotConcurrency(concurrency int) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	// 完成当前槽位
+	mc.currentSlot.concurrency = concurrency
+
+	// 存入 ring buffer
+	mc.slots.Value = mc.currentSlot
+	mc.slots = mc.slots.Next()
+
+	// 开始新的槽位
+	mc.currentSlot = &metricsSlot{timestamp: time.Now()}
+}
+
+// GetHistory 获取所有有效快照
+func (mc *MetricsCollector) GetHistory() []MetricsSnapshot {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+
+	var result []MetricsSnapshot
+	mc.slots.Do(func(v interface{}) {
+		if v == nil {
+			return
+		}
+		slot := v.(*metricsSlot)
+		if slot.timestamp.IsZero() {
+			return
+		}
+		avgLatency := float64(0)
+		if slot.requestCount > 0 {
+			avgLatency = float64(slot.totalDuration) / float64(slot.requestCount)
+		}
+		result = append(result, MetricsSnapshot{
+			Timestamp:    slot.timestamp,
+			TimeLabel:    slot.timestamp.Format("15:04"),
+			Concurrency:  slot.concurrency,
+			AvgLatencyMs: avgLatency,
+			RequestCount: slot.requestCount,
+		})
+	})
+
+	return result
+}
+
 // Service 仪表板服务
 type Service struct {
-	db            *sql.DB
-	hourlyCounter *HourlyCounter
+	db                 *sql.DB
+	hourlyCounter      *HourlyCounter
+	metricsCollector   *MetricsCollector
+	concurrencyLimiter ConcurrencyStatsProvider
 }
 
 // NewService 创建仪表板服务
 func NewService(db *sql.DB) *Service {
 	s := &Service{
-		db:            db,
-		hourlyCounter: NewHourlyCounter(),
+		db:               db,
+		hourlyCounter:    NewHourlyCounter(),
+		metricsCollector: NewMetricsCollector(),
 	}
 	// 启动清理任务
 	go s.dateCheckLoop()
 	return s
+}
+
+// SetConcurrencyLimiter 设置并发限制器引用，启动定时采样
+func (s *Service) SetConcurrencyLimiter(limiter ConcurrencyStatsProvider) {
+	s.concurrencyLimiter = limiter
+	go s.metricsLoop()
+}
+
+// metricsLoop 每5分钟采样一次并发数
+func (s *Service) metricsLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		concurrency := 0
+		if s.concurrencyLimiter != nil {
+			stats := s.concurrencyLimiter.GetStats()
+			if v, ok := stats["global_current"]; ok {
+				if n, ok := v.(int); ok {
+					concurrency = n
+				}
+			}
+		}
+		s.metricsCollector.SnapshotConcurrency(concurrency)
+	}
 }
 
 // dateCheckLoop 每小时清理过期数据（只保留今天和昨天）
@@ -141,8 +265,17 @@ func (s *Service) dateCheckLoop() {
 }
 
 // RecordHourlyStat 记录小时级统计
-func (s *Service) RecordHourlyStat(userID string, inputTokens, outputTokens int) {
+func (s *Service) RecordHourlyStat(userID string, inputTokens, outputTokens int, durationMs int64) {
 	s.hourlyCounter.Increment(userID, inputTokens, outputTokens)
+	// 同时记录到5分钟级指标采集器
+	if durationMs > 0 {
+		s.metricsCollector.RecordDuration(durationMs)
+	}
+}
+
+// GetMetricsHistory 获取最近24小时的5分钟级指标历史
+func (s *Service) GetMetricsHistory() []MetricsSnapshot {
+	return s.metricsCollector.GetHistory()
 }
 
 // DashboardStats 系统概览

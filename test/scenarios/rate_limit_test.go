@@ -86,7 +86,7 @@ func TestScenario_ConcurrentRequests(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b")
+			err := scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b", 0)
 			require.NoError(t, err)
 		}()
 	}
@@ -115,7 +115,7 @@ func TestScenario_RequestQuotaResetNextDay(t *testing.T) {
 
 	// 用掉一些配额
 	for i := 0; i < 10; i++ {
-		err := scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b")
+		err := scenario.QuotaSvc.RecordRequest(user.ID, "llama3-70b", 0)
 		require.NoError(t, err)
 	}
 
