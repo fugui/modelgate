@@ -108,17 +108,42 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 	h.proxy.ExecuteCoreWorkflow(
 		c,
 		backendReq,
-		// 响应转换器
-		func(body []byte) ([]byte, error) {
-			return ConvertFromOpenAI(body, &anthropicReq)
-		},
-		// 流式行转换器
-		func(line string, state map[string]interface{}) (string, error) {
-			return ConvertStreamLine(line, &anthropicReq, state)
-		},
-		// Anthropic-compliant ping/keep-alive message
-		"event: ping\ndata: {\"type\": \"ping\"}\n\n",
+		&anthropicProtocol{ClientReq: &anthropicReq},
 	)
+}
+
+// anthropicProtocol 实现了 proxy.Protocol 接口
+type anthropicProtocol struct {
+	ClientReq *MessagesRequest
+}
+
+func (p *anthropicProtocol) FormatResponse(backendResp []byte) ([]byte, int, int, error) {
+	// 提前解析原始 backendResp 获取精确 Token
+	var normalResp proxy.OpenAIResponse
+	var preciseInput, preciseOutput int
+	if err := json.Unmarshal(backendResp, &normalResp); err == nil && normalResp.Usage != nil {
+		preciseInput = normalResp.Usage.PromptTokens
+		preciseOutput = normalResp.Usage.CompletionTokens
+	}
+
+	clientResp, err := ConvertFromOpenAI(backendResp, p.ClientReq)
+	return clientResp, preciseInput, preciseOutput, err
+}
+
+func (p *anthropicProtocol) FormatStreamLine(line string, state map[string]interface{}) (string, int, int, string, error) {
+	clientLine, err := ConvertStreamLine(line, p.ClientReq, state)
+	if err != nil {
+		return "", 0, 0, "", err
+	}
+
+	// 文本内容和精确 Token 的提取直接从原始 OpenAI 行完成，简单且准确
+	content, preciseInput, preciseOutput := proxy.ParseOpenAISSE(line)
+
+	return clientLine, preciseInput, preciseOutput, content, nil
+}
+
+func (p *anthropicProtocol) PingMessage() string {
+	return "event: ping\ndata: {\"type\": \"ping\"}\n\n"
 }
 
 // HandleCountTokens 处理 /v1/messages/count_tokens 请求

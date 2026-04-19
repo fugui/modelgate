@@ -70,11 +70,11 @@ type OpenAIResponse struct {
 	Created int64                    `json:"created"`
 	Model   string                   `json:"model"`
 	Choices []map[string]interface{} `json:"choices"`
-	Usage   struct {
+	Usage   *struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	} `json:"usage,omitempty"`
 }
 
 // StreamResponse 流式响应格式
@@ -84,6 +84,11 @@ type StreamResponse struct {
 	Created int64          `json:"created"`
 	Model   string         `json:"model"`
 	Choices []StreamChoice `json:"choices"`
+	Usage   *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage,omitempty"`
 }
 
 type StreamChoice struct {
@@ -92,45 +97,6 @@ type StreamChoice struct {
 	FinishReason *string                `json:"finish_reason"`
 }
 
-func (p *Proxy) HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID uuid.UUID) {
-	// 读取请求体
-	bodyBytes, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
-		return
-	}
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-	var req OpenAIRequest
-	if err := json.Unmarshal(bodyBytes, &req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format"})
-		return
-	}
-
-	modelID := req.Model
-	if modelID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
-		return
-	}
-
-	backendReq := &BackendRequest{
-		ModelID:     modelID,
-		UserID:      userID,
-		APIKeyID:    apiKeyID,
-		RequestBody: bodyBytes,
-		IsStream:    req.Stream,
-		ClientIP:    c.ClientIP(),
-		UserAgent:   c.Request.UserAgent(),
-	}
-
-	p.ExecuteCoreWorkflow(
-		c,
-		backendReq,
-		nil, // responseConverter
-		nil, // streamLineConverter
-		"",  // default ping message
-	)
-}
 
 // BackendRequest 后端请求参数
 type BackendRequest struct {
@@ -157,9 +123,7 @@ type BackendResponse struct {
 func (p *Proxy) ExecuteCoreWorkflow(
 	c *gin.Context,
 	req *BackendRequest,
-	responseConverter func([]byte) ([]byte, error),
-	streamLineConverter func(string, map[string]interface{}) (string, error),
-	pingMessage string,
+	proto Protocol,
 ) {
 	startTime := time.Now()
 
@@ -346,10 +310,10 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	// 根据是否流式响应选择处理方式
 	if isStreamResponse {
 		// handleConvertedStreamResponse 负责在结束后调用 resp.Body.Close()
-		p.handleConvertedStreamResponse(c, resp, req, backend.ID, startTime, streamLineConverter, pingMessage, inputTokens)
+		p.handleConvertedStreamResponse(c, resp, req, backend.ID, startTime, proto, inputTokens)
 	} else {
 		defer resp.Body.Close()
-		p.handleConvertedNormalResponse(c, resp, req, backend.ID, startTime, responseConverter, inputTokens)
+		p.handleConvertedNormalResponse(c, resp, req, backend.ID, startTime, proto, inputTokens)
 	}
 }
 
@@ -360,7 +324,7 @@ func (p *Proxy) handleConvertedNormalResponse(
 	req *BackendRequest,
 	backendID string,
 	startTime time.Time,
-	converter func([]byte) ([]byte, error),
+	proto Protocol,
 	inputTokens int,
 ) {
 	respBody, err := io.ReadAll(resp.Body)
@@ -399,16 +363,23 @@ func (p *Proxy) handleConvertedNormalResponse(
 		}
 	}
 
-	// 计算 OutputTokens
-	outputTokens := 0
-	var normalResp OpenAIResponse
-	if err := json.Unmarshal(respBody, &normalResp); err == nil && normalResp.Usage.CompletionTokens > 0 {
-		outputTokens = normalResp.Usage.CompletionTokens
-		// 覆盖 inputTokens 以便使用大模型提供的更精准值（如果有的话）
-		if normalResp.Usage.PromptTokens > 0 {
-			inputTokens = normalResp.Usage.PromptTokens
+	// 使用协议接口转换响应并获取精准 Token
+	var preciseInput, preciseOutput int
+	if proto != nil {
+		var err error
+		respBody, preciseInput, preciseOutput, err = proto.FormatResponse(respBody)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert response: " + err.Error()})
+			return
 		}
-	} else {
+	}
+
+	// 计算最终 Token（优先使用精确 Token）
+	if preciseInput > 0 {
+		inputTokens = preciseInput
+	}
+	outputTokens := preciseOutput
+	if outputTokens == 0 {
 		outputTokens = utils.EstimateTokens(string(respBody))
 	}
 
@@ -446,17 +417,7 @@ func (p *Proxy) handleConvertedNormalResponse(
 	}
 	c.Header("Content-Type", contentType)
 
-	// 转换响应
-	if converter != nil {
-		converted, err := converter(respBody)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert response: " + err.Error()})
-			return
-		}
-		c.Data(resp.StatusCode, contentType, converted)
-		return
-	}
-
+	// 返回响应
 	c.Data(resp.StatusCode, contentType, respBody)
 }
 
@@ -467,8 +428,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 	req *BackendRequest,
 	backendID string,
 	startTime time.Time,
-	lineConverter func(string, map[string]interface{}) (string, error),
-	pingMessage string,
+	proto Protocol,
 	inputTokens int,
 ) {
 	defer resp.Body.Close()
@@ -478,12 +438,13 @@ func (p *Proxy) handleConvertedStreamResponse(
 	c.Header("X-Accel-Buffering", "no") // 告知 Nginx 不要缓存响应
 	c.Status(resp.StatusCode)
 
-	// 立即发送一个 SSE 注释并 Flush，确保客户端收到 Header，防止首字节超时
-	if pingMessage != "" {
-		c.Writer.WriteString(pingMessage)
-	} else {
-		c.Writer.WriteString(": ping\n\n")
+	pingMessage := ": ping\n\n"
+	if proto != nil && proto.PingMessage() != "" {
+		pingMessage = proto.PingMessage()
 	}
+
+	// 立即发送一个 SSE 注释并 Flush，确保客户端收到 Header，防止首字节超时
+	c.Writer.WriteString(pingMessage)
 	c.Writer.Flush()
 
 	// 使用带 timeout 的 context 处理流式响应，设置为 1 小时以支持超长生成
@@ -534,13 +495,24 @@ func (p *Proxy) handleConvertedStreamResponse(
 	// 创建该流的状态跟踪器
 	streamState := make(map[string]interface{})
 	var fullCollectedText strings.Builder
+	var preciseInputTokens, preciseOutputTokens int
 
 	// 使用 defer 确保无论流式循环如何退出（正常 EOF、错误、ctx 取消），都记录 Token
 	defer func() {
-		outputTokens := utils.EstimateTokens(fullCollectedText.String())
+		// 优先使用精确的 OutputTokens，如果未获取到则进行估算
+		outputTokens := preciseOutputTokens
+		if outputTokens == 0 {
+			outputTokens = utils.EstimateTokens(fullCollectedText.String())
+		}
+		
+		// 优先使用精确的 InputTokens
+		finalInputTokens := inputTokens
+		if preciseInputTokens > 0 {
+			finalInputTokens = preciseInputTokens
+		}
 		latency := int(time.Since(startTime).Milliseconds())
 
-		c.Set("input_tokens", inputTokens)
+		c.Set("input_tokens", finalInputTokens)
 		c.Set("output_tokens", outputTokens)
 
 		p.usageService.RecordUsageDetailed(&usage.Record{
@@ -553,11 +525,11 @@ func (p *Proxy) handleConvertedStreamResponse(
 			UserAgent:    req.UserAgent,
 			BackendID:    backendID,
 			StatusCode:   resp.StatusCode,
-			InputTokens:  inputTokens,
+			InputTokens:  finalInputTokens,
 			OutputTokens: outputTokens,
 		})
 
-		_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens, int64(latency))
+		_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, finalInputTokens, outputTokens, int64(latency))
 	}()
 
 	for {
@@ -578,17 +550,23 @@ func (p *Proxy) handleConvertedStreamResponse(
 		}
 
 		// 转换每一行
-		if lineConverter != nil {
-			converted, err := lineConverter(line, streamState)
+		if proto != nil {
+			converted, inToks, outToks, contentDelta, err := proto.FormatStreamLine(line, streamState)
+			if inToks > 0 {
+				preciseInputTokens = inToks
+			}
+			if outToks > 0 {
+				preciseOutputTokens = outToks
+			}
+			
 			writeMu.Lock()
 			if err != nil {
-				// 转换失败时透传原始行
+				// 转换失败时透传原始行，并尝试提取原始行的文本
 				_, _ = c.Writer.WriteString(line)
-				fullCollectedText.WriteString(line)
+				content, _, _ := ParseOpenAISSE(line)
+				fullCollectedText.WriteString(content)
 			} else {
 				_, _ = c.Writer.WriteString(converted)
-				// 解析转换后的行获取内容以估算 Token
-				contentDelta := extractContentFromSSE(converted)
 				fullCollectedText.WriteString(contentDelta)
 			}
 			c.Writer.Flush()
@@ -598,17 +576,28 @@ func (p *Proxy) handleConvertedStreamResponse(
 			_, _ = c.Writer.WriteString(line)
 			c.Writer.Flush()
 			writeMu.Unlock()
-			contentDelta := extractContentFromSSE(line)
+			contentDelta, inToks, outToks := ParseOpenAISSE(line)
+			if inToks > 0 {
+				preciseInputTokens = inToks
+			}
+			if outToks > 0 {
+				preciseOutputTokens = outToks
+			}
 			fullCollectedText.WriteString(contentDelta)
 		}
 	}
 }
 
-// extractContentFromSSE 从 SSE 格式的 data 行中粗略提取文本以估算 Token
-// 支持 OpenAI 格式 (choices[0].delta.content / reasoning_content) 和 Anthropic 格式 (delta.text, delta.thinking, delta.partial_json)
-func extractContentFromSSE(line string) string {
+// ParseOpenAISSE 解析 OpenAI SSE 格式的行
+// 返回:
+// - contentText: 提取的文本内容（用于估算Token）
+// - preciseInputTokens: 如果包含 Usage，提取精确 Input Tokens
+// - preciseOutputTokens: 如果包含 Usage，提取精确 Output Tokens
+func ParseOpenAISSE(line string) (string, int, int) {
 	var result strings.Builder
-	// 处理可能包含多个 SSE 事件的转换输出（lineConverter 可能将一行转换为多个事件）
+	var preciseInput, preciseOutput int
+
+	// 处理可能包含多个 SSE 事件的字符串
 	for _, segment := range strings.Split(line, "\n") {
 		segment = strings.TrimSpace(segment)
 
@@ -629,46 +618,42 @@ func extractContentFromSSE(line string) string {
 
 		// 尝试 OpenAI 格式
 		var streamResp StreamResponse
-		if err := json.Unmarshal([]byte(jsonStr), &streamResp); err == nil && len(streamResp.Choices) > 0 {
-			if content, ok := streamResp.Choices[0].Delta["content"].(string); ok {
-				result.WriteString(content)
+		if err := json.Unmarshal([]byte(jsonStr), &streamResp); err == nil {
+			// 提取 Usage
+			if streamResp.Usage != nil {
+				if streamResp.Usage.PromptTokens > 0 {
+					preciseInput = streamResp.Usage.PromptTokens
+				}
+				if streamResp.Usage.CompletionTokens > 0 {
+					preciseOutput = streamResp.Usage.CompletionTokens
+				}
 			}
-			// 提取 reasoning_content（思考模型如 Kimi、DeepSeek R1 等使用）
-			if reasoning, ok := streamResp.Choices[0].Delta["reasoning_content"].(string); ok {
-				result.WriteString(reasoning)
-			}
-			// 提取 tool_calls arguments
-			if toolCalls, ok := streamResp.Choices[0].Delta["tool_calls"].([]interface{}); ok {
-				for _, tc := range toolCalls {
-					if tcMap, ok := tc.(map[string]interface{}); ok {
-						if fn, ok := tcMap["function"].(map[string]interface{}); ok {
-							if args, ok := fn["arguments"].(string); ok {
-								result.WriteString(args)
+
+			// 提取 Content
+			if len(streamResp.Choices) > 0 {
+				if content, ok := streamResp.Choices[0].Delta["content"].(string); ok {
+					result.WriteString(content)
+				}
+				// 提取 reasoning_content（思考模型如 Kimi、DeepSeek R1 等使用）
+				if reasoning, ok := streamResp.Choices[0].Delta["reasoning_content"].(string); ok {
+					result.WriteString(reasoning)
+				}
+				// 提取 tool_calls arguments
+				if toolCalls, ok := streamResp.Choices[0].Delta["tool_calls"].([]interface{}); ok {
+					for _, tc := range toolCalls {
+						if tcMap, ok := tc.(map[string]interface{}); ok {
+							if fn, ok := tcMap["function"].(map[string]interface{}); ok {
+								if args, ok := fn["arguments"].(string); ok {
+									result.WriteString(args)
+								}
 							}
 						}
 					}
 				}
 			}
-			continue
-		}
-
-		// 尝试 Anthropic 格式 (delta.text, delta.thinking, delta.partial_json)
-		var event map[string]interface{}
-		if err := json.Unmarshal([]byte(jsonStr), &event); err == nil {
-			if delta, ok := event["delta"].(map[string]interface{}); ok {
-				if text, ok := delta["text"].(string); ok {
-					result.WriteString(text)
-				}
-				if thinking, ok := delta["thinking"].(string); ok {
-					result.WriteString(thinking)
-				}
-				if partialJSON, ok := delta["partial_json"].(string); ok {
-					result.WriteString(partialJSON)
-				}
-			}
 		}
 	}
-	return result.String()
+	return result.String(), preciseInput, preciseOutput
 }
 
 func (p *Proxy) HandleListModels(c *gin.Context) {

@@ -2,6 +2,9 @@
 package apikey
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 
@@ -9,8 +12,9 @@ import (
 	"github.com/google/uuid"
 	"modelgate/internal/auth"
 	"modelgate/internal/concurrency"
-	"modelgate/internal/middleware"
 	"modelgate/internal/entity"
+	"modelgate/internal/middleware"
+	"modelgate/internal/proxy"
 )
 
 // contextKey 用于在 gin 上下文中存储认证信息
@@ -134,8 +138,8 @@ type UsageService interface {
 
 // Proxy 代理接口
 type Proxy interface {
-	HandleChatCompletions(c *gin.Context, userID uuid.UUID, apiKeyID uuid.UUID)
 	HandleListModels(c *gin.Context)
+	ExecuteCoreWorkflow(c *gin.Context, req *proxy.BackendRequest, proto proxy.Protocol)
 }
 
 func NewProxyHandler(service *Service, proxy Proxy, jwtManager *auth.JWTManager, userStore *entity.UserStore, usageService UsageService) *ProxyHandler {
@@ -221,6 +225,28 @@ func (h *ProxyHandler) ListModels(c *gin.Context) {
 	h.proxy.HandleListModels(c)
 }
 
+// openAIProtocol 实现了 proxy.Protocol 接口
+type openAIProtocol struct{}
+
+func (p *openAIProtocol) FormatResponse(backendResp []byte) ([]byte, int, int, error) {
+	var normalResp proxy.OpenAIResponse
+	var preciseInput, preciseOutput int
+	if err := json.Unmarshal(backendResp, &normalResp); err == nil && normalResp.Usage != nil {
+		preciseInput = normalResp.Usage.PromptTokens
+		preciseOutput = normalResp.Usage.CompletionTokens
+	}
+	return backendResp, preciseInput, preciseOutput, nil
+}
+
+func (p *openAIProtocol) FormatStreamLine(line string, state map[string]interface{}) (string, int, int, string, error) {
+	content, preciseInput, preciseOutput := proxy.ParseOpenAISSE(line)
+	return line, preciseInput, preciseOutput, content, nil
+}
+
+func (p *openAIProtocol) PingMessage() string {
+	return ""
+}
+
 func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
 	userID, _ := c.Get(string(contextKeyUserID))
 	apiKeyID, hasAPIKey := c.Get(string(contextKeyAPIKeyID))
@@ -235,5 +261,39 @@ func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
 		akid = uuid.Nil
 	}
 
-	h.proxy.HandleChatCompletions(c, uid, akid)
+	// 读取请求体
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	var req proxy.OpenAIRequest
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format"})
+		return
+	}
+
+	modelID := req.Model
+	if modelID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+		return
+	}
+
+	backendReq := &proxy.BackendRequest{
+		ModelID:     modelID,
+		UserID:      uid,
+		APIKeyID:    akid,
+		RequestBody: bodyBytes,
+		IsStream:    req.Stream,
+		ClientIP:    c.ClientIP(),
+		UserAgent:   c.Request.UserAgent(),
+	}
+
+	h.proxy.ExecuteCoreWorkflow(
+		c,
+		backendReq,
+		&openAIProtocol{},
+	)
 }
