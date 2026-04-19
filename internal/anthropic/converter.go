@@ -483,6 +483,31 @@ func (p *StreamParser) ParseLine(line string) (string, error) {
 	return p.sb.String(), nil
 }
 
+func (p *StreamParser) getBlockIndex(key string) int {
+	if val, ok := p.state[key].(int); ok {
+		return val
+	}
+	nextIdx, _ := p.state["next_block_index"].(int)
+	p.state[key] = nextIdx
+	p.state["next_block_index"] = nextIdx + 1
+	return nextIdx
+}
+
+func (p *StreamParser) getToolBlockIndex(openaiIdx int) int {
+	toolMap, ok := p.state["tool_index_map"].(map[int]int)
+	if !ok {
+		toolMap = make(map[int]int)
+		p.state["tool_index_map"] = toolMap
+	}
+	if anthropicIdx, exists := toolMap[openaiIdx]; exists {
+		return anthropicIdx
+	}
+	nextIdx, _ := p.state["next_block_index"].(int)
+	toolMap[openaiIdx] = nextIdx
+	p.state["next_block_index"] = nextIdx + 1
+	return nextIdx
+}
+
 func (p *StreamParser) emitEvent(eventType string, data interface{}) {
 	ej, _ := json.Marshal(data)
 	p.sb.WriteString(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(ej)))
@@ -542,18 +567,24 @@ func (p *StreamParser) handleMessageStart(msgID string) {
 
 func (p *StreamParser) handleThinkingDelta(delta map[string]interface{}) {
 	if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+		anthropicIdx := p.getBlockIndex("thinking_index")
+
+		if active, ok := p.state["active_block_index"].(int); ok && active >= 0 && active != anthropicIdx {
+			p.stopActiveBlock()
+		}
+
 		if started, _ := p.state["started_thinking"].(bool); !started {
 			p.state["started_thinking"] = true
-			p.state["active_block_index"] = 0
+			p.state["active_block_index"] = anthropicIdx
 			p.emitEvent("content_block_start", map[string]interface{}{
 				"type":  "content_block_start",
-				"index": 0,
+				"index": anthropicIdx,
 				"content_block": map[string]interface{}{"type": "thinking", "thinking": ""},
 			})
 		}
 		p.emitEvent("content_block_delta", map[string]interface{}{
 			"type":  "content_block_delta",
-			"index": 0,
+			"index": anthropicIdx,
 			"delta": map[string]interface{}{"type": "thinking_delta", "thinking": reasoning},
 		})
 	}
@@ -561,21 +592,24 @@ func (p *StreamParser) handleThinkingDelta(delta map[string]interface{}) {
 
 func (p *StreamParser) handleTextDelta(delta map[string]interface{}) {
 	if content, ok := delta["content"].(string); ok && content != "" {
-		if active, ok := p.state["active_block_index"].(int); ok && active == 0 {
+		anthropicIdx := p.getBlockIndex("text_index")
+
+		if active, ok := p.state["active_block_index"].(int); ok && active >= 0 && active != anthropicIdx {
 			p.stopActiveBlock()
 		}
+
 		if started, _ := p.state["started_text"].(bool); !started {
 			p.state["started_text"] = true
-			p.state["active_block_index"] = 1
+			p.state["active_block_index"] = anthropicIdx
 			p.emitEvent("content_block_start", map[string]interface{}{
 				"type":  "content_block_start",
-				"index": 1,
+				"index": anthropicIdx,
 				"content_block": map[string]interface{}{"type": "text", "text": ""},
 			})
 		}
 		p.emitEvent("content_block_delta", map[string]interface{}{
 			"type":  "content_block_delta",
-			"index": 1,
+			"index": anthropicIdx,
 			"delta": map[string]interface{}{"type": "text_delta", "text": content},
 		})
 	}
@@ -588,7 +622,8 @@ func (p *StreamParser) handleToolCalls(delta map[string]interface{}) {
 		for _, tc := range toolCalls {
 			if tcMap, ok := tc.(map[string]interface{}); ok {
 				idx, _ := tcMap["index"].(float64)
-				anthropicIdx := int(idx) + 2
+				openaiIdx := int(idx)
+				anthropicIdx := p.getToolBlockIndex(openaiIdx)
 
 				// Stop the active block if we are transitioning from a different block
 				// (e.g. from text, thinking, or a previous tool call)
@@ -619,6 +654,7 @@ func (p *StreamParser) handleToolCalls(delta map[string]interface{}) {
 						})
 					}
 					if args, ok := function["arguments"].(string); ok && args != "" {
+						p.state["active_block_index"] = anthropicIdx
 						p.emitEvent("content_block_delta", map[string]interface{}{
 							"type":  "content_block_delta",
 							"index": anthropicIdx,
