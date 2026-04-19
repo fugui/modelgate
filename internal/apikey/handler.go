@@ -165,13 +165,13 @@ func (h *ProxyHandler) AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
+			sendOpenAIError(c, http.StatusUnauthorized, "invalid_request_error", "missing authorization header")
 			return
 		}
 
 		// 支持 Bearer Token 格式
 		if !strings.HasPrefix(authHeader, "Bearer ") {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization header format"})
+			sendOpenAIError(c, http.StatusUnauthorized, "invalid_request_error", "invalid authorization header format")
 			return
 		}
 
@@ -192,25 +192,25 @@ func (h *ProxyHandler) AuthMiddleware() gin.HandlerFunc {
 		claims, err := h.jwtManager.Validate(token)
 		if err != nil {
 			if err == auth.ErrExpiredToken {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token expired"})
+				sendOpenAIError(c, http.StatusUnauthorized, "invalid_request_error", "token expired")
 				return
 			}
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization"})
+			sendOpenAIError(c, http.StatusUnauthorized, "invalid_request_error", "invalid authorization")
 			return
 		}
 
 		// 验证用户是否存在于数据库且未禁用
 		user, err := h.userStore.GetByID(claims.UserID)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to verify user"})
+			sendOpenAIError(c, http.StatusInternalServerError, "api_error", "failed to verify user")
 			return
 		}
 		if user == nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+			sendOpenAIError(c, http.StatusUnauthorized, "invalid_request_error", "user not found")
 			return
 		}
 		if !user.Enabled {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "user disabled"})
+			sendOpenAIError(c, http.StatusUnauthorized, "invalid_request_error", "user disabled")
 			return
 		}
 
@@ -236,6 +236,30 @@ func (p *openAIProtocol) FormatResponse(backendResp []byte) ([]byte, int, int, e
 		preciseOutput = normalResp.Usage.CompletionTokens
 	}
 	return backendResp, preciseInput, preciseOutput, nil
+}
+
+func (p *openAIProtocol) BuildErrorResponse(errType, message string) []byte {
+	resp := map[string]interface{}{
+		"error": map[string]interface{}{
+			"type":    errType,
+			"message": message,
+			"param":   nil,
+			"code":    nil,
+		},
+	}
+	b, _ := json.Marshal(resp)
+	return b
+}
+
+func sendOpenAIError(c *gin.Context, statusCode int, errType, message string) {
+	c.AbortWithStatusJSON(statusCode, gin.H{
+		"error": gin.H{
+			"type":    errType,
+			"message": message,
+			"param":   nil,
+			"code":    nil,
+		},
+	})
 }
 
 func (p *openAIProtocol) FormatStreamLine(line string, state map[string]interface{}) (string, int, int, string, error) {
@@ -264,20 +288,20 @@ func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
 	// 读取请求体
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		sendOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "failed to read request body")
 		return
 	}
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	var req proxy.OpenAIRequest
 	if err := json.Unmarshal(bodyBytes, &req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format"})
+		sendOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "invalid request format")
 		return
 	}
 
 	modelID := req.Model
 	if modelID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+		sendOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
 

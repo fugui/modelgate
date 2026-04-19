@@ -118,7 +118,7 @@ type BackendResponse struct {
 	BackendID  string
 }
 
-// ExecuteCoreWorkflow 执行核心代理工作流（复用逻辑）
+	// ExecuteCoreWorkflow 执行核心代理工作流（复用逻辑）
 // 支持请求/响应转换，用于实现多协议支持
 func (p *Proxy) ExecuteCoreWorkflow(
 	c *gin.Context,
@@ -126,6 +126,15 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	proto Protocol,
 ) {
 	startTime := time.Now()
+
+	// 统一发送错误的工具函数闭包，捕获 proto 实例
+	sendErr := func(statusCode int, errType, message string) {
+		if proto != nil {
+			c.Data(statusCode, "application/json", proto.BuildErrorResponse(errType, message))
+		} else {
+			c.JSON(statusCode, gin.H{"error": message})
+		}
+	}
 
 	// 追踪并发数（所有协议统一追踪，不仅限 OpenAI 中间件）
 	if p.concurrencyTracker != nil {
@@ -136,11 +145,11 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	// 获取用户信息
 	user, err := p.userStore.GetByID(req.UserID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get user info"})
+		sendErr(http.StatusInternalServerError, "api_error", "failed to get user info")
 		return
 	}
 	if user == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		sendErr(http.StatusUnauthorized, "invalid_request_error", "user not found")
 		return
 	}
 
@@ -151,7 +160,7 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	// 检查配额
 	quotaResult, err := p.quotaService.CheckQuota(req.UserID, user.QuotaPolicy, req.ModelID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "quota check failed"})
+		sendErr(http.StatusInternalServerError, "api_error", "quota check failed")
 		return
 	}
 
@@ -160,16 +169,14 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		req.ModelID = quotaResult.DefaultModel
 		quotaResult, err = p.quotaService.CheckQuota(req.UserID, user.QuotaPolicy, req.ModelID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "quota check failed"})
+			sendErr(http.StatusInternalServerError, "api_error", "quota check failed")
 			return
 		}
 	}
 
 	if !quotaResult.Allowed {
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"error": quotaResult.Reason,
-			"quota": quotaResult,
-		})
+		// quotaResult.Reason 可能需要客户端处理，传递为 error message
+		sendErr(http.StatusTooManyRequests, "rate_limit_error", quotaResult.Reason)
 		return
 	}
 
@@ -189,7 +196,7 @@ func (p *Proxy) ExecuteCoreWorkflow(
 			StatusCode: http.StatusServiceUnavailable,
 			Error:      "no backend available",
 		})
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no backend available for model: " + req.ModelID})
+		sendErr(http.StatusServiceUnavailable, "api_error", "no backend available for model: "+req.ModelID)
 		return
 	}
 
@@ -224,7 +231,7 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	}
 	proxyReq, err := http.NewRequest(c.Request.Method, url, bytes.NewReader(requestBody))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
+		sendErr(http.StatusInternalServerError, "api_error", "failed to create proxy request")
 		return
 	}
 
@@ -262,9 +269,9 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	if err != nil {
 		p.lb.MarkFailed(backend.ID)
 		if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
-			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "backend request timeout"})
+			sendErr(http.StatusGatewayTimeout, "api_error", "backend request timeout")
 		} else {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "backend unavailable: " + err.Error()})
+			sendErr(http.StatusServiceUnavailable, "api_error", "backend unavailable: "+err.Error())
 		}
 		return
 	}
@@ -298,8 +305,28 @@ func (p *Proxy) ExecuteCoreWorkflow(
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
 		})
-		
-		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
+		// 尝试从后端返回的 OpenAI 错误中提取真正的错误信息
+		errType := "api_error"
+		errMsg := string(respBody)
+		var backendErr struct {
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(respBody, &backendErr); err == nil && backendErr.Error.Message != "" {
+			errType = backendErr.Error.Type
+			if errType == "" {
+				errType = "api_error"
+			}
+			errMsg = backendErr.Error.Message
+		}
+
+		if proto != nil {
+			c.Data(resp.StatusCode, "application/json", proto.BuildErrorResponse(errType, errMsg))
+		} else {
+			c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
+		}
 		return
 	}
 
@@ -659,7 +686,12 @@ func ParseOpenAISSE(line string) (string, int, int) {
 func (p *Proxy) HandleListModels(c *gin.Context) {
 	models, err := p.modelStore.ListEnabled()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list models"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"type":    "api_error",
+				"message": "failed to list models",
+			},
+		})
 		return
 	}
 

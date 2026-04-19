@@ -25,4 +25,8 @@ type Protocol interface {
 	// PingMessage 返回协议特有的 Keep-Alive 消息
 	// 例如 Anthropic 返回 "event: ping\ndata: {\"type\": \"ping\"}\n\n"
 	PingMessage() string
+
+	// BuildErrorResponse 构造标准的协议错误响应
+	// 接收标准的错误类型和错误详情，返回协议特定的错误 JSON 数据
+	BuildErrorResponse(errType, message string) []byte
 }

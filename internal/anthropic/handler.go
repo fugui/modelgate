@@ -47,7 +47,7 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 	// 获取认证信息
 	userID, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		sendAnthropicError(c, http.StatusUnauthorized, "authentication_error", "unauthorized")
 		return
 	}
 	uid := userID.(uuid.UUID)
@@ -55,7 +55,7 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 	// 读取原始请求体用于调试
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body: " + err.Error()})
+		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "failed to read request body: "+err.Error())
 		return
 	}
 	// 重新设置 body 以便后续处理
@@ -64,25 +64,25 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 	// 解析 Anthropic 请求
 	var anthropicReq MessagesRequest
 	if err := json.Unmarshal(bodyBytes, &anthropicReq); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format: " + err.Error()})
+		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "invalid request format: "+err.Error())
 		return
 	}
 
 	// 验证必需字段
 	if anthropicReq.Model == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
 
 	if len(anthropicReq.Messages) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "messages is required"})
+		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "messages is required")
 		return
 	}
 
 	// 转换为 OpenAI 请求
 	openaiBody, err := ConvertToOpenAI(&anthropicReq)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert request: " + err.Error()})
+		sendAnthropicError(c, http.StatusInternalServerError, "api_error", "failed to convert request: "+err.Error())
 		return
 	}
 
@@ -146,25 +146,47 @@ func (p *anthropicProtocol) PingMessage() string {
 	return "event: ping\ndata: {\"type\": \"ping\"}\n\n"
 }
 
+func (p *anthropicProtocol) BuildErrorResponse(errType, message string) []byte {
+	resp := map[string]interface{}{
+		"type": "error",
+		"error": map[string]interface{}{
+			"type":    errType,
+			"message": message,
+		},
+	}
+	b, _ := json.Marshal(resp)
+	return b
+}
+
+func sendAnthropicError(c *gin.Context, statusCode int, errType, message string) {
+	c.JSON(statusCode, gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    errType,
+			"message": message,
+		},
+	})
+}
+
 // HandleCountTokens 处理 /v1/messages/count_tokens 请求
 func (h *Handler) HandleCountTokens(c *gin.Context) {
 	// 获取认证信息
 	_, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		sendAnthropicError(c, http.StatusUnauthorized, "authentication_error", "unauthorized")
 		return
 	}
 
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body: " + err.Error()})
+		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "failed to read request body: "+err.Error())
 		return
 	}
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	var anthropicReq MessagesRequest
 	if err := json.Unmarshal(bodyBytes, &anthropicReq); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format: " + err.Error()})
+		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "invalid request format: "+err.Error())
 		return
 	}
 
