@@ -232,8 +232,12 @@ func buildOpenAIMessages(role string, parsed parsedAnthropicContent) []map[strin
 			}
 			var toolCalls []map[string]interface{}
 			for _, toolUse := range parsed.toolUses {
+				toolID := toolUse.ID
+				if strings.HasPrefix(toolID, "toolu_") {
+					toolID = strings.TrimPrefix(toolID, "toolu_")
+				}
 				tc := map[string]interface{}{
-					"id":   toolUse.ID,
+					"id":   toolID,
 					"type": "function",
 					"function": map[string]interface{}{
 						"name":      toolUse.Name,
