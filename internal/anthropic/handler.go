@@ -4,38 +4,34 @@ package anthropic
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"modelgate/internal/concurrency"
 	"modelgate/internal/middleware"
 	"modelgate/internal/proxy"
+	"modelgate/internal/usage"
 	"modelgate/internal/utils"
 )
-
-// UsageService 访问日志服务接口
-type UsageService interface {
-	RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, durationMs int64)
-	RecordAccessDetailed(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, requestHeaders map[string]string, requestBody string, responseHeaders map[string]string, responseBody string, inputTokens int, outputTokens int, durationMs int64)
-}
 
 // Handler 处理 Anthropic API 请求
 type Handler struct {
 	proxy        *proxy.Proxy
-	usageService UsageService
+	usageService *usage.Service
 }
 
 // NewHandler 创建 Anthropic Handler
-func NewHandler(proxy *proxy.Proxy, usageService UsageService) *Handler {
-	return &Handler{proxy: proxy, usageService: usageService}
+func NewHandler(proxyInst *proxy.Proxy, usageService *usage.Service) *Handler {
+	return &Handler{proxy: proxyInst, usageService: usageService}
 }
 
 // RegisterRoutes 注册 Anthropic 路由
 func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc, concurrencyLimiter *concurrency.Limiter) {
 	v1 := r.Group("/v1")
 	v1.Use(authMiddleware)
+	v1.Use(middleware.ProtocolInjectionMiddleware(&Protocol{}))
 	{
 		v1.POST("/messages", middleware.ConcurrencyLimitMiddleware(concurrencyLimiter), middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.HandleMessages)
 		v1.POST("/messages/count_tokens", h.HandleCountTokens)
@@ -44,72 +40,27 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc, 
 
 // HandleMessages 处理 /v1/messages 请求
 func (h *Handler) HandleMessages(c *gin.Context) {
-	// 获取认证信息
-	userID, exists := c.Get("user_id")
-	if !exists {
-		sendAnthropicError(c, http.StatusUnauthorized, "authentication_error", "unauthorized")
-		return
-	}
-	uid := userID.(uuid.UUID)
-
-	// 读取原始请求体用于调试
-	bodyBytes, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "failed to read request body: "+err.Error())
-		return
-	}
-	// 重新设置 body 以便后续处理
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-	// 解析 Anthropic 请求
 	var anthropicReq MessagesRequest
-	if err := json.Unmarshal(bodyBytes, &anthropicReq); err != nil {
-		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "invalid request format: "+err.Error())
-		return
-	}
-
-	// 验证必需字段
-	if anthropicReq.Model == "" {
-		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
-		return
-	}
-
-	if len(anthropicReq.Messages) == 0 {
-		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "messages is required")
-		return
-	}
-
-	// 转换为 OpenAI 请求
-	openaiBody, err := ConvertToOpenAI(&anthropicReq)
-	if err != nil {
-		sendAnthropicError(c, http.StatusInternalServerError, "api_error", "failed to convert request: "+err.Error())
-		return
-	}
-
-	// 获取 API Key ID（由认证中间件设置）
-	var akid uuid.UUID
-	if apiKeyID, exists := c.Get("api_key_id"); exists {
-		if id, ok := apiKeyID.(uuid.UUID); ok {
-			akid = id
+	h.proxy.HandleProxyRequest(c, &Protocol{ClientReq: &anthropicReq}, func(bodyBytes []byte) (string, bool, []byte, error) {
+		if err := json.Unmarshal(bodyBytes, &anthropicReq); err != nil {
+			return "", false, nil, err
 		}
-	}
 
-	// 执行核心工作流
-	backendReq := &proxy.BackendRequest{
-		ModelID:     anthropicReq.Model,
-		UserID:      uid,
-		APIKeyID:    akid,
-		RequestBody: openaiBody,
-		IsStream:    anthropicReq.Stream,
-		ClientIP:    c.ClientIP(),
-		UserAgent:   c.Request.UserAgent(),
-	}
+		if anthropicReq.Model == "" {
+			return "", false, nil, fmt.Errorf("model is required")
+		}
 
-	h.proxy.ExecuteCoreWorkflow(
-		c,
-		backendReq,
-		&Protocol{ClientReq: &anthropicReq},
-	)
+		if len(anthropicReq.Messages) == 0 {
+			return "", false, nil, fmt.Errorf("messages is required")
+		}
+
+		openaiBody, err := ConvertToOpenAI(&anthropicReq)
+		if err != nil {
+			return "", false, nil, fmt.Errorf("failed to convert request: %w", err)
+		}
+
+		return anthropicReq.Model, anthropicReq.Stream, openaiBody, nil
+	})
 }
 
 // Protocol 实现了 proxy.Protocol 接口
@@ -158,42 +109,33 @@ func (p *Protocol) BuildErrorResponse(errType, message string) []byte {
 	return b
 }
 
-func sendAnthropicError(c *gin.Context, statusCode int, errType, message string) {
-	c.JSON(statusCode, gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
-	})
-}
-
 // HandleCountTokens 处理 /v1/messages/count_tokens 请求
 func (h *Handler) HandleCountTokens(c *gin.Context) {
+	proto := &Protocol{}
 	// 获取认证信息
 	_, exists := c.Get("user_id")
 	if !exists {
-		sendAnthropicError(c, http.StatusUnauthorized, "authentication_error", "unauthorized")
+		c.Data(http.StatusUnauthorized, "application/json", proto.BuildErrorResponse("authentication_error", "unauthorized"))
 		return
 	}
 
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "failed to read request body: "+err.Error())
+		c.Data(http.StatusBadRequest, "application/json", proto.BuildErrorResponse("invalid_request_error", "failed to read request body: "+err.Error()))
 		return
 	}
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	var anthropicReq MessagesRequest
 	if err := json.Unmarshal(bodyBytes, &anthropicReq); err != nil {
-		sendAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "invalid request format: "+err.Error())
+		c.Data(http.StatusBadRequest, "application/json", proto.BuildErrorResponse("invalid_request_error", "invalid request format: "+err.Error()))
 		return
 	}
 
 	// 统一转换为 OpenAI 格式，复用底层的标准 Token 估算器
 	openaiBody, err := ConvertToOpenAI(&anthropicReq)
 	if err != nil {
-		sendAnthropicError(c, http.StatusInternalServerError, "api_error", "failed to convert request for token counting: "+err.Error())
+		c.Data(http.StatusInternalServerError, "application/json", proto.BuildErrorResponse("api_error", "failed to convert request for token counting: "+err.Error()))
 		return
 	}
 

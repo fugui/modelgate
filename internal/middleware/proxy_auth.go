@@ -7,8 +7,22 @@ import (
 	"github.com/gin-gonic/gin"
 	"modelgate/internal/auth"
 	"modelgate/internal/entity"
-	"modelgate/internal/proxy"
 )
+
+// ErrorResponseBuilder 定义了用于生成错误响应的接口
+type ErrorResponseBuilder interface {
+	BuildErrorResponse(errType, message string) []byte
+}
+
+const ContextKeyProtocol = "protocol"
+
+// ProtocolInjectionMiddleware 注入当前的协议处理器到上下文
+func ProtocolInjectionMiddleware(proto ErrorResponseBuilder) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set(ContextKeyProtocol, proto)
+		c.Next()
+	}
+}
 
 // APIKeyValidator 定义 API Key 验证服务接口，避免循环依赖
 type APIKeyValidator interface {
@@ -29,9 +43,10 @@ func ProxyAuthMiddleware(
 	keyValidator APIKeyValidator,
 	jwtManager *auth.JWTManager,
 	userStore *entity.UserStore,
-	proto proxy.Protocol,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		proto := c.MustGet(ContextKeyProtocol).(ErrorResponseBuilder)
+
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.Data(http.StatusUnauthorized, "application/json", proto.BuildErrorResponse("authentication_error", "missing authorization header"))

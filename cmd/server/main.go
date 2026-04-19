@@ -205,12 +205,12 @@ func main() {
 	}
 
 	// OpenAI 兼容代理接口
-	openaiAuth := middleware.ProxyAuthMiddleware(apiKeyService, jwtManager, userStore, &openai.Protocol{})
+	openaiAuth := middleware.ProxyAuthMiddleware(apiKeyService, jwtManager, userStore)
 	openaiHandler := openai.NewHandler(proxyInstance, usageService)
 	openaiHandler.RegisterRoutes(r, openaiAuth, concurrencyLimiter)
 
 	// Anthropic 兼容代理接口
-	anthropicAuth := middleware.ProxyAuthMiddleware(apiKeyService, jwtManager, userStore, &anthropic.Protocol{})
+	anthropicAuth := middleware.ProxyAuthMiddleware(apiKeyService, jwtManager, userStore)
 	anthropicHandler := anthropic.NewHandler(proxyInstance, usageService)
 	anthropicHandler.RegisterRoutes(r, anthropicAuth, concurrencyLimiter)
 
