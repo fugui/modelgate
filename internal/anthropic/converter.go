@@ -238,10 +238,14 @@ func buildOpenAIMessages(role string, parsed parsedAnthropicContent) []map[strin
 		messages = append(messages, openaiMsg)
 	} else if role == "user" && len(parsed.toolResults) > 0 {
 		for _, toolResult := range parsed.toolResults {
+			toolID := toolResult.ToolUseID
+			if strings.HasPrefix(toolID, "toolu_") {
+				toolID = strings.TrimPrefix(toolID, "toolu_")
+			}
 			messages = append(messages, map[string]interface{}{
 				"role":         "tool",
 				"content":      convertToolResultContent(toolResult.Content),
-				"tool_call_id": toolResult.ToolUseID,
+				"tool_call_id": toolID,
 			})
 		}
 		if len(parsed.openaiContent) > 0 {
@@ -636,6 +640,8 @@ func (p *StreamParser) handleToolCalls(delta map[string]interface{}) {
 						toolID, _ := tcMap["id"].(string)
 						if toolID == "" {
 							toolID = "toolu_" + generateID()
+						} else if !strings.HasPrefix(toolID, "toolu_") {
+							toolID = "toolu_" + toolID
 						}
 						// 缓存 Gemini 的 extra_content（含 thought_signature）
 						if extraContent, ok := tcMap["extra_content"]; ok {
