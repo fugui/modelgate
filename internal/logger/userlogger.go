@@ -57,7 +57,7 @@ func NewUserLogger(basePath string, retentionDays int) *UserLogger {
 // getLogPath 获取用户的日志文件路径
 func (l *UserLogger) getLogPath(userID string, date time.Time) string {
 	dateStr := date.Format("2006-01-02")
-	return filepath.Join(l.basePath, dateStr, userID+".log")
+	return filepath.Join(l.basePath, dateStr, userID+".jsonl")
 }
 
 // getWriter 获取或创建用户的日志写入器
@@ -88,7 +88,7 @@ func (l *UserLogger) getWriter(userID string, date time.Time) (*os.File, error) 
 	}
 
 	// 打开日志文件（追加模式）
-	logPath := filepath.Join(dateDir, userID+".log")
+	logPath := filepath.Join(dateDir, userID+".jsonl")
 	writer, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open log file: %w", err)
