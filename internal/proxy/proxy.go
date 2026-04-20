@@ -106,9 +106,11 @@ type BackendRequest struct {
 	UserEmail   string
 	APIKeyID    uuid.UUID
 	RequestBody []byte
-	IsStream    bool
-	ClientIP    string
-	UserAgent   string
+	IsStream        bool
+	ClientIP        string
+	UserAgent       string
+	TraceID         string
+	RequestPayload  map[string]interface{}
 }
 
 // BackendResponse 后端响应
@@ -126,6 +128,18 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	proto Protocol,
 ) {
 	startTime := time.Now()
+
+	req.TraceID = c.GetHeader("X-Request-ID")
+	if req.TraceID == "" {
+		req.TraceID = c.Writer.Header().Get("X-Request-ID")
+	}
+	if req.TraceID == "" {
+		req.TraceID = "req-" + uuid.New().String()
+	}
+
+	var requestPayload map[string]interface{}
+	_ = json.Unmarshal(req.RequestBody, &requestPayload)
+	req.RequestPayload = requestPayload
 
 	// 统一发送错误的工具函数闭包，捕获 proto 实例
 	sendErr := func(statusCode int, errType, message string) {
@@ -187,14 +201,16 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	backend, actualModelID, ok := p.lb.Next(req.ModelID, quotaResult.DefaultModel)
 	if !ok {
 		p.usageService.RecordUsageDetailed(&usage.Record{
-			UserID:     req.UserID,
-			UserName:   req.UserName,
-			UserEmail:  req.UserEmail,
-			ModelID:    req.ModelID,
-			ClientIP:   req.ClientIP,
-			UserAgent:  req.UserAgent,
-			StatusCode: http.StatusServiceUnavailable,
-			Error:      "no backend available",
+			UserID:          req.UserID,
+			UserName:        req.UserName,
+			UserEmail:       req.UserEmail,
+			ModelID:         req.ModelID,
+			ClientIP:        req.ClientIP,
+			UserAgent:       req.UserAgent,
+			StatusCode:      http.StatusServiceUnavailable,
+			Error:           "no backend available",
+			TraceID:         req.TraceID,
+			RequestPayload:  req.RequestPayload,
 		})
 		sendErr(http.StatusServiceUnavailable, "api_error", "no backend available for model: "+req.ModelID)
 		return
@@ -293,17 +309,21 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		c.Set("input_tokens", inputTokens)
 		c.Set("output_tokens", outputTokens)
 		p.usageService.RecordUsageDetailed(&usage.Record{
-			UserID:       req.UserID,
-			UserName:     req.UserName,
-			UserEmail:    req.UserEmail,
-			ModelID:      req.ModelID,
-			LatencyMs:    int(time.Since(startTime).Milliseconds()),
-			ClientIP:     req.ClientIP,
-			UserAgent:    req.UserAgent,
-			BackendID:    backend.ID,
-			StatusCode:   resp.StatusCode,
-			InputTokens:  inputTokens,
-			OutputTokens: outputTokens,
+			UserID:          req.UserID,
+			UserName:        req.UserName,
+			UserEmail:       req.UserEmail,
+			ModelID:         req.ModelID,
+			LatencyMs:       int(time.Since(startTime).Milliseconds()),
+			ClientIP:        req.ClientIP,
+			UserAgent:       req.UserAgent,
+			BackendID:       backend.ID,
+			StatusCode:      resp.StatusCode,
+			InputTokens:     inputTokens,
+			OutputTokens:    outputTokens,
+			TraceID:         req.TraceID,
+			RequestPayload:  req.RequestPayload,
+			ResponsePayload: string(respBody),
+			TTFTMs:          time.Since(startTime).Milliseconds(),
 		})
 		// 尝试从后端返回的 OpenAI 错误中提取真正的错误信息
 		errType := "api_error"
@@ -416,17 +436,21 @@ func (p *Proxy) handleConvertedNormalResponse(
 
 	// 记录使用日志
 	p.usageService.RecordUsageDetailed(&usage.Record{
-		UserID:       req.UserID,
-		UserName:     req.UserName,
-		UserEmail:    req.UserEmail,
-		ModelID:      req.ModelID,
-		LatencyMs:    latency,
-		ClientIP:     req.ClientIP,
-		UserAgent:    req.UserAgent,
-		BackendID:    backendID,
-		StatusCode:   resp.StatusCode,
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
+		UserID:          req.UserID,
+		UserName:        req.UserName,
+		UserEmail:       req.UserEmail,
+		ModelID:         req.ModelID,
+		LatencyMs:       latency,
+		ClientIP:        req.ClientIP,
+		UserAgent:       req.UserAgent,
+		BackendID:       backendID,
+		StatusCode:      resp.StatusCode,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		TraceID:         req.TraceID,
+		RequestPayload:  req.RequestPayload,
+		ResponsePayload: string(respBody),
+		TTFTMs:          int64(latency),
 	})
 
 	// 记录请求并扣除 Token
@@ -523,6 +547,8 @@ func (p *Proxy) handleConvertedStreamResponse(
 	streamState := make(map[string]interface{})
 	var fullCollectedText strings.Builder
 	var preciseInputTokens, preciseOutputTokens int
+	var firstTokenOnce sync.Once
+	var ttftMs int64
 
 	// 使用 defer 确保无论流式循环如何退出（正常 EOF、错误、ctx 取消），都记录 Token
 	defer func() {
@@ -543,17 +569,21 @@ func (p *Proxy) handleConvertedStreamResponse(
 		c.Set("output_tokens", outputTokens)
 
 		p.usageService.RecordUsageDetailed(&usage.Record{
-			UserID:       req.UserID,
-			UserName:     req.UserName,
-			UserEmail:    req.UserEmail,
-			ModelID:      req.ModelID,
-			LatencyMs:    latency,
-			ClientIP:     req.ClientIP,
-			UserAgent:    req.UserAgent,
-			BackendID:    backendID,
-			StatusCode:   resp.StatusCode,
-			InputTokens:  finalInputTokens,
-			OutputTokens: outputTokens,
+			UserID:          req.UserID,
+			UserName:        req.UserName,
+			UserEmail:       req.UserEmail,
+			ModelID:         req.ModelID,
+			LatencyMs:       latency,
+			ClientIP:        req.ClientIP,
+			UserAgent:       req.UserAgent,
+			BackendID:       backendID,
+			StatusCode:      resp.StatusCode,
+			InputTokens:     finalInputTokens,
+			OutputTokens:    outputTokens,
+			TraceID:         req.TraceID,
+			RequestPayload:  req.RequestPayload,
+			ResponsePayload: fullCollectedText.String(),
+			TTFTMs:          ttftMs,
 		})
 
 		_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, finalInputTokens, outputTokens, int64(latency))
@@ -568,6 +598,10 @@ func (p *Proxy) handleConvertedStreamResponse(
 		}
 
 		line, err := reader.ReadString('\n')
+		firstTokenOnce.Do(func() {
+			ttftMs = time.Since(startTime).Milliseconds()
+		})
+		
 		if err != nil {
 			if err == io.EOF {
 				break

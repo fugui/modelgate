@@ -33,7 +33,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc, 
 	v1.Use(middleware.ProtocolInjectionMiddleware(&Protocol{}))
 	v1.Use(authMiddleware)
 	{
-		v1.POST("/messages", middleware.ConcurrencyLimitMiddleware(concurrencyLimiter), middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.HandleMessages)
+		v1.POST("/messages", middleware.ConcurrencyLimitMiddleware(concurrencyLimiter), middleware.AccessLogMiddleware(h.usageService), h.HandleMessages)
 		v1.POST("/messages/count_tokens", h.HandleCountTokens)
 	}
 }

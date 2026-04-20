@@ -42,18 +42,22 @@ type Service struct {
 
 // Record 使用记录
 type Record struct {
-	UserID       uuid.UUID
-	UserName     string
-	UserEmail    string
-	ModelID      string
-	LatencyMs    int
-	ClientIP     string
-	UserAgent    string
-	StatusCode   int
-	Error        string
-	BackendID    string
-	InputTokens  int
-	OutputTokens int
+	UserID          uuid.UUID
+	UserName        string
+	UserEmail       string
+	ModelID         string
+	LatencyMs       int
+	ClientIP        string
+	UserAgent       string
+	StatusCode      int
+	Error           string
+	BackendID       string
+	InputTokens     int
+	OutputTokens    int
+	TraceID         string
+	RequestPayload  map[string]interface{}
+	ResponsePayload string
+	TTFTMs          int64
 }
 
 // NewService 创建使用记录服务
@@ -68,18 +72,22 @@ func NewService(logger *logger.UserLogger) *Service {
 // RecordUsageDetailed 记录详细的使用信息（写文件日志 + ring buffer）
 func (s *Service) RecordUsageDetailed(record *Record) {
 	s.logger.LogUsageWithDetails(record.UserID.String(), logger.UsageLogEntry{
-		Time:         time.Now().Format(time.RFC3339),
-		UserName:     record.UserName,
-		UserEmail:    record.UserEmail,
-		Model:        record.ModelID,
-		LatencyMs:    record.LatencyMs,
-		ClientIP:     record.ClientIP,
-		ClientType:   utils.ParseClientType(record.UserAgent),
-		StatusCode:   record.StatusCode,
-		Error:        record.Error,
-		BackendID:    record.BackendID,
-		InputTokens:  record.InputTokens,
-		OutputTokens: record.OutputTokens,
+		Time:            time.Now().Format(time.RFC3339),
+		UserName:        record.UserName,
+		UserEmail:       record.UserEmail,
+		Model:           record.ModelID,
+		LatencyMs:       record.LatencyMs,
+		ClientIP:        record.ClientIP,
+		ClientType:      utils.ParseClientType(record.UserAgent),
+		StatusCode:      record.StatusCode,
+		Error:           record.Error,
+		BackendID:       record.BackendID,
+		InputTokens:     record.InputTokens,
+		OutputTokens:    record.OutputTokens,
+		TraceID:         record.TraceID,
+		RequestPayload:  record.RequestPayload,
+		ResponsePayload: record.ResponsePayload,
+		OriginalTTFTMs:  record.TTFTMs,
 	})
 }
 

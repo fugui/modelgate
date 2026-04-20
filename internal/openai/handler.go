@@ -30,7 +30,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc, 
 	v1.Use(authMiddleware)
 	{
 		v1.GET("/models", middleware.AccessLogMiddleware(h.usageService), h.ListModels)
-		v1.POST("/chat/completions", middleware.ConcurrencyLimitMiddleware(concurrencyLimiter), middleware.TrafficLogMiddleware(), middleware.AccessLogMiddleware(h.usageService), h.ChatCompletions)
+		v1.POST("/chat/completions", middleware.ConcurrencyLimitMiddleware(concurrencyLimiter), middleware.AccessLogMiddleware(h.usageService), h.ChatCompletions)
 	}
 }
 

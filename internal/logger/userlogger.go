@@ -11,18 +11,22 @@ import (
 
 // UsageLogEntry 使用日志条目
 type UsageLogEntry struct {
-	Time       string `json:"time"`
-	UserName   string `json:"user_name,omitempty"`
-	UserEmail  string `json:"user_email,omitempty"`
-	Model      string `json:"model"`
-	LatencyMs  int    `json:"latency_ms"`
-	ClientIP   string `json:"client_ip,omitempty"`
-	ClientType string `json:"client_type,omitempty"`
-	StatusCode   int    `json:"status_code,omitempty"`
-	Error        string `json:"error,omitempty"`
-	BackendID    string `json:"backend_id,omitempty"`
-	InputTokens  int    `json:"input_tokens,omitempty"`
-	OutputTokens int    `json:"output_tokens,omitempty"`
+	Time            string                 `json:"time"`
+	UserName        string                 `json:"user_name,omitempty"`
+	UserEmail       string                 `json:"user_email,omitempty"`
+	Model           string                 `json:"model"`
+	LatencyMs       int                    `json:"latency_ms"`
+	ClientIP        string                 `json:"client_ip,omitempty"`
+	ClientType      string                 `json:"client_type,omitempty"`
+	StatusCode      int                    `json:"status_code,omitempty"`
+	Error           string                 `json:"error,omitempty"`
+	BackendID       string                 `json:"backend_id,omitempty"`
+	InputTokens     int                    `json:"input_tokens,omitempty"`
+	OutputTokens    int                    `json:"output_tokens,omitempty"`
+	TraceID         string                 `json:"trace_id,omitempty"`
+	RequestPayload  map[string]interface{} `json:"request_payload,omitempty"`
+	ResponsePayload string                 `json:"response_payload,omitempty"`
+	OriginalTTFTMs  int64                  `json:"original_ttft_ms,omitempty"`
 }
 
 // UserLogger 按用户分文件的日志记录器
