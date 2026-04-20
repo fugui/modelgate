@@ -1,0 +1,12 @@
+: ping
+
+data: {"choices":[{"delta":{"content":"我来帮你看看这个目录的情况。我将先列出当前目录下的","role":"assistant"},"index":0}],"created":1776667061,"id":"tcnlabLdGt-smtkP2qrgqQ0","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"文件和结构。","role":"assistant"},"index":0}],"created":1776667061,"id":"tcnlabLdGt-smtkP2qrgqQ0","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"role":"assistant","tool_calls":[{"extra_content":{"google":{"thought_signature":"EjQKMgEMOdbHEHlO5uJz3AfOLNvIbei3PtEsqTEzKircsz64z0kuEGoQuFrC738fAYiEjHQa"}},"function":{"arguments":"{\"description\":\"List all files in the current directory recursively\",\"command\":\"ls -R\"}","name":"Bash"},"id":"zlh3gm1h","type":"function"}]},"index":0}],"created":1776667061,"id":"tcnlabLdGt-smtkP2qrgqQ0","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":"stop","index":0}],"created":1776667061,"id":"tcnlabLdGt-smtkP2qrgqQ0","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: [DONE]
+

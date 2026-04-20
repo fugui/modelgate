@@ -1,0 +1,22 @@
+: ping
+
+data: {"choices":[{"delta":{"content":"这是一个 **","role":"assistant"},"index":0}],"created":1776667063,"id":"t8nlafe9IqON6dkPzauIIA","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"Claude Code** 的配置和工作目录（通常位于 `~/.claude","role":"assistant"},"index":0}],"created":1776667063,"id":"t8nlafe9IqON6dkPzauIIA","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"`）。\n\n它包含了以下关键部分：\n\n*   **`projects/`**: 存储了你使用 Claude Code 访问","role":"assistant"},"index":0}],"created":1776667063,"id":"t8nlafe9IqON6dkPzauIIA","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"过的不同项目的记录，例如 `-home-fugui-codes-modelgate`。\n*   **`sessions/","role":"assistant"},"index":0}],"created":1776667063,"id":"t8nlafe9IqON6dkPzauIIA","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"`** 和 **`history.jsonl`**: 记录了对话历史和会话状态。\n*   **","role":"assistant"},"index":0}],"created":1776667064,"id":"t8nlafe9IqON6dkPzauIIA","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"`settings.json`**: Claude Code 的全局配置文件。\n*   **`memory/`**: 存储 Claude 对","role":"assistant"},"index":0}],"created":1776667064,"id":"t8nlafe9IqON6dkPzauIIA","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"项目或你的偏好的持久记忆。\n*   **`plans/`**: 存放之前生成的实施方案（","role":"assistant"},"index":0}],"created":1776667064,"id":"t8nlafe9IqON6dkPzauIIA","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"Plans）。\n\n简单来说，这是 Claude CLI 工具用来维持状态、记忆和配置的“大脑”存储区。","role":"assistant"},"index":0}],"created":1776667064,"id":"t8nlafe9IqON6dkPzauIIA","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"extra_content":{"google":{"thought_signature":"EjQKMgEMOdbHqtb0znYZ4t1HZQ5DurMytzDdkbZVRn3UNg/of8VAaEGZ9RPcKCHz+LgELh1c"}},"role":"assistant"},"finish_reason":"stop","index":0}],"created":1776667064,"id":"t8nlafe9IqON6dkPzauIIA","model":"models/gemini-3-flash-preview","object":"chat.completion.chunk"}
+
+data: [DONE]
+

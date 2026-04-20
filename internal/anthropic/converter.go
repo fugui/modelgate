@@ -266,9 +266,15 @@ func buildOpenAIMessages(role string, parsed parsedAnthropicContent) []map[strin
 			if strings.HasPrefix(toolID, "toolu_") {
 				toolID = strings.TrimPrefix(toolID, "toolu_")
 			}
+			
+			contentStr := convertToolResultContent(toolResult.Content)
+			if toolResult.IsError {
+				contentStr = "[Error] " + contentStr
+			}
+
 			toolMsg := map[string]interface{}{
 				"role":         "tool",
-				"content":      convertToolResultContent(toolResult.Content),
+				"content":      contentStr,
 				"tool_call_id": toolID,
 			}
 			if toolResult.Name != "" {

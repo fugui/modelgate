@@ -1,0 +1,51 @@
+: ping
+
+event: message_start
+data: {"message":{"id":"t8nlafe9IqON6dkPzauIIA","model":"gemini-3-flash-preview","role":"assistant","type":"message","usage":{"input_tokens":0,"output_tokens":0}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"这是一个 **","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+
+event: content_block_delta
+data: {"delta":{"text":"Claude Code** 的配置和工作目录（通常位于 `~/.claude","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+
+event: content_block_delta
+data: {"delta":{"text":"`）。\n\n它包含了以下关键部分：\n\n*   **`projects/`**: 存储了你使用 Claude Code 访问","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+
+event: content_block_delta
+data: {"delta":{"text":"过的不同项目的记录，例如 `-home-fugui-codes-modelgate`。\n*   **`sessions/","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+
+event: content_block_delta
+data: {"delta":{"text":"`** 和 **`history.jsonl`**: 记录了对话历史和会话状态。\n*   **","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+
+event: content_block_delta
+data: {"delta":{"text":"`settings.json`**: Claude Code 的全局配置文件。\n*   **`memory/`**: 存储 Claude 对","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+
+event: content_block_delta
+data: {"delta":{"text":"项目或你的偏好的持久记忆。\n*   **`plans/`**: 存放之前生成的实施方案（","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+
+event: content_block_delta
+data: {"delta":{"text":"Plans）。\n\n简单来说，这是 Claude CLI 工具用来维持状态、记忆和配置的“大脑”存储区。","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"end_turn","stop_sequence":null},"type":"message_delta","usage":{"output_tokens":0}}
+
+
+event: message_stop
+data: {"type":"message_stop"}
+
+
