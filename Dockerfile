@@ -9,7 +9,7 @@ COPY web/ ./
 RUN npm run build
 
 # 后端构建阶段
-FROM golang:1.22-alpine AS go-builder
+FROM golang:1.25-alpine AS go-builder
 
 WORKDIR /app
 
