@@ -32,6 +32,13 @@
 - ✅ 并发请求下配额计算正确
 - ⚠️ 次日配额重置（需要额外机制）
 
+### 5. 协议转换与 Claude Code (`claude_code_test.go`)
+- ✅ Anthropic 到 OpenAI 的请求体正确转换
+- ✅ 包含系统提示词、工具定义（Tool Schemas）
+- ✅ 模型 Tool Call 准确映射到 `tool_use`，并自动追加 `toolu_` 前缀
+- ✅ Gemini 流式响应（SSE）在提前 `stop` 时的正确捕获与 `stop_reason` 修正
+- ✅ Claude Code 执行结果（`tool_result`）在附带 `is_error` 时的错误消息强化
+
 ## 运行测试
 
 ```bash
