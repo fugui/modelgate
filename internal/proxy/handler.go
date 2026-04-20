@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"modelgate/internal/logger"
 	"modelgate/internal/middleware"
 )
 
@@ -52,6 +53,20 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, extract Extra
 	if modelID == "" {
 		c.Data(http.StatusBadRequest, "application/json", proto.BuildErrorResponse("invalid_request_error", "model is required"))
 		return
+	}
+
+	// 提前获取/生成 TraceID 以供 Dumper 使用
+	traceID := c.GetHeader("X-Request-ID")
+	if traceID == "" {
+		traceID = "req-" + uuid.New().String()
+		// 方便后续复用
+		c.Request.Header.Set("X-Request-ID", traceID)
+	}
+
+	// Dump 阶段 1 和 2
+	if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
+		p.trafficDumper.Dump(traceID, logger.Stage1ClientRequest, bodyBytes, false)
+		p.trafficDumper.Dump(traceID, logger.Stage2ConvertedRequest, openaiBody, false)
 	}
 
 	// 构造 BackendRequest

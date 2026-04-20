@@ -37,6 +37,7 @@ type Proxy struct {
 	backendStore       *entity.BackendStore
 	userStore          *entity.UserStore
 	concurrencyTracker ConcurrencyTracker
+	trafficDumper      *logger.TrafficDumper
 }
 
 func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService *usage.Service, modelStore *entity.ModelStore, backendStore *entity.BackendStore, userStore *entity.UserStore) *Proxy {
@@ -54,6 +55,11 @@ func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService 
 // SetConcurrencyTracker 设置并发追踪器（用于统计并发数）
 func (p *Proxy) SetConcurrencyTracker(tracker ConcurrencyTracker) {
 	p.concurrencyTracker = tracker
+}
+
+// SetTrafficDumper 设置原始流量调试日志组件
+func (p *Proxy) SetTrafficDumper(dumper *logger.TrafficDumper) {
+	p.trafficDumper = dumper
 }
 
 // OpenAIRequest OpenAI 兼容的请求格式
@@ -412,13 +418,21 @@ func (p *Proxy) handleConvertedNormalResponse(
 
 	// 使用协议接口转换响应并获取精准 Token
 	var preciseInput, preciseOutput int
+	var convertedRespBody []byte
 	if proto != nil {
 		var err error
-		respBody, preciseInput, preciseOutput, err = proto.FormatResponse(respBody)
+		convertedRespBody, preciseInput, preciseOutput, err = proto.FormatResponse(respBody)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert response: " + err.Error()})
 			return
 		}
+	} else {
+		convertedRespBody = respBody
+	}
+
+	if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
+		p.trafficDumper.Dump(req.TraceID, logger.Stage3BackendResponse, respBody, false)
+		p.trafficDumper.Dump(req.TraceID, logger.Stage4ConvertedResponse, convertedRespBody, false)
 	}
 
 	// 计算最终 Token（优先使用精确 Token）
@@ -427,7 +441,7 @@ func (p *Proxy) handleConvertedNormalResponse(
 	}
 	outputTokens := preciseOutput
 	if outputTokens == 0 {
-		outputTokens = utils.EstimateTokens(string(respBody))
+		outputTokens = utils.EstimateTokens(string(convertedRespBody))
 	}
 
 	latency := int(time.Since(startTime).Milliseconds())
@@ -449,7 +463,7 @@ func (p *Proxy) handleConvertedNormalResponse(
 		OutputTokens:    outputTokens,
 		TraceID:         req.TraceID,
 		RequestPayload:  req.RequestPayload,
-		ResponsePayload: string(respBody),
+		ResponsePayload: string(convertedRespBody),
 		TTFTMs:          int64(latency),
 	})
 
@@ -469,7 +483,7 @@ func (p *Proxy) handleConvertedNormalResponse(
 	c.Header("Content-Type", contentType)
 
 	// 返回响应
-	c.Data(resp.StatusCode, contentType, respBody)
+	c.Data(resp.StatusCode, contentType, convertedRespBody)
 }
 
 // handleConvertedStreamResponse 处理流式响应（带转换）
@@ -620,6 +634,16 @@ func (p *Proxy) handleConvertedStreamResponse(
 				preciseOutputTokens = outToks
 			}
 			
+			// Dump Stage 3 & 4
+			if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
+				p.trafficDumper.Dump(req.TraceID, logger.Stage3BackendResponse, []byte(line), true)
+				if err == nil {
+					p.trafficDumper.Dump(req.TraceID, logger.Stage4ConvertedResponse, []byte(converted), true)
+				} else {
+					p.trafficDumper.Dump(req.TraceID, logger.Stage4ConvertedResponse, []byte(line), true)
+				}
+			}
+			
 			writeMu.Lock()
 			if err != nil {
 				// 转换失败时透传原始行，并尝试提取原始行的文本
@@ -633,6 +657,12 @@ func (p *Proxy) handleConvertedStreamResponse(
 			c.Writer.Flush()
 			writeMu.Unlock()
 		} else {
+			// Dump Stage 3 & 4 for direct proxy
+			if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
+				p.trafficDumper.Dump(req.TraceID, logger.Stage3BackendResponse, []byte(line), true)
+				p.trafficDumper.Dump(req.TraceID, logger.Stage4ConvertedResponse, []byte(line), true)
+			}
+			
 			writeMu.Lock()
 			_, _ = c.Writer.WriteString(line)
 			c.Writer.Flush()

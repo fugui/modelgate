@@ -120,6 +120,10 @@ func main() {
 	// 将并发限制器传给 Proxy，用于统计所有协议的并发数
 	proxyInstance.SetConcurrencyTracker(concurrencyLimiter)
 
+	// 初始化并注入 TrafficDumper
+	trafficDumper := logger.NewTrafficDumper(cfg.Logs.Path, cfg.Logs.DebugRawPayloads)
+	proxyInstance.SetTrafficDumper(trafficDumper)
+
 	go func() {
 		for event := range configChanges {
 			switch event.Type {
