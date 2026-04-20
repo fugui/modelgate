@@ -43,6 +43,7 @@ type JWTConfig struct {
 type LogConfig struct {
 	Path          string `yaml:"path"`
 	RetentionDays int    `yaml:"retention_days"`
+	LogPayloads   bool   `yaml:"log_payloads"`
 }
 
 type ModelConfig struct {

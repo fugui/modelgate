@@ -66,7 +66,7 @@ func main() {
 	log.Println("Database migrated (quota usage tables only)")
 
 	// 初始化日志记录器
-	userLogger := logger.NewUserLogger(cfg.Logs.Path, cfg.Logs.RetentionDays)
+	userLogger := logger.NewUserLogger(cfg.Logs.Path, cfg.Logs.RetentionDays, cfg.Logs.LogPayloads)
 	defer userLogger.Close()
 
 	// 初始化本地缓存

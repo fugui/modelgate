@@ -29,19 +29,20 @@ type UsageLogEntry struct {
 	OriginalTTFTMs  int64                  `json:"original_ttft_ms,omitempty"`
 }
 
-// UserLogger 按用户分文件的日志记录器
 type UserLogger struct {
 	basePath      string
 	retentionDays int
+	logPayloads   bool
 	writers       map[string]*os.File
 	mu            sync.RWMutex
 }
 
 // NewUserLogger 创建用户日志记录器
-func NewUserLogger(basePath string, retentionDays int) *UserLogger {
+func NewUserLogger(basePath string, retentionDays int, logPayloads bool) *UserLogger {
 	logger := &UserLogger{
 		basePath:      basePath,
 		retentionDays: retentionDays,
+		logPayloads:   logPayloads,
 		writers:       make(map[string]*os.File),
 	}
 
@@ -102,6 +103,11 @@ func (l *UserLogger) getWriter(userID string, date time.Time) (*os.File, error) 
 func (l *UserLogger) LogUsageWithDetails(userID string, entry UsageLogEntry) error {
 	if entry.Time == "" {
 		entry.Time = time.Now().Format(time.RFC3339)
+	}
+
+	if !l.logPayloads {
+		entry.RequestPayload = nil
+		entry.ResponsePayload = ""
 	}
 
 	data, err := json.Marshal(entry)
