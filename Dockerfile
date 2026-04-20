@@ -1,5 +1,5 @@
 # 前端构建阶段
-FROM node:18-alpine AS web-builder
+FROM node:22-alpine AS web-builder
 
 WORKDIR /app/web
 # 复制前端配置文件和源码
