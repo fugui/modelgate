@@ -82,4 +82,10 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, extract Extra
 
 	// 调用核心工作流
 	p.ExecuteCoreWorkflow(c, backendReq, proto)
+
+	// 请求结束后，检查是否发生 400 及以上的错误，决定是否 Flush 原始报文 Dump
+	if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
+		hasError := c.Writer.Status() >= 400
+		p.trafficDumper.FlushOrDiscard(traceID, hasError)
+	}
 }

@@ -44,7 +44,7 @@ type LogConfig struct {
 	Path             string `yaml:"path"`
 	RetentionDays    int    `yaml:"retention_days"`
 	LogPayloads      bool   `yaml:"log_payloads"`
-	DebugRawPayloads bool   `yaml:"debug_raw_payloads"`
+	DebugRawPayloads string `yaml:"debug_raw_payloads"` // "none", "error", or "full"
 }
 
 type ModelConfig struct {

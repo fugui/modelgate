@@ -3,26 +3,36 @@ package logger
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
+
+type dumpSession struct {
+	mu    sync.Mutex
+	files map[string][]byte
+}
 
 // TrafficDumper 负责记录底层的原始流量，用于协议转换的调试与测试桩提取
 type TrafficDumper struct {
 	basePath string
-	enabled  bool
+	mode     string // "none", "error", "full"
+	sessions sync.Map
 }
 
 // NewTrafficDumper 创建一个新的 TrafficDumper
-func NewTrafficDumper(basePath string, enabled bool) *TrafficDumper {
+func NewTrafficDumper(basePath string, mode string) *TrafficDumper {
+	if mode == "" {
+		mode = "none"
+	}
 	return &TrafficDumper{
 		basePath: filepath.Join(basePath, "raw_dumps"),
-		enabled:  enabled,
+		mode:     mode,
 	}
 }
 
 // IsEnabled 检查是否开启了 Dump
 func (d *TrafficDumper) IsEnabled() bool {
-	return d.enabled
+	return d.mode == "full" || d.mode == "error"
 }
 
 func (d *TrafficDumper) getDir(traceID string) string {
@@ -30,12 +40,7 @@ func (d *TrafficDumper) getDir(traceID string) string {
 	return filepath.Join(d.basePath, dateStr, traceID)
 }
 
-// Dump 将数据写入对应 traceID 的目录中
-func (d *TrafficDumper) Dump(traceID, filename string, payload []byte, isAppend bool) {
-	if !d.enabled || traceID == "" || len(payload) == 0 {
-		return
-	}
-
+func (d *TrafficDumper) writeToDisk(traceID, filename string, payload []byte, isAppend bool) {
 	dir := d.getDir(traceID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return
@@ -56,6 +61,56 @@ func (d *TrafficDumper) Dump(traceID, filename string, payload []byte, isAppend 
 	defer f.Close()
 
 	_, _ = f.Write(payload)
+}
+
+// Dump 将数据写入对应 traceID 的目录中
+func (d *TrafficDumper) Dump(traceID, filename string, payload []byte, isAppend bool) {
+	if traceID == "" || len(payload) == 0 {
+		return
+	}
+
+	if d.mode == "full" {
+		d.writeToDisk(traceID, filename, payload, isAppend)
+		return
+	}
+
+	if d.mode == "error" {
+		v, _ := d.sessions.LoadOrStore(traceID, &dumpSession{
+			files: make(map[string][]byte),
+		})
+		session := v.(*dumpSession)
+
+		session.mu.Lock()
+		defer session.mu.Unlock()
+
+		if isAppend {
+			session.files[filename] = append(session.files[filename], payload...)
+		} else {
+			copied := make([]byte, len(payload))
+			copy(copied, payload)
+			session.files[filename] = copied
+		}
+	}
+}
+
+// FlushOrDiscard 结束一个会话，决定是落盘还是丢弃
+func (d *TrafficDumper) FlushOrDiscard(traceID string, hasError bool) {
+	if d.mode == "error" {
+		v, loaded := d.sessions.LoadAndDelete(traceID)
+		if !loaded {
+			return
+		}
+
+		if hasError {
+			session := v.(*dumpSession)
+			session.mu.Lock()
+			defer session.mu.Unlock()
+
+			for filename, data := range session.files {
+				d.writeToDisk(traceID, filename, data, false) // Buffer is complete, no append needed
+			}
+		}
+	}
 }
 
 // 预定义的一些常用的 Dump 阶段
