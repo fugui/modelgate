@@ -49,19 +49,7 @@ interface DashboardData {
     input_tokens: number;
     output_tokens: number;
   }[];
-  top_users_7d: {
-    user_id: string;
-    name: string;
-    department: string;
-    total_requests: number;
-    total_tokens: number;
-    daily_stats: {
-      date: string;
-      request_count: number;
-      input_tokens: number;
-      output_tokens: number;
-    }[];
-  }[];
+
   metrics_history: {
     timestamp: string;
     time_label: string;
@@ -79,11 +67,10 @@ const DashboardStats: React.FC = () => {
 
   const fetchStats = async () => {
     try {
-      const [statsRes, hourlyRes, topUsersRes, topUsers7dRes, metricsRes] = await Promise.all([
+      const [statsRes, hourlyRes, topUsersRes, metricsRes] = await Promise.all([
         api.get('/api/v1/dashboard/stats'),
         api.get('/api/v1/dashboard/hourly'),
         api.get('/api/v1/dashboard/top-users'),
-        api.get('/api/v1/dashboard/top-users-7d'),
         api.get('/api/v1/dashboard/metrics'),
       ]);
       const stats = statsRes.data.data || {};
@@ -105,7 +92,7 @@ const DashboardStats: React.FC = () => {
           input_tokens: u.input_tokens || 0,
           output_tokens: u.output_tokens || 0,
         })),
-        top_users_7d: topUsers7dRes.data.data || [],
+
         metrics_history: (metricsRes.data.data || []).map((m: any) => ({
           ...m,
           avg_latency_ms: Math.round((m.avg_latency_ms || 0) * 100) / 100,
@@ -133,7 +120,7 @@ const DashboardStats: React.FC = () => {
     return <Empty description="无法加载数据" />;
   }
 
-  const { summary, hourly_stats: hourlyStats, top_users: topUsers, top_users_7d: topUsers7d, metrics_history: metricsHistory } = data;
+  const { summary, hourly_stats: hourlyStats, top_users: topUsers, metrics_history: metricsHistory } = data;
 
   const formatTokens = (num: number) => {
     if (num >= 1000000) {
@@ -159,126 +146,7 @@ const DashboardStats: React.FC = () => {
     { title: 'Tokens', key: 'total_tokens', render: renderTokens, sorter: (a: any, b: any) => ((a.input_tokens || 0) + (a.output_tokens || 0)) - ((b.input_tokens || 0) + (b.output_tokens || 0)) },
   ];
 
-  // 生成最近7天的日期列表（使用本地时区，与后端保持一致）
-  const last7Dates: string[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    last7Dates.push(`${yyyy}-${mm}-${dd}`);
-  }
 
-  const weekDayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-  const getWeekDayName = (dateStr: string) => {
-    const d = new Date(dateStr + 'T00:00:00');
-    return weekDayNames[d.getDay()];
-  };
-  const formatDateShort = (dateStr: string) => {
-    const parts = dateStr.split('-');
-    return `${parts[1]}-${parts[2]}`;
-  };
-
-  const findDailyStat = (dailyStats: any[], date: string) =>
-    (dailyStats || []).find((s: any) => (s.date || '').slice(0, 10) === date);
-
-  const topUser7dColumns = (() => {
-    const dateColumns = last7Dates.map((date) => ({
-      title: `${getWeekDayName(date)} ${formatDateShort(date)}`,
-      key: `day_${date}`,
-      width: 150,
-      render: (_: any, record: any) => {
-        const stat = findDailyStat(record.daily_stats, date);
-        if (!stat || (stat.request_count === 0 && (stat.input_tokens || 0) === 0 && (stat.output_tokens || 0) === 0)) {
-          return <span style={{ color: '#ccc' }}>-</span>;
-        }
-        return (
-          <span>
-            <span>{stat.request_count}次</span>
-            <br />
-            <span style={{ color: '#fa8c16', fontSize: 12 }}>↑{formatTokens(stat.input_tokens || 0)}</span>
-            <span style={{ margin: '0 2px', fontSize: 12 }}>/</span>
-            <span style={{ color: '#722ed1', fontSize: 12 }}>↓{formatTokens(stat.output_tokens || 0)}</span>
-          </span>
-        );
-      },
-    }));
-
-    return [
-      { title: '#', key: 'rank', width: 50, fixed: 'left' as const, render: (_: any, __: any, index: number) => index + 1 },
-      { title: '用户名', dataIndex: 'name', key: 'name', width: 120, fixed: 'left' as const, render: (text: string, record: any) => text || record.user_id },
-      ...dateColumns,
-      {
-        title: '总计',
-        key: 'total',
-        width: 150,
-        fixed: 'right' as const,
-        render: (_: any, record: any) => {
-          const totalInput = (record.daily_stats || []).reduce((sum: number, s: any) => sum + (s.input_tokens || 0), 0);
-          const totalOutput = (record.daily_stats || []).reduce((sum: number, s: any) => sum + (s.output_tokens || 0), 0);
-          return (
-            <span>
-              <span>{record.total_requests}次</span>
-              <br />
-              <span style={{ color: '#fa8c16', fontSize: 12 }}>↑{formatTokens(totalInput)}</span>
-              <span style={{ margin: '0 2px', fontSize: 12 }}>/</span>
-              <span style={{ color: '#722ed1', fontSize: 12 }}>↓{formatTokens(totalOutput)}</span>
-            </span>
-          );
-        },
-        sorter: (a: any, b: any) => a.total_tokens - b.total_tokens,
-      },
-    ];
-  })();
-
-  const renderSummary7d = () => {
-    const sumByDate = (date: string, field: string) =>
-      topUsers7d.reduce((sum, u) => {
-        const stat = findDailyStat(u.daily_stats, date);
-        return sum + ((stat as any)?.[field] || 0);
-      }, 0);
-    const grandRequests = topUsers7d.reduce((sum, u) => sum + (u.total_requests || 0), 0);
-    const grandInput = topUsers7d.reduce((sum, u) =>
-      sum + (u.daily_stats || []).reduce((s: number, d: any) => s + (d.input_tokens || 0), 0), 0);
-    const grandOutput = topUsers7d.reduce((sum, u) =>
-      sum + (u.daily_stats || []).reduce((s: number, d: any) => s + (d.output_tokens || 0), 0), 0);
-
-    return (
-      <Table.Summary fixed>
-        <Table.Summary.Row>
-          <Table.Summary.Cell index={0} colSpan={2}>
-            <strong>总计</strong>
-          </Table.Summary.Cell>
-          {last7Dates.map((date, idx) => {
-            const req = sumByDate(date, 'request_count');
-            const inp = sumByDate(date, 'input_tokens');
-            const out = sumByDate(date, 'output_tokens');
-            return (
-              <Table.Summary.Cell key={date} index={idx + 2}>
-                <span>
-                  <strong>{req}次</strong>
-                  <br />
-                  <span style={{ color: '#fa8c16', fontSize: 12 }}>↑{formatTokens(inp)}</span>
-                  <span style={{ margin: '0 2px', fontSize: 12 }}>/</span>
-                  <span style={{ color: '#722ed1', fontSize: 12 }}>↓{formatTokens(out)}</span>
-                </span>
-              </Table.Summary.Cell>
-            );
-          })}
-          <Table.Summary.Cell index={last7Dates.length + 2}>
-            <span>
-              <strong>{grandRequests}次</strong>
-              <br />
-              <span style={{ color: '#fa8c16', fontSize: 12 }}>↑{formatTokens(grandInput)}</span>
-              <span style={{ margin: '0 2px', fontSize: 12 }}>/</span>
-              <span style={{ color: '#722ed1', fontSize: 12 }}>↓{formatTokens(grandOutput)}</span>
-            </span>
-          </Table.Summary.Cell>
-        </Table.Summary.Row>
-      </Table.Summary>
-    );
-  };
 
 
 
@@ -431,26 +299,7 @@ const DashboardStats: React.FC = () => {
         </Col>
       </Row>
 
-      {/* 最近7天 TOP 20 用户 */}
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col xs={24}>
-          <Card title="最近7天 TOP 20 用户">
-            {topUsers7d.length > 0 ? (
-              <Table
-                dataSource={topUsers7d}
-                columns={topUser7dColumns}
-                rowKey="user_id"
-                pagination={false}
-                size="small"
-                scroll={{ x: 1500 }}
-                summary={renderSummary7d}
-              />
-            ) : (
-              <Empty description="暂无数据" style={{ padding: '60px 0' }} />
-            )}
-          </Card>
-        </Col>
-      </Row>
+
     </div>
   );
 };

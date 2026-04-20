@@ -4,6 +4,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined, SettingOutlined, ReloadOutl
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
 import AdminLogs from './AdminLogs';
+import AdminTopUsers from './AdminTopUsers';
 
 interface Model {
   id: string;
@@ -287,7 +288,7 @@ const Admin: React.FC = () => {
 
   // Validate and set active tab from URL
   useEffect(() => {
-    const validTabs = ['users', 'models', 'policies', 'health', 'system', 'logs'];
+    const validTabs = ['users', 'models', 'policies', 'health', 'system', 'logs', 'top7d'];
     const currentTab = tab || 'users';
     if (!validTabs.includes(currentTab)) {
       navigate('/admin/users', { replace: true });
@@ -1339,6 +1340,9 @@ const Admin: React.FC = () => {
           </Tabs.TabPane>
           <Tabs.TabPane tab="全员访问日志" key="logs">
             <AdminLogs />
+          </Tabs.TabPane>
+          <Tabs.TabPane tab="最近7天TOP用户" key="top7d">
+            <AdminTopUsers />
           </Tabs.TabPane>
         </Tabs>
       </Card>
