@@ -84,7 +84,7 @@ release: clean web-build embed
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o releases/$(BINARY_NAME)-linux-amd64 ./cmd/server
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o releases/$(IMPORTER_NAME)-linux-amd64 ./cmd/import_users
 	cp config.yaml releases/config.yaml.example
-	cp import_users_template.csv releases/
+	cp docs/import_users_template.csv releases/
 	cp README.md releases/
 	cd releases && tar -czf $(BINARY_NAME)-$(VERSION)-linux-amd64.tar.gz $(BINARY_NAME)-linux-amd64 $(IMPORTER_NAME)-linux-amd64 config.yaml.example import_users_template.csv README.md
 

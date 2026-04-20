@@ -153,7 +153,7 @@ CSV 文件必须包含表头，格式要求如下：
 
 执行示例：
 ```bash
-./import_users -csv import_users_template.csv -config config.yaml
+./import_users -csv docs/import_users_template.csv -config config.yaml
 ```
 
 ## 测试
