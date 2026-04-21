@@ -7,28 +7,28 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"modelgate/internal/apikey"
-	"modelgate/internal/auth"
-	"modelgate/internal/cache"
 	"modelgate/internal/config"
-	"modelgate/internal/entity"
-	"modelgate/internal/quota"
+	"modelgate/internal/domain/apikey"
+	"modelgate/internal/domain/quota"
+	"modelgate/internal/infra/auth"
+	"modelgate/internal/infra/cache"
+	"modelgate/internal/repository"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 // TestScenario 测试场景基座
 type TestScenario struct {
-	DB           *sql.DB
-	CfgManager   *config.ConfigManager
-	UserStore    *entity.UserStore
-	APIKeyStore  *entity.APIKeyStore
-	ModelStore   *entity.ModelStore
-	QuotaStore   *entity.QuotaStore
-	JWTManager   *auth.JWTManager
-	Cache        *cache.Cache
-	APIKeySvc    *apikey.Service
-	QuotaSvc     *quota.Service
+	DB          *sql.DB
+	CfgManager  *config.ConfigManager
+	UserStore   *entity.UserStore
+	APIKeyStore *entity.APIKeyStore
+	ModelStore  *entity.ModelStore
+	QuotaStore  *entity.QuotaStore
+	JWTManager  *auth.JWTManager
+	Cache       *cache.Cache
+	APIKeySvc   *apikey.Service
+	QuotaSvc    *quota.Service
 }
 
 // SetupTestDB 创建内存测试数据库和配置
@@ -125,14 +125,14 @@ CREATE TABLE quota_usage_daily (
 	cfgManager := config.NewManager(testCfg, "/tmp/test-config.yaml")
 
 	return &TestScenario{
-		DB:           db,
-		CfgManager:   cfgManager,
-		UserStore:    entity.NewUserStore(db),
-		APIKeyStore:  entity.NewAPIKeyStore(db),
-		ModelStore:   entity.NewModelStore(cfgManager),
-		QuotaStore:   entity.NewQuotaStore(cfgManager, db),
-		JWTManager:   auth.NewJWTManager("test-secret", 24),
-		Cache:        cache.New(),
+		DB:          db,
+		CfgManager:  cfgManager,
+		UserStore:   entity.NewUserStore(db),
+		APIKeyStore: entity.NewAPIKeyStore(db),
+		ModelStore:  entity.NewModelStore(cfgManager),
+		QuotaStore:  entity.NewQuotaStore(cfgManager, db),
+		JWTManager:  auth.NewJWTManager("test-secret", 24),
+		Cache:       cache.New(),
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"modelgate/internal/entity"
+	"modelgate/internal/repository"
 )
 
 // TestScenario_UserEndToEndFlow

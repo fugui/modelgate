@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"modelgate/internal/anthropic"
+	"modelgate/internal/gateway/anthropic"
 )
 
 // TestClaudeCodeProtocolConversion validates the Anthropic to OpenAI and back protocol conversion
@@ -29,7 +29,7 @@ func TestClaudeCodeProtocolConversion(t *testing.T) {
 		if !entry.IsDir() {
 			continue
 		}
-		
+
 		scenarioDir := filepath.Join(testDataDir, entry.Name())
 		t.Run(entry.Name(), func(t *testing.T) {
 			// 1. Load Original Client Request
@@ -90,7 +90,7 @@ func TestClaudeCodeProtocolConversion(t *testing.T) {
 				// The stream line processing
 				convertedLine, err := anthropic.ConvertStreamLine(line, &anthropicReq, state)
 				require.NoError(t, err, "ConvertStreamLine should not fail on valid stream line")
-				
+
 				if convertedLine != "" && convertedLine != line {
 					// Extract event parts
 					parts := strings.Split(convertedLine, "\n\n")

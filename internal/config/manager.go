@@ -18,11 +18,11 @@ type ConfigEvent struct {
 
 // ConfigManager 配置管理器 - 管理配置的加载、保存和热重载
 type ConfigManager struct {
-	cfg       *Config
-	path      string
-	mu        sync.RWMutex
-	watchers  []chan<- ConfigEvent
-	watchMu   sync.Mutex
+	cfg      *Config
+	path     string
+	mu       sync.RWMutex
+	watchers []chan<- ConfigEvent
+	watchMu  sync.Mutex
 }
 
 // NewManager 创建新的配置管理器

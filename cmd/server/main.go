@@ -12,24 +12,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"modelgate/internal/admin"
-	"modelgate/internal/anthropic"
-	"modelgate/internal/apikey"
-	"modelgate/internal/auth"
-	"modelgate/internal/cache"
-	"modelgate/internal/concurrency"
 	"modelgate/internal/config"
-	"modelgate/internal/dashboard"
-	"modelgate/internal/db"
-	"modelgate/internal/entity"
-	"modelgate/internal/logger"
-	"modelgate/internal/middleware"
-	"modelgate/internal/openai"
-	"modelgate/internal/proxy"
-	"modelgate/internal/quota"
-	"modelgate/internal/static"
-	"modelgate/internal/usage"
-	"modelgate/internal/user"
+	"modelgate/internal/domain/admin"
+	"modelgate/internal/domain/apikey"
+	"modelgate/internal/domain/dashboard"
+	"modelgate/internal/domain/quota"
+	"modelgate/internal/domain/usage"
+	"modelgate/internal/domain/user"
+	"modelgate/internal/gateway/anthropic"
+	"modelgate/internal/gateway/openai"
+	"modelgate/internal/gateway/proxy"
+	"modelgate/internal/infra/auth"
+	"modelgate/internal/infra/cache"
+	"modelgate/internal/infra/concurrency"
+	"modelgate/internal/infra/db"
+	"modelgate/internal/infra/logger"
+	"modelgate/internal/infra/middleware"
+	"modelgate/internal/infra/static"
+	"modelgate/internal/repository"
 )
 
 func main() {
@@ -166,10 +166,10 @@ func main() {
 
 	// 注册各模块路由
 	userHandler := user.NewHandler(user.NewHandlerParams{
-		Store:        userStore,
-		JWTManager:   jwtManager,
-		QuotaService: quotaService,
-		QuotaStore:   quotaStore,
+		Store:         userStore,
+		JWTManager:    jwtManager,
+		QuotaService:  quotaService,
+		QuotaStore:    quotaStore,
 		UsageService:  usageService,
 		Cache:         localCache,
 		ConfigManager: cfgManager,

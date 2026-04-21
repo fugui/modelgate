@@ -8,10 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"modelgate/internal/auth"
 	"modelgate/internal/config"
-	"modelgate/internal/db"
-	"modelgate/internal/entity"
+	"modelgate/internal/infra/auth"
+	"modelgate/internal/infra/db"
+	"modelgate/internal/repository"
 )
 
 func main() {
@@ -80,17 +80,17 @@ func main() {
 
 	for i, record := range records[1:] {
 		rowNum := i + 2 // 1-indexed, starting from row 2
-		
+
 		email := strings.TrimSpace(record[headerMap["email"]])
 		password := strings.TrimSpace(record[headerMap["password"]])
 		name := strings.TrimSpace(record[headerMap["name"]])
 		roleStr := strings.TrimSpace(record[headerMap["role"]])
-		
+
 		department := ""
 		if idx, ok := headerMap["department"]; ok && idx < len(record) {
 			department = strings.TrimSpace(record[idx])
 		}
-		
+
 		quotaPolicy := "default"
 		if idx, ok := headerMap["quota_policy"]; ok && idx < len(record) {
 			val := strings.TrimSpace(record[idx])
