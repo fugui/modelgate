@@ -347,10 +347,19 @@ func (p *Proxy) ExecuteCoreWorkflow(
 			errMsg = backendErr.Error.Message
 		}
 
+		var finalRespBody []byte
 		if proto != nil {
-			c.Data(resp.StatusCode, "application/json", proto.BuildErrorResponse(errType, errMsg))
+			finalRespBody = proto.BuildErrorResponse(errType, errMsg)
+			c.Data(resp.StatusCode, "application/json", finalRespBody)
 		} else {
-			c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
+			finalRespBody = respBody
+			c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), finalRespBody)
+		}
+
+		// 在发生 HTTP 错误时，也必须记录阶段 3 和 4 的 Dump，否则 RAW Dump 链路不完整
+		if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
+			p.trafficDumper.Dump(req.TraceID, logger.Stage3BackendResponse, respBody, false)
+			p.trafficDumper.Dump(req.TraceID, logger.Stage4ConvertedResponse, finalRespBody, false)
 		}
 		return
 	}
