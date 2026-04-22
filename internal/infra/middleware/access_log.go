@@ -89,16 +89,16 @@ type UsageRecorder interface {
 // 只记录已认证用户的请求
 func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1. 读取请求体（限制大小）
+		// 1. 读取完整请求体（避免截断导致的 JSON 解析错误）
 		var requestBody []byte
-		if c.Request.Body != nil && c.Request.ContentLength > 0 {
+		if c.Request.Body != nil {
 			var err error
-			requestBody, err = io.ReadAll(io.LimitReader(c.Request.Body, constants.MaxLogRequestBodySize))
+			requestBody, err = io.ReadAll(c.Request.Body)
 			if err != nil {
 				// 读取失败时继续处理，只是记录空请求体
 				requestBody = []byte{}
 			}
-			// 重新设置 body，以便后续处理程序可以读取
+			// 重新设置 body，以便后续处理程序可以读取完整的 body
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 		}
 
@@ -128,6 +128,9 @@ func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 		clientIP := c.ClientIP()
 		userAgent := c.Request.UserAgent()
 		requestBytes := c.Request.ContentLength
+		if requestBytes <= 0 && len(requestBody) > 0 {
+			requestBytes = int64(len(requestBody))
+		}
 
 		// 4. 处理请求
 		startTime := time.Now()
@@ -178,9 +181,13 @@ func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 			}
 
 			// 异步记录访问日志，避免影响响应时间
-			// 在启动 goroutine 前复制数据，避免竞态条件
-			requestBodyCopy := make([]byte, len(requestBody))
-			copy(requestBodyCopy, requestBody)
+			// 截断超大请求体，避免内存泄漏或日志过大
+			var requestBodyStr string
+			if len(requestBody) > constants.MaxLogRequestBodySize {
+				requestBodyStr = string(requestBody[:constants.MaxLogRequestBodySize]) + "\n[truncated...]"
+			} else {
+				requestBodyStr = string(requestBody)
+			}
 			responseBodyCopy := responseBody // string 是不可变的，无需深拷贝
 
 			var inputTokens, outputTokens int
@@ -201,7 +208,7 @@ func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 				requestBytes,
 				responseBytes,
 				requestHeaders,
-				string(requestBodyCopy),
+				requestBodyStr,
 				responseHeaders,
 				responseBodyCopy,
 				inputTokens,
