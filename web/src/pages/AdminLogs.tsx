@@ -56,16 +56,7 @@ const AdminLogs: React.FC = () => {
     return seconds === '0.0' ? `${minutes}m` : `${minutes}m ${seconds}s`;
   };
 
-  const getMethodColor = (method: string): string => {
-    const colorMap: { [key: string]: string } = {
-      'GET': 'blue',
-      'POST': 'green',
-      'PUT': 'orange',
-      'DELETE': 'red',
-      'PATCH': 'purple',
-    };
-    return colorMap[method.toUpperCase()] || 'default';
-  };
+
 
   const getStatusColor = (status: number): string => {
     if (status >= 200 && status < 300) return 'success';
@@ -112,29 +103,6 @@ const AdminLogs: React.FC = () => {
       },
     },
     {
-      title: '方法',
-      dataIndex: 'method',
-      key: 'method',
-      width: 90,
-      render: (method: string) => (
-        <Tag color={getMethodColor(method)}>{method.toUpperCase()}</Tag>
-      ),
-    },
-    {
-      title: '路径',
-      dataIndex: 'path',
-      key: 'path',
-      width: 160,
-      ellipsis: true,
-    },
-    {
-      title: '模型',
-      dataIndex: 'model_name',
-      key: 'model_name',
-      width: 100,
-      render: (model: string) => model ? <Tag color="default">{model}</Tag> : '-',
-    },
-    {
       title: '来源/客户端',
       dataIndex: 'user_agent',
       key: 'user_agent',
@@ -146,6 +114,25 @@ const AdminLogs: React.FC = () => {
         </Tooltip>
       ),
     },
+    {
+      title: '协议',
+      dataIndex: 'path',
+      key: 'protocol',
+      width: 100,
+      render: (path: string) => {
+        if (!path) return '-';
+        if (path.includes('/v1/messages')) return <Tag color="purple">Anthropic</Tag>;
+        return <Tag color="blue">OpenAI</Tag>;
+      },
+    },
+    {
+      title: '模型',
+      dataIndex: 'model_name',
+      key: 'model_name',
+      width: 100,
+      render: (model: string) => model ? <Tag color="default">{model}</Tag> : '-',
+    },
+
     {
       title: '流量(字节)',
       key: 'traffic',
