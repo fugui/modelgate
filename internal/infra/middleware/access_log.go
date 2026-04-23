@@ -128,7 +128,7 @@ func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 		clientIP := c.ClientIP()
 		userAgent := c.Request.UserAgent()
 		requestBytes := c.Request.ContentLength
-		if requestBytes <= 0 && len(requestBody) > 0 {
+		if requestBytes <= 0 {
 			requestBytes = int64(len(requestBody))
 		}
 
