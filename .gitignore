@@ -52,7 +52,7 @@ config.local.yaml
 config.prod.yaml
 
 # Embedded frontend files (generated during build)
-internal/static/dist/
+internal/infra/static/dist/
 
 # Release packages
 releases/
