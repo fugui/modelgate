@@ -235,7 +235,7 @@ const Login: React.FC = () => {
           textAlign: 'center',
           width: '100%',
         }}>
-          <div>© {new Date().getFullYear()} Model Gate · 企业大模型统一接入网关</div>
+          <div>© {new Date().getFullYear()} 模界(Model Gate) · 企业大模型统一接入网关</div>
           <div style={{ marginTop: '4px', opacity: 0.8, fontSize: '11px' }}>
             版本: {versionInfo?.version || 'N/A'} ({versionInfo?.commit || 'N/A'}) | 编译时间: {versionInfo?.build_time || 'N/A'}
           </div>

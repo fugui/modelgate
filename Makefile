@@ -28,10 +28,10 @@ web-build:
 # 复制前端文件到嵌入目录
 embed: web-build
 	@echo "准备嵌入文件..."
-	@rm -rf internal/static/dist
-	@mkdir -p internal/static/dist
-	@cp -r web/dist/* internal/static/dist/
-	@echo "已复制 $$(ls internal/static/dist | wc -l) 个文件"
+	@rm -rf internal/infra/static/dist
+	@mkdir -p internal/infra/static/dist
+	@cp -r web/dist/* internal/infra/static/dist/
+	@echo "已复制 $$(ls internal/infra/static/dist | wc -l) 个文件"
 
 # 开发模式运行（使用 vite 代理）
 dev:
@@ -57,7 +57,7 @@ test:
 # 清理
 clean:
 	rm -f $(BINARY_NAME) $(IMPORTER_NAME)
-	rm -rf internal/static/dist
+	rm -rf internal/infra/static/dist
 	go clean
 
 # 代码检查
