@@ -45,7 +45,7 @@ func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService 
 		lb:           lb,
 		quotaService: quotaService,
 		usageService: usageService,
-		httpClient:   &http.Client{Timeout: 300 * time.Second},
+		httpClient:   &http.Client{Timeout: 10 * time.Minute},
 		modelStore:   modelStore,
 		backendStore: backendStore,
 		userStore:    userStore,
