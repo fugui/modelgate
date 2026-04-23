@@ -127,6 +127,25 @@ const AdminLogs: React.FC = () => {
       ellipsis: true,
     },
     {
+      title: '模型',
+      dataIndex: 'model_name',
+      key: 'model_name',
+      width: 100,
+      render: (model: string) => model ? <Tag color="default">{model}</Tag> : '-',
+    },
+    {
+      title: '来源/客户端',
+      dataIndex: 'user_agent',
+      key: 'user_agent',
+      width: 130,
+      ellipsis: true,
+      render: (ua: string) => (
+        <Tooltip title={ua}>
+          <span>{ua || '-'}</span>
+        </Tooltip>
+      ),
+    },
+    {
       title: '流量(字节)',
       key: 'traffic',
       width: 140,
@@ -225,6 +244,7 @@ const AdminLogs: React.FC = () => {
                 <Descriptions.Item label="User Name">{userMap[selectedLog.user_id] || selectedLog.user_id}</Descriptions.Item>
                 <Descriptions.Item label="Method">{selectedLog.method}</Descriptions.Item>
                 <Descriptions.Item label="Path">{selectedLog.path}</Descriptions.Item>
+                <Descriptions.Item label="Model">{selectedLog.model_name || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Client IP">{selectedLog.client_ip}</Descriptions.Item>
                 <Descriptions.Item label="Status Code">
                   <Tag color={getStatusColor(selectedLog.status_code)}>

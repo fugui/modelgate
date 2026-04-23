@@ -1,6 +1,9 @@
 package utils
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // ParseClientType 将 User-Agent 字符串解析为简短的客户端类型标识
 func ParseClientType(userAgent string) string {
@@ -55,4 +58,88 @@ func ParseClientType(userAgent string) string {
 	}
 
 	return "Unknown"
+}
+
+// FormatUserAgentForDisplay 将原始 UserAgent 和 Referer 解析为前端友好的显示名称
+func FormatUserAgentForDisplay(userAgent string, referer string) string {
+	// 如果来源是网页的 /chat，认为是演练场
+	if referer != "" && strings.Contains(referer, "/chat") {
+		return "演练场"
+	}
+
+	if userAgent == "" {
+		return "Unknown"
+	}
+
+	ua := userAgent
+	uaLower := strings.ToLower(ua)
+
+	// 提取名称和版本号，例如 "Claude Code/2.1.84" 或 "Cursor 0.45.0"
+	re := regexp.MustCompile(`(?i)(claude-code|claude-cli|cursor|vscode|jetbrains|intellij|copilot|postman|curl|wget)[/\s]?([0-9a-zA-Z.-]+)?`)
+	matches := re.FindStringSubmatch(ua)
+
+	if len(matches) > 1 {
+		name := matches[1]
+		version := ""
+		if len(matches) > 2 {
+			version = matches[2]
+		}
+
+		// 规范化名称
+		switch strings.ToLower(name) {
+		case "claude-code", "claude-cli":
+			name = "Claude Code"
+		case "cursor":
+			name = "Cursor"
+		case "vscode":
+			name = "VS Code"
+		case "jetbrains", "intellij":
+			name = "JetBrains"
+		case "postman":
+			name = "Postman"
+		case "curl":
+			name = "curl"
+		case "wget":
+			name = "wget"
+		}
+
+		if version != "" {
+			return name + " " + version
+		}
+		return name
+	}
+
+	// 编程语言 HTTP 客户端
+	if strings.Contains(uaLower, "python-requests") || strings.Contains(uaLower, "httpx") || strings.Contains(uaLower, "aiohttp") {
+		return "Python"
+	}
+	if strings.Contains(uaLower, "go-http-client") || strings.Contains(uaLower, "go-resty") {
+		return "Go"
+	}
+	if strings.Contains(uaLower, "axios") || strings.Contains(uaLower, "node-fetch") || strings.Contains(uaLower, "undici") {
+		return "Node.js"
+	}
+
+	// 浏览器
+	if strings.Contains(uaLower, "edg/") {
+		return "Edge"
+	}
+	if strings.Contains(uaLower, "chrome/") && !strings.Contains(uaLower, "edg/") {
+		return "Chrome"
+	}
+	if strings.Contains(uaLower, "firefox/") {
+		return "Firefox"
+	}
+	if strings.Contains(uaLower, "safari/") && !strings.Contains(uaLower, "chrome/") {
+		return "Safari"
+	}
+	if strings.Contains(uaLower, "mozilla/") {
+		return "Browser"
+	}
+
+	// 如果没有匹配上，则返回截断的原始 UA 以避免过长
+	if len(ua) > 30 {
+		return ua[:27] + "..."
+	}
+	return ua
 }

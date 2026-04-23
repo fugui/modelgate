@@ -19,6 +19,7 @@ type AccessLog struct {
 	Path            string            `json:"path"`             // 访问路径
 	ClientIP        string            `json:"client_ip"`        // 客户端IP
 	UserAgent       string            `json:"user_agent"`       // 用户代理
+	ModelName       string            `json:"model_name"`       // 模型名称
 	Timestamp       time.Time         `json:"timestamp"`        // 访问时间
 	StatusCode      int               `json:"status_code"`      // HTTP状态码
 	RequestBytes    int64             `json:"request_bytes"`    // 请求字节数
@@ -114,14 +115,14 @@ func (s *Service) Flush() {
 }
 
 // RecordAccess 记录用户访问日志
-func (s *Service) RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, statusCode int, requestBytes, responseBytes int64, durationMs int64) {
-	s.RecordAccessDetailed(userID, method, path, clientIP, userAgent, statusCode, requestBytes, responseBytes, nil, "", nil, "", 0, 0, durationMs)
+func (s *Service) RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, modelName string, statusCode int, requestBytes, responseBytes int64, durationMs int64) {
+	s.RecordAccessDetailed(userID, method, path, clientIP, userAgent, modelName, statusCode, requestBytes, responseBytes, nil, "", nil, "", 0, 0, durationMs)
 }
 
 // RecordAccessDetailed 记录用户访问日志（包含详细信息）
 func (s *Service) RecordAccessDetailed(
 	userID uuid.UUID,
-	method, path, clientIP, userAgent string,
+	method, path, clientIP, userAgent string, modelName string,
 	statusCode int,
 	requestBytes, responseBytes int64,
 	requestHeaders map[string]string,
@@ -149,6 +150,7 @@ func (s *Service) RecordAccessDetailed(
 		Path:            path,
 		ClientIP:        clientIP,
 		UserAgent:       userAgent,
+		ModelName:       modelName,
 		Timestamp:       time.Now(),
 		StatusCode:      statusCode,
 		RequestBytes:    requestBytes,

@@ -18,9 +18,9 @@ func TestRecordAccessAndGetRecentAccess(t *testing.T) {
 	userID := uuid.New()
 
 	// 记录几条日志
-	service.RecordAccess(userID, "GET", "/api/v1/user/quota", "192.168.1.1", "TestAgent/1.0", 200, 100, 200, 50)
-	service.RecordAccess(userID, "POST", "/api/v1/chat/completions", "192.168.1.1", "TestAgent/1.0", 200, 1000, 5000, 120)
-	service.RecordAccess(userID, "GET", "/api/v1/models", "192.168.1.1", "TestAgent/1.0", 200, 50, 1000, 30)
+	service.RecordAccess(userID, "GET", "/api/v1/user/quota", "192.168.1.1", "TestAgent/1.0", "glm4", 200, 100, 200, 50)
+	service.RecordAccess(userID, "POST", "/api/v1/chat/completions", "192.168.1.1", "TestAgent/1.0", "kimi", 200, 1000, 5000, 120)
+	service.RecordAccess(userID, "GET", "/api/v1/models", "192.168.1.1", "TestAgent/1.0", "", 200, 50, 1000, 30)
 
 	// 获取访问日志
 	logs := service.GetRecentAccess(userID, 20)
@@ -49,7 +49,7 @@ func TestGetRecentAccessLimit(t *testing.T) {
 
 	// 记录25条日志（超过最大值20）
 	for i := 0; i < 25; i++ {
-		service.RecordAccess(userID, "GET", "/api/test", "127.0.0.1", "Test", 200, 100, 200, 10)
+		service.RecordAccess(userID, "GET", "/api/test", "127.0.0.1", "Test", "", 200, 100, 200, 10)
 	}
 
 	// 获取所有日志
@@ -87,7 +87,7 @@ func TestConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func() {
 			for i := 0; i < 1000; i++ {
-				service.RecordAccess(userID, "GET", "/api/test", "127.0.0.1", "Test", 200, 100, 200, 15)
+				service.RecordAccess(userID, "GET", "/api/test", "127.0.0.1", "Test", "", 200, 100, 200, 15)
 			}
 			done <- true
 		}()
@@ -114,11 +114,11 @@ func TestMultipleUsers(t *testing.T) {
 
 	// 为用户1记录日志
 	for i := 0; i < 5; i++ {
-		service.RecordAccess(user1, "GET", "/api/user1", "127.0.0.1", "Test", 200, 100, 200, 5)
+		service.RecordAccess(user1, "GET", "/api/user1", "127.0.0.1", "Test", "", 200, 100, 200, 5)
 	}
 
 	// user2 访问一次
-	service.RecordAccess(user2, "POST", "/api/user2", "192.168.1.1", "Test", 200, 200, 300, 8)
+	service.RecordAccess(user2, "POST", "/api/user2", "192.168.1.1", "Test", "", 200, 200, 300, 8)
 
 	// 验证用户1的日志
 	logs1 := service.GetRecentAccess(user1, 20)

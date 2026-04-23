@@ -19,6 +19,7 @@ import (
 	"modelgate/internal/infra/auth"
 	"modelgate/internal/infra/middleware"
 	"modelgate/internal/repository"
+	"modelgate/internal/infra/utils"
 	"modelgate/internal/version"
 )
 
@@ -459,6 +460,7 @@ func (h *Handler) GetAccessLogs(c *gin.Context) {
 		Path          string    `json:"path"`
 		ClientIP      string    `json:"client_ip"`
 		UserAgent     string    `json:"user_agent"`
+		ModelName     string    `json:"model_name"`
 		Timestamp     time.Time `json:"timestamp"`
 		StatusCode    int       `json:"status_code"`
 		RequestBytes  int64     `json:"request_bytes"`
@@ -472,7 +474,8 @@ func (h *Handler) GetAccessLogs(c *gin.Context) {
 			Method:        log.Method,
 			Path:          log.Path,
 			ClientIP:      log.ClientIP,
-			UserAgent:     log.UserAgent,
+			UserAgent:     utils.FormatUserAgentForDisplay(log.UserAgent, log.RequestHeaders["Referer"]),
+			ModelName:     log.ModelName,
 			Timestamp:     log.Timestamp,
 			StatusCode:    log.StatusCode,
 			RequestBytes:  log.RequestBytes,
@@ -510,6 +513,7 @@ func (h *Handler) GetAllAccessLogs(c *gin.Context) {
 		Path          string    `json:"path"`
 		ClientIP      string    `json:"client_ip"`
 		UserAgent     string    `json:"user_agent"`
+		ModelName     string    `json:"model_name"`
 		Timestamp     time.Time `json:"timestamp"`
 		StatusCode    int       `json:"status_code"`
 		RequestBytes  int64     `json:"request_bytes"`
@@ -523,7 +527,8 @@ func (h *Handler) GetAllAccessLogs(c *gin.Context) {
 			Method:        log.Method,
 			Path:          log.Path,
 			ClientIP:      log.ClientIP,
-			UserAgent:     log.UserAgent,
+			UserAgent:     utils.FormatUserAgentForDisplay(log.UserAgent, log.RequestHeaders["Referer"]),
+			ModelName:     log.ModelName,
 			Timestamp:     log.Timestamp,
 			StatusCode:    log.StatusCode,
 			RequestBytes:  log.RequestBytes,

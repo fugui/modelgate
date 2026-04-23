@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Descriptions, Table, Tag, Statistic, Row, Col, Progress, Modal, Button } from 'antd';
+import { Card, Descriptions, Table, Tag, Statistic, Row, Col, Progress, Modal, Button, Tooltip as AntTooltip } from 'antd';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { EyeOutlined } from '@ant-design/icons';
 import api from '../api';
@@ -131,6 +131,25 @@ const UsageStats: React.FC = () => {
       dataIndex: 'path',
       key: 'path',
       ellipsis: true,
+    },
+    {
+      title: '模型',
+      dataIndex: 'model_name',
+      key: 'model_name',
+      width: 100,
+      render: (model: string) => model ? <Tag color="default">{model}</Tag> : '-',
+    },
+    {
+      title: '来源/客户端',
+      dataIndex: 'user_agent',
+      key: 'user_agent',
+      width: 130,
+      ellipsis: true,
+      render: (ua: string) => (
+        <AntTooltip title={ua}>
+          <span>{ua || '-'}</span>
+        </AntTooltip>
+      ),
     },
     {
       title: '流量(字节)',
@@ -295,6 +314,7 @@ const UsageStats: React.FC = () => {
               <Descriptions column={1} size="small">
                 <Descriptions.Item label="Method">{selectedLog.method}</Descriptions.Item>
                 <Descriptions.Item label="Path">{selectedLog.path}</Descriptions.Item>
+                <Descriptions.Item label="Model">{selectedLog.model_name || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Client IP">{selectedLog.client_ip}</Descriptions.Item>
                 <Descriptions.Item label="User Agent" style={{ wordBreak: 'break-all' }}>
                   {selectedLog.user_agent}

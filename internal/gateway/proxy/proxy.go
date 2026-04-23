@@ -223,6 +223,7 @@ func (p *Proxy) ExecuteCoreWorkflow(
 
 	// 使用实际的模型 ID（可能是 fallback 后的模型）
 	req.ModelID = actualModelID
+	c.Set("model_id", actualModelID)
 
 	// 获取模型配置并注入参数
 	modelConfig, _ := p.modelStore.GetByID(req.ModelID)
