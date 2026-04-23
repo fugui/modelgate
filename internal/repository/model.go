@@ -21,16 +21,18 @@ type ModelCreateRequest struct {
 	ID          string                 `json:"id" binding:"required"`
 	Name        string                 `json:"name" binding:"required"`
 	Description string                 `json:"description"`
-	Enabled     bool                   `json:"enabled"`
-	ModelParams map[string]interface{} `json:"model_params"`
+	Enabled       bool                   `json:"enabled"`
+	ContextWindow int                    `json:"context_window"`
+	ModelParams   map[string]interface{} `json:"model_params"`
 	Backends    []BackendCreateInput   `json:"backends"`
 }
 
 type ModelUpdateRequest struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
-	Enabled     *bool                  `json:"enabled"`
-	ModelParams map[string]interface{} `json:"model_params"`
+	Enabled       *bool                  `json:"enabled"`
+	ContextWindow *int                   `json:"context_window"`
+	ModelParams   map[string]interface{} `json:"model_params"`
 }
 
 type BackendCreateInput struct {

@@ -82,10 +82,11 @@ func (h *ModelHandler) Create(c *gin.Context) {
 	}
 
 	model := &entity.Model{
-		ID:          req.ID,
-		Name:        req.Name,
-		Description: req.Description,
-		Enabled:     req.Enabled,
+		ID:            req.ID,
+		Name:          req.Name,
+		Description:   req.Description,
+		Enabled:       req.Enabled,
+		ContextWindow: req.ContextWindow,
 	}
 
 	if err := h.store.Create(model); err != nil {
@@ -147,6 +148,9 @@ func (h *ModelHandler) Update(c *gin.Context) {
 	}
 	if req.Description != "" {
 		model.Description = req.Description
+	}
+	if req.ContextWindow != nil {
+		model.ContextWindow = *req.ContextWindow
 	}
 
 	if err := h.store.Update(model); err != nil {

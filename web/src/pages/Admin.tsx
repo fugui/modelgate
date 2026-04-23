@@ -11,6 +11,7 @@ interface Model {
   name: string;
   description: string;
   enabled: boolean;
+  context_window?: number;
   model_params?: Record<string, any>;
   created_at: string;
   updated_at: string;
@@ -74,6 +75,7 @@ interface ModelFormValues {
   name: string;
   description: string;
   enabled: boolean;
+  context_window?: number;
   model_params?: string;
   base_url?: string;
   api_key?: string;
@@ -348,6 +350,7 @@ const Admin: React.FC = () => {
       name: model.name,
       description: model.description,
       enabled: model.enabled,
+      context_window: model.context_window,
       model_params: model.model_params ? JSON.stringify(model.model_params, null, 2) : '',
     });
     setModelModalVisible(true);
@@ -424,6 +427,7 @@ const Admin: React.FC = () => {
           name: values.name,
           description: values.description,
           enabled: values.enabled,
+          context_window: values.context_window || 0,
           model_params: modelParams,
         });
         messageApi.success('模型更新成功');
@@ -434,6 +438,7 @@ const Admin: React.FC = () => {
           name: values.name,
           description: values.description,
           enabled: values.enabled,
+          context_window: values.context_window || 0,
           model_params: modelParams,
         });
         messageApi.success('模型创建成功');
@@ -772,6 +777,11 @@ const Admin: React.FC = () => {
     { title: 'ID', dataIndex: 'id', ellipsis: true },
     { title: '名称', dataIndex: 'name' },
     { title: '描述', dataIndex: 'description', ellipsis: true },
+    {
+      title: '上下文长度',
+      dataIndex: 'context_window',
+      render: (v: number) => v ? <Tag color="purple">{v}</Tag> : <Tag>无限制</Tag>,
+    },
     {
       title: '后端数量',
       dataIndex: 'backend_count',
@@ -1538,6 +1548,14 @@ const Admin: React.FC = () => {
             valuePropName="checked"
           >
             <Switch />
+          </Form.Item>
+
+          <Form.Item
+            name="context_window"
+            label="上下文长度"
+            extra="模型支持的最大上下文长度，留空或者设置为0表示不限制"
+          >
+            <InputNumber min={0} style={{ width: '100%' }} placeholder="如：128000" />
           </Form.Item>
 
           <Form.Item
