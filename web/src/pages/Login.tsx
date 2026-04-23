@@ -236,11 +236,9 @@ const Login: React.FC = () => {
           width: '100%',
         }}>
           <div>© {new Date().getFullYear()} Model Gate · 企业大模型统一接入网关</div>
-          {versionInfo.commit && (
-            <div style={{ marginTop: '4px', opacity: 0.8, fontSize: '11px' }}>
-              版本: {versionInfo.version} ({versionInfo.commit}) | 编译时间: {versionInfo.build_time}
-            </div>
-          )}
+          <div style={{ marginTop: '4px', opacity: 0.8, fontSize: '11px' }}>
+            版本: {versionInfo?.version || 'N/A'} ({versionInfo?.commit || 'N/A'}) | 编译时间: {versionInfo?.build_time || 'N/A'}
+          </div>
         </div>
       </div>
     </div>
