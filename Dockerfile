@@ -27,7 +27,10 @@ COPY . .
 COPY --from=web-builder /app/web/dist ./internal/static/dist
 
 # 编译
-RUN CGO_ENABLED=0 GOOS=linux go build -o modelgate ./cmd/server
+ARG VERSION=dev
+ARG BUILD_TIME=unknown
+ARG COMMIT=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w -X modelgate/internal/version.Version=${VERSION} -X modelgate/internal/version.BuildTime=${BUILD_TIME} -X modelgate/internal/version.Commit=${COMMIT}" -o modelgate ./cmd/server
 
 # 生产镜像
 FROM alpine:latest

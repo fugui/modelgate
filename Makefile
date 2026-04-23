@@ -7,7 +7,7 @@ VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_TIME=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.Commit=$(COMMIT)"
+LDFLAGS=-ldflags "-s -w -X modelgate/internal/version.Version=$(VERSION) -X modelgate/internal/version.BuildTime=$(BUILD_TIME) -X modelgate/internal/version.Commit=$(COMMIT)"
 
 # 默认构建（包含前端嵌入）
 build: web-build embed

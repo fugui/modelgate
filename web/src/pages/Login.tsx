@@ -12,6 +12,7 @@ const Login: React.FC = () => {
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const navigate = useNavigate();
   const [messageApi, contextHolder] = message.useMessage();
+  const [versionInfo, setVersionInfo] = useState<{ version?: string, build_time?: string, commit?: string }>({});
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -20,6 +21,11 @@ const Login: React.FC = () => {
     }
     api.get('/api/v1/config/frontend').then(res => {
       setRegistrationEnabled(res.data.data?.registration_enabled || false);
+      setVersionInfo({
+        version: res.data.data?.version,
+        build_time: res.data.data?.build_time,
+        commit: res.data.data?.commit,
+      });
     }).catch(() => { });
   }, [navigate]);
 
@@ -225,8 +231,15 @@ const Login: React.FC = () => {
           bottom: '24px',
           color: '#bfbfbf',
           fontSize: '12px',
+          textAlign: 'center',
+          width: '100%',
         }}>
-          © {new Date().getFullYear()} Model Gate · 企业大模型统一接入网关
+          <div>© {new Date().getFullYear()} Model Gate · 企业大模型统一接入网关</div>
+          {versionInfo.commit && versionInfo.commit !== 'unknown' && (
+            <div style={{ marginTop: '4px', opacity: 0.8, fontSize: '11px' }}>
+              版本: {versionInfo.version} ({versionInfo.commit}) | 编译时间: {versionInfo.build_time}
+            </div>
+          )}
         </div>
       </div>
     </div>

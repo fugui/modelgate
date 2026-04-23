@@ -19,6 +19,7 @@ import (
 	"modelgate/internal/infra/auth"
 	"modelgate/internal/infra/middleware"
 	"modelgate/internal/repository"
+	"modelgate/internal/version"
 )
 
 type ChangePasswordRequest struct {
@@ -541,6 +542,9 @@ func (h *Handler) GetFrontendConfig(c *gin.Context) {
 			"dev_manual_url":       cfg.Frontend.DevManualURL,
 			"sso_enabled":          cfg.SSO.Enabled,
 			"registration_enabled": cfg.Frontend.RegistrationEnabled,
+			"version":              version.Version,
+			"build_time":           version.BuildTime,
+			"commit":               version.Commit,
 		},
 	})
 }
