@@ -124,6 +124,7 @@ const AdminLogs: React.FC = () => {
       title: '路径',
       dataIndex: 'path',
       key: 'path',
+      width: 160,
       ellipsis: true,
     },
     {
