@@ -152,6 +152,7 @@ const Login: React.FC = () => {
         justifyContent: 'center',
         alignItems: 'center',
         padding: '60px',
+        position: 'relative',
       }}>
         <div style={{ width: '100%', maxWidth: '380px' }}>
           <div style={{ marginBottom: '40px' }}>
@@ -235,7 +236,7 @@ const Login: React.FC = () => {
           width: '100%',
         }}>
           <div>© {new Date().getFullYear()} Model Gate · 企业大模型统一接入网关</div>
-          {versionInfo.commit && versionInfo.commit !== 'unknown' && (
+          {versionInfo.commit && (
             <div style={{ marginTop: '4px', opacity: 0.8, fontSize: '11px' }}>
               版本: {versionInfo.version} ({versionInfo.commit}) | 编译时间: {versionInfo.build_time}
             </div>
