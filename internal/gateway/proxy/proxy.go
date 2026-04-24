@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -359,8 +360,10 @@ func (p *Proxy) ExecuteCoreWorkflow(
 
 		// 在发生 HTTP 错误时，也必须记录阶段 3 和 4 的 Dump，否则 RAW Dump 链路不完整
 		if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
-			p.trafficDumper.Dump(req.TraceID, logger.Stage3BackendResponse, respBody, false)
-			p.trafficDumper.Dump(req.TraceID, logger.Stage4ConvertedResponse, finalRespBody, false)
+			filename3 := fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode)
+			filename4 := fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode)
+			p.trafficDumper.Dump(req.TraceID, filename3, respBody, false)
+			p.trafficDumper.Dump(req.TraceID, filename4, finalRespBody, false)
 		}
 		return
 	}
@@ -440,8 +443,10 @@ func (p *Proxy) handleConvertedNormalResponse(
 	}
 
 	if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
-		p.trafficDumper.Dump(req.TraceID, logger.Stage3BackendResponse, respBody, false)
-		p.trafficDumper.Dump(req.TraceID, logger.Stage4ConvertedResponse, convertedRespBody, false)
+		filename3 := fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode)
+		filename4 := fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode)
+		p.trafficDumper.Dump(req.TraceID, filename3, respBody, false)
+		p.trafficDumper.Dump(req.TraceID, filename4, convertedRespBody, false)
 	}
 
 	// 计算最终 Token（优先使用精确 Token）
@@ -645,11 +650,13 @@ func (p *Proxy) handleConvertedStreamResponse(
 
 			// Dump Stage 3 & 4
 			if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
-				p.trafficDumper.Dump(req.TraceID, logger.Stage3BackendResponse, []byte(line), true)
+				filename3 := fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode)
+				filename4 := fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode)
+				p.trafficDumper.Dump(req.TraceID, filename3, []byte(line), true)
 				if err == nil {
-					p.trafficDumper.Dump(req.TraceID, logger.Stage4ConvertedResponse, []byte(converted), true)
+					p.trafficDumper.Dump(req.TraceID, filename4, []byte(converted), true)
 				} else {
-					p.trafficDumper.Dump(req.TraceID, logger.Stage4ConvertedResponse, []byte(line), true)
+					p.trafficDumper.Dump(req.TraceID, filename4, []byte(line), true)
 				}
 			}
 
@@ -668,8 +675,10 @@ func (p *Proxy) handleConvertedStreamResponse(
 		} else {
 			// Dump Stage 3 & 4 for direct proxy
 			if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
-				p.trafficDumper.Dump(req.TraceID, logger.Stage3BackendResponse, []byte(line), true)
-				p.trafficDumper.Dump(req.TraceID, logger.Stage4ConvertedResponse, []byte(line), true)
+				filename3 := fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode)
+				filename4 := fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode)
+				p.trafficDumper.Dump(req.TraceID, filename3, []byte(line), true)
+				p.trafficDumper.Dump(req.TraceID, filename4, []byte(line), true)
 			}
 
 			writeMu.Lock()

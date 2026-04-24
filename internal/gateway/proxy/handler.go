@@ -85,7 +85,8 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, extract Extra
 
 	// 请求结束后，检查是否发生 400 及以上的错误，决定是否 Flush 原始报文 Dump
 	if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
-		hasError := c.Writer.Status() >= 400
+		status := c.Writer.Status()
+		hasError := status >= 400 && status != http.StatusTooManyRequests
 		p.trafficDumper.FlushOrDiscard(traceID, hasError)
 	}
 }

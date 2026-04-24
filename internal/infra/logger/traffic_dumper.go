@@ -117,6 +117,4 @@ func (d *TrafficDumper) FlushOrDiscard(traceID string, hasError bool) {
 const (
 	Stage1ClientRequest     = "1_client_request.json"
 	Stage2ConvertedRequest  = "2_converted_request.json"
-	Stage3BackendResponse   = "3_backend_response.txt"
-	Stage4ConvertedResponse = "4_converted_response.txt"
 )
