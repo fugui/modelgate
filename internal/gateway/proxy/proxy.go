@@ -22,23 +22,16 @@ import (
 	"modelgate/internal/repository"
 )
 
-// ConcurrencyTracker 并发追踪接口
-type ConcurrencyTracker interface {
-	Acquire(userID string) bool
-	Release(userID string)
-}
-
 // Proxy LLM 代理
 type Proxy struct {
-	lb                 *RoundRobinBalancer
-	quotaService       *quota.Service
-	usageService       *usage.Service
-	httpClient         *http.Client
-	modelStore         *entity.ModelStore
-	backendStore       *entity.BackendStore
-	userStore          *entity.UserStore
-	concurrencyTracker ConcurrencyTracker
-	trafficDumper      *logger.TrafficDumper
+	lb            *RoundRobinBalancer
+	quotaService  *quota.Service
+	usageService  *usage.Service
+	httpClient    *http.Client
+	modelStore    *entity.ModelStore
+	backendStore  *entity.BackendStore
+	userStore     *entity.UserStore
+	trafficDumper *logger.TrafficDumper
 }
 
 func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService *usage.Service, modelStore *entity.ModelStore, backendStore *entity.BackendStore, userStore *entity.UserStore) *Proxy {
@@ -51,11 +44,6 @@ func NewProxy(lb *RoundRobinBalancer, quotaService *quota.Service, usageService 
 		backendStore: backendStore,
 		userStore:    userStore,
 	}
-}
-
-// SetConcurrencyTracker 设置并发追踪器（用于统计并发数）
-func (p *Proxy) SetConcurrencyTracker(tracker ConcurrencyTracker) {
-	p.concurrencyTracker = tracker
 }
 
 // SetTrafficDumper 设置原始流量调试日志组件
@@ -154,12 +142,6 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		} else {
 			c.JSON(statusCode, gin.H{"error": message})
 		}
-	}
-
-	// 追踪并发数（所有协议统一追踪，不仅限 OpenAI 中间件）
-	if p.concurrencyTracker != nil {
-		p.concurrencyTracker.Acquire(req.UserID.String())
-		defer p.concurrencyTracker.Release(req.UserID.String())
 	}
 
 	// 获取用户信息
