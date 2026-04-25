@@ -41,6 +41,14 @@ interface DashboardData {
     input_tokens: number;
     output_tokens: number;
     total_tokens: number;
+    models?: {
+      [key: string]: {
+        requests: number;
+        input_tokens: number;
+        output_tokens: number;
+      };
+    };
+    [key: string]: any;
   }[];
   top_users: {
     user_id: string;
@@ -81,10 +89,18 @@ const DashboardStats: React.FC = () => {
           today_requests: stats.today_total_requests || 0,
           today_tokens: (stats.today_input_tokens || 0) + (stats.today_output_tokens || 0),
         },
-        hourly_stats: (hourlyRes.data.data || []).map((h: any) => ({
-          ...h,
-          total_tokens: (h.input_tokens || 0) + (h.output_tokens || 0),
-        })),
+        hourly_stats: (hourlyRes.data.data || []).map((h: any) => {
+          const stat: any = {
+            ...h,
+            total_tokens: (h.input_tokens || 0) + (h.output_tokens || 0),
+          };
+          if (h.models) {
+            Object.keys(h.models).forEach((modelId) => {
+              stat[`model_${modelId}_requests`] = h.models[modelId].requests;
+            });
+          }
+          return stat;
+        }),
         top_users: (topUsersRes.data.data || []).map((u: any) => ({
           user_id: u.user_id,
           username: u.name || u.user_id,
@@ -121,6 +137,11 @@ const DashboardStats: React.FC = () => {
   }
 
   const { summary, hourly_stats: hourlyStats, top_users: topUsers, metrics_history: metricsHistory } = data;
+
+  const uniqueModels = Array.from(
+    new Set(hourlyStats.flatMap((stat) => (stat.models ? Object.keys(stat.models) : [])))
+  );
+  const chartColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#eb2f96', '#13c2c2', '#fa8c16'];
 
   const formatTokens = (num: number) => {
     if (num >= 1000000) {
@@ -204,13 +225,27 @@ const DashboardStats: React.FC = () => {
                   <YAxis yAxisId="right" orientation="right" stroke="#f5222d" tickFormatter={(v: number) => formatTokens(v)} label={{ value: 'Token', angle: 90, position: 'insideRight', offset: 10 }} />
                   <Tooltip
                     formatter={(value: any, name: any) => {
-                      if (name === '请求数') return [`${value ?? 0}`, '请求数'];
-                      return [formatTokens(Number(value ?? 0)), 'Token 总量'];
+                      if (name === '请求数' || name === '请求总数') return [`${value ?? 0}`, '请求总数'];
+                      if (name === 'Token 总量') return [formatTokens(Number(value ?? 0)), 'Token 总量'];
+                      return [`${value ?? 0}`, `模型: ${name}`];
                     }}
                     labelFormatter={(label: any) => `${label}`}
                   />
                   <Legend />
-                  <Bar yAxisId="left" dataKey="requests" fill="#1890ff" name="请求数" />
+                  {uniqueModels.length > 0 ? (
+                    uniqueModels.map((modelId, index) => (
+                      <Bar
+                        key={modelId}
+                        yAxisId="left"
+                        dataKey={`model_${modelId}_requests`}
+                        stackId="requests"
+                        fill={chartColors[index % chartColors.length]}
+                        name={modelId}
+                      />
+                    ))
+                  ) : (
+                    <Bar yAxisId="left" dataKey="requests" fill="#1890ff" name="请求数" />
+                  )}
                   <Line yAxisId="right" type="monotone" dataKey="total_tokens" stroke="#f5222d" name="Token 总量" dot={false} strokeWidth={2} />
                 </ComposedChart>
               </ResponsiveContainer>

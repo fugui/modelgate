@@ -90,7 +90,7 @@ func (rc *RateCounter) GetCount(userID string, window int) int {
 
 // DashboardRecorder 用于记录仪表板统计的接口
 type DashboardRecorder interface {
-	RecordHourlyStat(userID string, inputTokens, outputTokens int, durationMs int64)
+	RecordHourlyStat(userID string, modelID string, inputTokens, outputTokens int, durationMs int64)
 }
 
 type Service struct {
@@ -351,7 +351,7 @@ func (s *Service) RecordRequest(userID uuid.UUID, modelID string, durationMs int
 
 	// 记录小时级统计（用于仪表板）
 	if s.dashboardRecorder != nil {
-		s.dashboardRecorder.RecordHourlyStat(userID.String(), 0, 0, durationMs)
+		s.dashboardRecorder.RecordHourlyStat(userID.String(), modelID, 0, 0, durationMs)
 	}
 
 	return nil
@@ -375,7 +375,7 @@ func (s *Service) RecordRequestTokens(userID uuid.UUID, modelID string, apiKeyID
 
 	// 记录小时级统计（用于仪表板）
 	if s.dashboardRecorder != nil {
-		s.dashboardRecorder.RecordHourlyStat(userID.String(), inputTokens, outputTokens, durationMs)
+		s.dashboardRecorder.RecordHourlyStat(userID.String(), modelID, inputTokens, outputTokens, durationMs)
 	}
 
 	return nil

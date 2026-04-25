@@ -20,19 +20,19 @@ type HourlyData struct {
 // HourlyCounter 内存小时级计数器
 // 保留今天和昨天的数据以支持跨天的 24 小时查询
 type HourlyCounter struct {
-	// date -> userID -> hour(0-23) -> HourlyData
-	counts map[string]map[string]map[int]*HourlyData
+	// date -> userID -> hour(0-23) -> modelID -> HourlyData
+	counts map[string]map[string]map[int]map[string]*HourlyData
 	mu     sync.RWMutex
 }
 
 func NewHourlyCounter() *HourlyCounter {
 	return &HourlyCounter{
-		counts: make(map[string]map[string]map[int]*HourlyData),
+		counts: make(map[string]map[string]map[int]map[string]*HourlyData),
 	}
 }
 
-// Increment 增加指定用户当前小时的计数和 Token
-func (hc *HourlyCounter) Increment(userID string, inputTokens, outputTokens int) {
+// Increment 增加指定用户和模型当前小时的计数和 Token
+func (hc *HourlyCounter) Increment(userID string, modelID string, inputTokens, outputTokens int) {
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
 
@@ -40,17 +40,20 @@ func (hc *HourlyCounter) Increment(userID string, inputTokens, outputTokens int)
 	hour := time.Now().Hour()
 
 	if hc.counts[today] == nil {
-		hc.counts[today] = make(map[string]map[int]*HourlyData)
+		hc.counts[today] = make(map[string]map[int]map[string]*HourlyData)
 	}
 	if hc.counts[today][userID] == nil {
-		hc.counts[today][userID] = make(map[int]*HourlyData)
+		hc.counts[today][userID] = make(map[int]map[string]*HourlyData)
 	}
 	if hc.counts[today][userID][hour] == nil {
-		hc.counts[today][userID][hour] = &HourlyData{}
+		hc.counts[today][userID][hour] = make(map[string]*HourlyData)
 	}
-	hc.counts[today][userID][hour].Count++
-	hc.counts[today][userID][hour].InputTokens += int64(inputTokens)
-	hc.counts[today][userID][hour].OutputTokens += int64(outputTokens)
+	if hc.counts[today][userID][hour][modelID] == nil {
+		hc.counts[today][userID][hour][modelID] = &HourlyData{}
+	}
+	hc.counts[today][userID][hour][modelID].Count++
+	hc.counts[today][userID][hour][modelID].InputTokens += int64(inputTokens)
+	hc.counts[today][userID][hour][modelID].OutputTokens += int64(outputTokens)
 }
 
 // GetLast24Hours 获取最近24小时的总请求数（按小时汇总）
@@ -74,6 +77,7 @@ func (hc *HourlyCounter) GetLast24Hours() []HourlyStat {
 			Requests:     0,
 			InputTokens:  0,
 			OutputTokens: 0,
+			Models:       make(map[string]ModelHourlyStat),
 		}
 	}
 
@@ -94,10 +98,18 @@ func (hc *HourlyCounter) GetLast24Hours() []HourlyStat {
 		// 汇总该日期所有用户在此小时的请求数和 Token
 		if dayData, ok := hc.counts[date]; ok {
 			for _, userData := range dayData {
-				if data, ok := userData[hour]; ok {
-					stats[i].Requests += data.Count
-					stats[i].InputTokens += data.InputTokens
-					stats[i].OutputTokens += data.OutputTokens
+				if hourData, ok := userData[hour]; ok {
+					for modelID, data := range hourData {
+						stats[i].Requests += data.Count
+						stats[i].InputTokens += data.InputTokens
+						stats[i].OutputTokens += data.OutputTokens
+
+						modelStat := stats[i].Models[modelID]
+						modelStat.Requests += data.Count
+						modelStat.InputTokens += data.InputTokens
+						modelStat.OutputTokens += data.OutputTokens
+						stats[i].Models[modelID] = modelStat
+					}
 				}
 			}
 		}
@@ -262,8 +274,8 @@ func (s *Service) dateCheckLoop() {
 }
 
 // RecordHourlyStat 记录小时级统计
-func (s *Service) RecordHourlyStat(userID string, inputTokens, outputTokens int, durationMs int64) {
-	s.hourlyCounter.Increment(userID, inputTokens, outputTokens)
+func (s *Service) RecordHourlyStat(userID string, modelID string, inputTokens, outputTokens int, durationMs int64) {
+	s.hourlyCounter.Increment(userID, modelID, inputTokens, outputTokens)
 	// 同时记录到5分钟级指标采集器
 	if durationMs > 0 {
 		s.metricsCollector.RecordDuration(durationMs)
@@ -296,12 +308,20 @@ type TopUser struct {
 	OutputTokens int64  `json:"output_tokens"`
 }
 
+// ModelHourlyStat 模型级别小时统计
+type ModelHourlyStat struct {
+	Requests     int   `json:"requests"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+}
+
 // HourlyStat 小时统计
 type HourlyStat struct {
-	Hour         string `json:"hour"` // 格式: "14:00"
-	Requests     int    `json:"requests"`
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"`
+	Hour         string                     `json:"hour"` // 格式: "14:00"
+	Requests     int                        `json:"requests"`
+	InputTokens  int64                      `json:"input_tokens"`
+	OutputTokens int64                      `json:"output_tokens"`
+	Models       map[string]ModelHourlyStat `json:"models"` // 按模型分组的统计
 }
 
 // DepartmentStat 部门统计
