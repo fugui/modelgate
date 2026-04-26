@@ -115,6 +115,21 @@ func NewUserStore(db *sql.DB) *UserStore {
 	return &UserStore{db: db}
 }
 
+// scanner interface defines the common Scan method for both sql.Row and sql.Rows
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanUser(s scanner) (*User, error) {
+	user := &User{}
+	err := s.Scan(
+		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
+		&user.Department, &user.QuotaPolicy, &user.AuthSource, &user.Enabled,
+		&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
+	)
+	return user, err
+}
+
 func (s *UserStore) Create(user *User) error {
 	user.ID = uuid.New()
 	if user.AuthSource == "" {
@@ -132,17 +147,12 @@ func (s *UserStore) Create(user *User) error {
 }
 
 func (s *UserStore) GetByID(id uuid.UUID) (*User, error) {
-	user := &User{}
 	query := `
 		SELECT id, email, password_hash, name, role, department, quota_policy,
 		       auth_source, enabled, created_at, updated_at, last_login_at
 		FROM users WHERE id = ?`
 
-	err := s.db.QueryRow(query, id.String()).Scan(
-		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
-		&user.Department, &user.QuotaPolicy, &user.AuthSource, &user.Enabled,
-		&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
-	)
+	user, err := scanUser(s.db.QueryRow(query, id.String()))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -153,17 +163,12 @@ func (s *UserStore) GetByID(id uuid.UUID) (*User, error) {
 }
 
 func (s *UserStore) GetByEmail(email string) (*User, error) {
-	user := &User{}
 	query := `
 		SELECT id, email, password_hash, name, role, department, quota_policy,
 		       auth_source, enabled, created_at, updated_at, last_login_at
 		FROM users WHERE email = ? AND enabled = 1`
 
-	err := s.db.QueryRow(query, email).Scan(
-		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
-		&user.Department, &user.QuotaPolicy, &user.AuthSource, &user.Enabled,
-		&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
-	)
+	user, err := scanUser(s.db.QueryRow(query, email))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -175,17 +180,12 @@ func (s *UserStore) GetByEmail(email string) (*User, error) {
 
 // GetByEmailAll 查询用户（不过滤 enabled 状态），用于注册时检测邮箱是否已被占用
 func (s *UserStore) GetByEmailAll(email string) (*User, error) {
-	user := &User{}
 	query := `
 		SELECT id, email, password_hash, name, role, department, quota_policy,
 		       auth_source, enabled, created_at, updated_at, last_login_at
 		FROM users WHERE email = ?`
 
-	err := s.db.QueryRow(query, email).Scan(
-		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
-		&user.Department, &user.QuotaPolicy, &user.AuthSource, &user.Enabled,
-		&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
-	)
+	user, err := scanUser(s.db.QueryRow(query, email))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -209,12 +209,7 @@ func (s *UserStore) List(limit, offset int) ([]*User, error) {
 
 	var users []*User
 	for rows.Next() {
-		user := &User{}
-		err := rows.Scan(
-			&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
-			&user.Department, &user.QuotaPolicy, &user.AuthSource, &user.Enabled,
-			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
-		)
+		user, err := scanUser(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -259,12 +254,7 @@ func (s *UserStore) ListPaginated(limit, offset int, sortBy, sortOrder string) (
 
 	var users []*User
 	for rows.Next() {
-		user := &User{}
-		err := rows.Scan(
-			&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
-			&user.Department, &user.QuotaPolicy, &user.AuthSource, &user.Enabled,
-			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
-		)
+		user, err := scanUser(rows)
 		if err != nil {
 			return nil, err
 		}

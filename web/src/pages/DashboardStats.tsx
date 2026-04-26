@@ -3,8 +3,8 @@ import {
   Row,
   Col,
   Card,
-  Statistic,
-  Table,
+
+
   Empty,
   message,
 } from 'antd';
@@ -27,6 +27,8 @@ import {
   ComposedChart,
 } from 'recharts';
 import api from '../api';
+import { MetricCard } from '../components/dashboard/MetricCard';
+import { TopList } from '../components/dashboard/TopList';
 
 interface DashboardData {
   summary: {
@@ -162,8 +164,8 @@ const DashboardStats: React.FC = () => {
   );
 
   const topUserColumns = [
-    { title: '用户名', dataKey: 'username', key: 'username', render: (_: any, record: any) => record.username || record.user_id },
-    { title: '请求数', dataIndex: 'request_count', key: 'request_count', sorter: (a: any, b: any) => a.request_count - b.request_count },
+    { title: '用户名', dataIndex: 'username', key: 'username', render: (_: any, record: any) => record.username || record.user_id },
+    { title: '请求数', dataIndex: 'request_count', key: 'request_count', sorter: (a: any, b: any) => (a.request_count || 0) - (b.request_count || 0) },
     { title: 'Tokens', key: 'total_tokens', render: renderTokens, sorter: (a: any, b: any) => ((a.input_tokens || 0) + (a.output_tokens || 0)) - ((b.input_tokens || 0) + (b.output_tokens || 0)) },
   ];
 
@@ -175,40 +177,36 @@ const DashboardStats: React.FC = () => {
     <div className="dashboard-stats">
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col xs={24} sm={12} lg={6}>
-          <Card bordered={false} hoverable>
-            <Statistic
-              title="用户总数"
-              value={summary.total_users}
-              prefix={<UserOutlined style={{ color: '#1890ff' }} />}
-            />
-          </Card>
+          <MetricCard
+            title="用户总数"
+            value={summary.total_users}
+            prefix={<UserOutlined style={{ color: '#1890ff' }} />}
+            valueStyle={{ color: '#1890ff' }}
+          />
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card bordered={false} hoverable>
-            <Statistic
-              title="今日最高并发"
-              value={summary.peak_concurrency}
-              prefix={<CloudServerOutlined style={{ color: '#52c41a' }} />}
-            />
-          </Card>
+          <MetricCard
+            title="今日最高并发"
+            value={summary.peak_concurrency}
+            prefix={<CloudServerOutlined style={{ color: '#52c41a' }} />}
+            valueStyle={{ color: '#52c41a' }}
+          />
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card bordered={false} hoverable>
-            <Statistic
-              title="今日总请求"
-              value={summary.today_requests}
-              prefix={<ThunderboltOutlined style={{ color: '#faad14' }} />}
-            />
-          </Card>
+          <MetricCard
+            title="今日总请求"
+            value={summary.today_requests}
+            prefix={<ThunderboltOutlined style={{ color: '#faad14' }} />}
+            valueStyle={{ color: '#faad14' }}
+          />
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card bordered={false} hoverable>
-            <Statistic
-              title="今日 Token 消耗"
-              value={formatTokens(summary.today_tokens)}
-              prefix={<HistoryOutlined style={{ color: '#f5222d' }} />}
-            />
-          </Card>
+          <MetricCard
+            title="今日 Token 消耗"
+            value={formatTokens(summary.today_tokens)}
+            prefix={<HistoryOutlined style={{ color: '#f5222d' }} />}
+            valueStyle={{ color: '#f5222d' }}
+          />
         </Col>
       </Row>
 
@@ -255,20 +253,19 @@ const DashboardStats: React.FC = () => {
           </Card>
         </Col>
         <Col xs={24} lg={10}>
-          <Card title="今日 TOP10 用户">
-            {topUsers.length > 0 && topUsers.some(u => u.request_count > 0) ? (
-              <Table
-                dataSource={topUsers.filter(u => u.request_count > 0).slice(0, 10)}
-                columns={topUserColumns}
-                rowKey="user_id"
-                pagination={false}
-                size="small"
-                scroll={{ y: 300 }}
-              />
-            ) : (
+          {topUsers.length > 0 && topUsers.some(u => u.request_count > 0) ? (
+            <TopList
+              title="今日 TOP10 用户"
+              dataSource={topUsers.filter(u => u.request_count > 0).slice(0, 10)}
+              columns={topUserColumns as any}
+              rowKey="user_id"
+              scroll={{ y: 300 }}
+            />
+          ) : (
+            <Card title="今日 TOP10 用户">
               <Empty description="暂无数据" style={{ padding: '60px 0' }} />
-            )}
-          </Card>
+            </Card>
+          )}
         </Col>
       </Row>
 

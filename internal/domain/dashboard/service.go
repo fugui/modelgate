@@ -36,6 +36,11 @@ func (hc *HourlyCounter) Increment(userID string, modelID string, inputTokens, o
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
 
+	// 确保 modelID 不为空，防止前端显示异常
+	if modelID == "" {
+		modelID = "unknown"
+	}
+
 	today := time.Now().Format("2006-01-02")
 	hour := time.Now().Hour()
 

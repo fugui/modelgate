@@ -364,6 +364,22 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	}
 }
 
+// recordFinalUsage records the final usage metrics to usageService and quotaService.
+func (p *Proxy) recordFinalUsage(record *usage.Record, userID uuid.UUID, modelID string, apiKeyID uuid.UUID, inputTokens, outputTokens int, latencyMs int64) {
+	// 记录使用日志
+	p.usageService.RecordUsageDetailed(record)
+
+	// 记录请求并扣除 Token
+	_ = p.quotaService.RecordRequestTokens(
+		userID,
+		modelID,
+		apiKeyID,
+		inputTokens,
+		outputTokens,
+		latencyMs,
+	)
+}
+
 // handleConvertedNormalResponse 处理非流式响应（带转换）
 func (p *Proxy) handleConvertedNormalResponse(
 	c *gin.Context,
@@ -444,8 +460,7 @@ func (p *Proxy) handleConvertedNormalResponse(
 	c.Set("input_tokens", inputTokens)
 	c.Set("output_tokens", outputTokens)
 
-	// 记录使用日志
-	p.usageService.RecordUsageDetailed(&usage.Record{
+	p.recordFinalUsage(&usage.Record{
 		UserID:          req.UserID,
 		UserName:        req.UserName,
 		UserEmail:       req.UserEmail,
@@ -461,10 +476,7 @@ func (p *Proxy) handleConvertedNormalResponse(
 		RequestPayload:  req.RequestPayload,
 		ResponsePayload: string(convertedRespBody),
 		TTFTMs:          int64(latency),
-	})
-
-	// 记录请求并扣除 Token
-	_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens, int64(latency))
+	}, req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens, int64(latency))
 
 	// 只有在成功解压后才删除 Content-Encoding header
 	if decompressed {
@@ -578,7 +590,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 		c.Set("input_tokens", finalInputTokens)
 		c.Set("output_tokens", outputTokens)
 
-		p.usageService.RecordUsageDetailed(&usage.Record{
+		p.recordFinalUsage(&usage.Record{
 			UserID:          req.UserID,
 			UserName:        req.UserName,
 			UserEmail:       req.UserEmail,
@@ -594,9 +606,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 			RequestPayload:  req.RequestPayload,
 			ResponsePayload: fullCollectedText.String(),
 			TTFTMs:          ttftMs,
-		})
-
-		_ = p.quotaService.RecordRequestTokens(req.UserID, req.ModelID, req.APIKeyID, finalInputTokens, outputTokens, int64(latency))
+		}, req.UserID, req.ModelID, req.APIKeyID, finalInputTokens, outputTokens, int64(latency))
 	}()
 
 	for {

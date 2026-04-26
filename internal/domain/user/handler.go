@@ -169,6 +169,37 @@ func (h *Handler) Login(c *gin.Context) {
 	})
 }
 
+func (h *Handler) createUserInternal(req entity.UserCreateRequest, enabled bool) (*entity.User, error) {
+	if req.Role == "" {
+		req.Role = entity.RoleUser
+	}
+
+	passwordHash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		return nil, err
+	}
+
+	user := &entity.User{
+		Email:        req.Email,
+		PasswordHash: passwordHash,
+		Name:         req.Name,
+		Role:         req.Role,
+		Department:   req.Department,
+		QuotaPolicy:  req.QuotaPolicy,
+		Enabled:      enabled,
+	}
+
+	if user.QuotaPolicy == "" {
+		user.QuotaPolicy = "default"
+	}
+
+	if err := h.store.Create(user); err != nil {
+		return nil, err
+	}
+
+	return user, nil
+}
+
 func (h *Handler) Register(c *gin.Context) {
 	var req entity.UserCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -187,32 +218,8 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	// 默认角色为 user
-	if req.Role == "" {
-		req.Role = entity.RoleUser
-	}
-
-	passwordHash, err := auth.HashPassword(req.Password)
+	_, err = h.createUserInternal(req, false)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	user := &entity.User{
-		Email:        req.Email,
-		PasswordHash: passwordHash,
-		Name:         req.Name,
-		Role:         req.Role,
-		Department:   req.Department,
-		QuotaPolicy:  req.QuotaPolicy,
-		Enabled:      false, // 注册后默认禁用，需管理员审核
-	}
-
-	if user.QuotaPolicy == "" {
-		user.QuotaPolicy = "default"
-	}
-
-	if err := h.store.Create(user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -294,31 +301,8 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
-	if req.Role == "" {
-		req.Role = entity.RoleUser
-	}
-
-	passwordHash, err := auth.HashPassword(req.Password)
+	user, err := h.createUserInternal(req, true)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	user := &entity.User{
-		Email:        req.Email,
-		PasswordHash: passwordHash,
-		Name:         req.Name,
-		Role:         req.Role,
-		Department:   req.Department,
-		QuotaPolicy:  req.QuotaPolicy,
-		Enabled:      true,
-	}
-
-	if user.QuotaPolicy == "" {
-		user.QuotaPolicy = "default"
-	}
-
-	if err := h.store.Create(user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

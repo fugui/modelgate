@@ -66,6 +66,16 @@ func NewAPIKeyStore(db *sql.DB) *APIKeyStore {
 	return &APIKeyStore{db: db}
 }
 
+func scanAPIKey(s scanner) (*APIKey, error) {
+	key := &APIKey{}
+	err := s.Scan(
+		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
+		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
+		&key.TotalTokensUsed,
+	)
+	return key, err
+}
+
 func (s *APIKeyStore) Create(key *APIKey) error {
 	key.ID = uuid.New()
 	query := `
@@ -80,17 +90,12 @@ func (s *APIKeyStore) Create(key *APIKey) error {
 }
 
 func (s *APIKeyStore) GetByID(id uuid.UUID) (*APIKey, error) {
-	key := &APIKey{}
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
 		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
 		FROM api_keys WHERE id = ?`
 
-	err := s.db.QueryRow(query, id.String()).Scan(
-		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
-		&key.TotalTokensUsed,
-	)
+	key, err := scanAPIKey(s.db.QueryRow(query, id.String()))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -101,17 +106,12 @@ func (s *APIKeyStore) GetByID(id uuid.UUID) (*APIKey, error) {
 }
 
 func (s *APIKeyStore) GetByHash(hash string) (*APIKey, error) {
-	key := &APIKey{}
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
 		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
 		FROM api_keys WHERE key_hash = ? AND enabled = 1`
 
-	err := s.db.QueryRow(query, hash).Scan(
-		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
-		&key.TotalTokensUsed,
-	)
+	key, err := scanAPIKey(s.db.QueryRow(query, hash))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -122,17 +122,12 @@ func (s *APIKeyStore) GetByHash(hash string) (*APIKey, error) {
 }
 
 func (s *APIKeyStore) GetByKeyPrefix(prefix string) (*APIKey, error) {
-	key := &APIKey{}
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
 		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
 		FROM api_keys WHERE key_prefix = ? AND enabled = 1`
 
-	err := s.db.QueryRow(query, prefix).Scan(
-		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
-		&key.TotalTokensUsed,
-	)
+	key, err := scanAPIKey(s.db.QueryRow(query, prefix))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -156,12 +151,7 @@ func (s *APIKeyStore) ListByUser(userID uuid.UUID) ([]*APIKey, error) {
 
 	var keys []*APIKey
 	for rows.Next() {
-		key := &APIKey{}
-		err := rows.Scan(
-			&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
-			&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
-			&key.TotalTokensUsed,
-		)
+		key, err := scanAPIKey(rows)
 		if err != nil {
 			return nil, err
 		}

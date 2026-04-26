@@ -1,24 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Input, Button, message, Typography } from 'antd';
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { Form, Input, Button, Typography, Divider, message } from 'antd';
+import { UserOutlined, LockOutlined, GlobalOutlined, CodeOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../api';
-import logo from '../assets/modelgate.png';
 
-const { Title, Text, Paragraph } = Typography;
+import AuthLayout from '../components/auth/AuthLayout';
+
+const { Title, Text } = Typography;
 
 const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
-  const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const navigate = useNavigate();
   const [messageApi, contextHolder] = message.useMessage();
-  const [versionInfo, setVersionInfo] = useState<{ version?: string, build_time?: string, commit?: string }>({});
+  const [ssoConfig, setSsoConfig] = useState<{ enabled: boolean; auth_url?: string; provider?: string }>({ enabled: false });
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
+  const [versionInfo, setVersionInfo] = useState<{ version?: string; build_time?: string; commit?: string }>({});
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
+    if (localStorage.getItem('token')) {
       navigate('/chat');
     }
+    // Check SSO and registration config
+    api.get('/api/v1/auth/sso/config').then(res => {
+      if (res.data.data && res.data.data.enabled) {
+        setSsoConfig(res.data.data);
+      }
+    }).catch(() => {
+      // Ignored
+    });
     api.get('/api/v1/config/frontend').then(res => {
       setRegistrationEnabled(res.data.data?.registration_enabled || false);
       setVersionInfo({
@@ -40,7 +49,7 @@ const Login: React.FC = () => {
     } catch (err: any) {
       const status = err.response?.status;
       const errMsg = err.response?.data?.error;
-      if (status === 403 && errMsg === 'account disabled') {
+      if (status === 403 && (errMsg === 'account disabled' || errMsg === 'user disabled')) {
         navigate('/register?pending=true');
       } else {
         messageApi.error(errMsg || '登录失败');
@@ -50,198 +59,171 @@ const Login: React.FC = () => {
     }
   };
 
-  return (
-    <div style={{
-      height: '100vh',
-      display: 'flex',
-      background: '#f5f7fa',
-    }}>
-      {contextHolder}
-      {/* 左侧品牌面板 */}
+  const extraContent = (
+    <>
+      <Title level={4} style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 400, marginTop: '-10px' }}>
+        Model Gate
+      </Title>
       <div style={{
-        flex: '0 0 45%',
-        background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)',
         display: 'flex',
-        flexDirection: 'column',
+        gap: '12px',
+        flexWrap: 'wrap',
         justifyContent: 'center',
-        alignItems: 'center',
-        padding: '60px',
-        position: 'relative',
-        overflow: 'hidden',
+        marginTop: '40px',
       }}>
-        {/* 装饰性光圈 */}
-        <div style={{
-          position: 'absolute',
-          top: '-20%',
-          left: '-10%',
-          width: '400px',
-          height: '400px',
-          background: 'radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%)',
-          borderRadius: '50%',
-        }} />
-        <div style={{
-          position: 'absolute',
-          bottom: '-15%',
-          right: '-5%',
-          width: '350px',
-          height: '350px',
-          background: 'radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%)',
-          borderRadius: '50%',
-        }} />
-
-        <div style={{ position: 'relative', zIndex: 1, textAlign: 'center', maxWidth: '400px' }}>
-          <img
-            src={logo}
-            alt="Model Gate"
-            style={{
-              width: '180px',
-              height: '60px',
-              marginBottom: '32px',
-              filter: 'drop-shadow(0 4px 20px rgba(139, 92, 246, 0.3))',
-            }}
-          />
-          <Title level={2} style={{ color: '#fff', marginBottom: '16px', fontWeight: 600 }}>
-            模界
-          </Title>
-          <Title level={4} style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 400, marginTop: 0 }}>
-            Model Gate
-          </Title>
-          <Paragraph style={{
-            color: 'rgba(255,255,255,0.5)',
-            fontSize: '15px',
-            lineHeight: '1.8',
-            marginTop: '32px',
+        {['OpenAI 兼容', 'Anthropic 兼容', 'SSO 支持', '多后端'].map(tag => (
+          <span key={tag} style={{
+            padding: '6px 16px',
+            borderRadius: '20px',
+            background: 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            color: 'rgba(255,255,255,0.6)',
+            fontSize: '13px',
+            backdropFilter: 'blur(10px)',
           }}>
-            企业级大模型统一接入网关
-            <br />
-            多后端负载均衡 · 灵活配额管控(模型/用户/时间) · 审计追踪
-            <br />
-            让 AI 触手可及，使能工作效率倍增新时代
-          </Paragraph>
-
-          {/* 特性标签 */}
-          <div style={{
-            display: 'flex',
-            gap: '12px',
-            flexWrap: 'wrap',
-            justifyContent: 'center',
-            marginTop: '40px',
-          }}>
-            {['OpenAI 兼容', 'Anthropic 兼容', 'SSO 支持', '多后端'].map(tag => (
-              <span key={tag} style={{
-                padding: '6px 16px',
-                borderRadius: '20px',
-                background: 'rgba(255,255,255,0.08)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                color: 'rgba(255,255,255,0.6)',
-                fontSize: '13px',
-                backdropFilter: 'blur(10px)',
-              }}>
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
+            {tag}
+          </span>
+        ))}
       </div>
+    </>
+  );
 
-      {/* 右侧登录面板 */}
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: '60px',
-        position: 'relative',
-      }}>
-        <div style={{ width: '100%', maxWidth: '380px' }}>
-          <div style={{ marginBottom: '40px' }}>
-            <Title level={3} style={{ marginBottom: '8px', color: '#1a1a2e' }}>
-              登录账号
-            </Title>
-            <Text type="secondary">请输入您的账号信息以继续</Text>
+  return (
+    <AuthLayout 
+      title="模界" 
+      description={
+        <>
+          企业级大模型统一接入网关
+          <br />
+          多后端负载均衡 · 灵活配额管控(模型/用户/时间) · 审计追踪
+          <br />
+          让 AI 触手可及，使能工作效率倍增新时代
+        </>
+      }
+      extraContent={extraContent}
+    >
+      {contextHolder}
+      <div style={{ maxWidth: '420px', width: '100%', margin: '0 auto' }}>
+        <div style={{ marginBottom: '40px' }}>
+          <Title level={2} style={{ color: '#1f2937', marginBottom: '8px', fontWeight: 600 }}>
+            欢迎回来
+          </Title>
+          <Text style={{ color: '#6b7280', fontSize: '15px' }}>
+            登录以继续使用模型网关服务
+          </Text>
+        </div>
+
+        {ssoConfig.enabled && (
+          <div style={{ marginBottom: '24px' }}>
+            <Button
+              type="primary"
+              size="large"
+              block
+              onClick={() => { window.location.href = ssoConfig.auth_url || '/api/v1/auth/sso/login'; }}
+              style={{
+                height: '48px',
+                background: '#4f46e5',
+                boxShadow: '0 4px 14px 0 rgba(79, 70, 229, 0.39)',
+                fontSize: '16px',
+                fontWeight: 500,
+              }}
+            >
+              使用 {ssoConfig.provider || 'SSO'} 登录
+            </Button>
+            <Divider style={{ margin: '24px 0', color: '#9ca3af', fontSize: '13px' }} plain>
+              或使用本地账号
+            </Divider>
           </div>
+        )}
 
-          <Form
-            onFinish={onFinish}
-            size="large"
-            layout="vertical"
+        <Form
+          name="login"
+          onFinish={onFinish}
+          layout="vertical"
+          size="large"
+          requiredMark={false}
+        >
+          <Form.Item
+            name="email"
+            rules={[
+              { required: true, message: '请输入邮箱' },
+              { type: 'email', message: '请输入有效的邮箱地址' }
+            ]}
           >
-            <Form.Item
-              name="email"
-              label="邮箱"
-              rules={[{ required: true, message: '请输入邮箱' }]}
+            <Input
+              prefix={<UserOutlined style={{ color: '#9ca3af' }} />}
+              placeholder="name@company.com"
+              style={{
+                height: '48px',
+                background: '#f9fafb',
+                borderColor: '#e5e7eb',
+              }}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            rules={[{ required: true, message: '请输入密码' }]}
+          >
+            <Input.Password
+              prefix={<LockOutlined style={{ color: '#9ca3af' }} />}
+              placeholder="密码"
+              style={{
+                height: '48px',
+                background: '#f9fafb',
+                borderColor: '#e5e7eb',
+              }}
+            />
+          </Form.Item>
+
+          <Form.Item style={{ marginTop: '32px', marginBottom: '16px' }}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              block
+              loading={loading}
+              style={{
+                height: '48px',
+                background: ssoConfig.enabled ? '#fff' : '#4f46e5',
+                color: ssoConfig.enabled ? '#1f2937' : '#fff',
+                borderColor: ssoConfig.enabled ? '#d1d5db' : '#4f46e5',
+                boxShadow: ssoConfig.enabled ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : '0 4px 14px 0 rgba(79, 70, 229, 0.39)',
+                fontSize: '16px',
+                fontWeight: 500,
+              }}
             >
-              <Input
-                prefix={<UserOutlined style={{ color: '#bfbfbf' }} />}
-                placeholder="请输入邮箱地址"
-                style={{ borderRadius: '8px', height: '44px' }}
-              />
-            </Form.Item>
-            <Form.Item
-              name="password"
-              label="密码"
-              rules={[{ required: true, message: '请输入密码' }]}
-            >
-              <Input.Password
-                prefix={<LockOutlined style={{ color: '#bfbfbf' }} />}
-                placeholder="请输入密码"
-                style={{ borderRadius: '8px', height: '44px' }}
-              />
-            </Form.Item>
-            <Form.Item style={{ marginTop: '32px' }}>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={loading}
-                block
-                style={{
-                  height: '44px',
-                  borderRadius: '8px',
-                  fontWeight: 500,
-                  fontSize: '15px',
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  border: 'none',
-                  boxShadow: '0 4px 15px rgba(102, 126, 234, 0.35)',
-                }}
-              >
-                登 录
-              </Button>
-            </Form.Item>
-          </Form>
+              登 录
+            </Button>
+          </Form.Item>
 
           {registrationEnabled && (
-            <div style={{
-              textAlign: 'center',
-              marginTop: '24px',
-              padding: '16px',
-              borderRadius: '8px',
-              background: '#f8f9ff',
-            }}>
-              <Text type="secondary">还没有账号？</Text>
-              <Link to="/register" style={{ marginLeft: '4px', fontWeight: 500 }}>
-                立即注册
-              </Link>
+            <div style={{ textAlign: 'center' }}>
+              <Text style={{ color: '#6b7280' }}>
+                还没有账号？ <Link to="/register" style={{ color: '#4f46e5', fontWeight: 500 }}>立即申请</Link>
+              </Text>
             </div>
           )}
-        </div>
+        </Form>
 
-        {/* 底部版权 */}
-        <div style={{
-          position: 'absolute',
-          bottom: '24px',
-          color: '#bfbfbf',
-          fontSize: '12px',
-          textAlign: 'center',
-          width: '100%',
-        }}>
-          <div>© {new Date().getFullYear()} 模界(Model Gate) · 企业大模型统一接入网关</div>
-          <div style={{ marginTop: '4px', opacity: 0.8, fontSize: '11px' }}>
-            版本: {versionInfo?.version || 'N/A'} ({versionInfo?.commit || 'N/A'}) | 编译时间: {versionInfo?.build_time || 'N/A'}
+        {versionInfo.version && (
+          <div style={{
+            marginTop: '60px',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            color: '#9ca3af',
+            fontSize: '12px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '16px' }}>
+              <span title="Version"><GlobalOutlined style={{ marginRight: 4 }} />{versionInfo.version}</span>
+              {versionInfo.commit && <span title="Commit"><CodeOutlined style={{ marginRight: 4 }} />{versionInfo.commit.substring(0, 7)}</span>}
+            </div>
+            {versionInfo.build_time && <span title="Build Time"><ClockCircleOutlined style={{ marginRight: 4 }} />{versionInfo.build_time}</span>}
           </div>
-        </div>
+        )}
       </div>
-    </div>
+    </AuthLayout>
   );
 };
 

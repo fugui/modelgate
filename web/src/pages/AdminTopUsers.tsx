@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Empty, message } from 'antd';
 import api from '../api';
+import TopList from '../components/dashboard/TopList';
 
 interface TopUser7d {
   user_id: string;
@@ -171,22 +172,23 @@ const AdminTopUsers: React.FC = () => {
   };
 
   return (
-    <Card title="最近7天 TOP 20 用户">
+    <>
       {data.length > 0 ? (
-        <Table
+        <TopList
+          title="最近7天 TOP 20 用户"
           dataSource={data}
-          columns={topUser7dColumns}
+          columns={topUser7dColumns as any}
           rowKey="user_id"
-          pagination={false}
-          size="small"
           scroll={{ x: 1500 }}
           loading={loading}
           summary={renderSummary7d}
         />
       ) : (
-        <Empty description={loading ? '加载中...' : '暂无数据'} style={{ padding: '60px 0' }} />
+        <Card title="最近7天 TOP 20 用户">
+          <Empty description={loading ? '加载中...' : '暂无数据'} style={{ padding: '60px 0' }} />
+        </Card>
       )}
-    </Card>
+    </>
   );
 };
 
