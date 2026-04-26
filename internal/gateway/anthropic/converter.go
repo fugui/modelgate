@@ -21,7 +21,22 @@ func CacheThoughtSignature(toolCallID string, extraContent interface{}) {
 
 // GetThoughtSignature 获取缓存的 thought_signature
 func GetThoughtSignature(toolCallID string) (interface{}, bool) {
-	return thoughtSignatureCache.Load(toolCallID)
+	if val, ok := thoughtSignatureCache.Load(toolCallID); ok {
+		return val, true
+	}
+	// 尝试去掉 toolu_ 前缀（如果存在）
+	if strings.HasPrefix(toolCallID, "toolu_") {
+		if val, ok := thoughtSignatureCache.Load(strings.TrimPrefix(toolCallID, "toolu_")); ok {
+			return val, true
+		}
+	}
+	// 尝试加上 toolu_ 前缀（如果不存在）
+	if !strings.HasPrefix(toolCallID, "toolu_") {
+		if val, ok := thoughtSignatureCache.Load("toolu_" + toolCallID); ok {
+			return val, true
+		}
+	}
+	return nil, false
 }
 
 // ToolUse 表示 Anthropic 的 tool_use 块
@@ -254,6 +269,16 @@ func buildOpenAIMessages(role string, parsed parsedAnthropicContent) []map[strin
 				// 注入缓存的 Gemini thought_signature
 				if extra, ok := GetThoughtSignature(toolUse.ID); ok {
 					tc["extra_content"] = extra
+					// 同时也注入到 function 内部，增加对某些 Gemini 适配层的兼容性
+					if extraMap, ok := extra.(map[string]interface{}); ok {
+						if google, ok := extraMap["google"].(map[string]interface{}); ok {
+							if sig, ok := google["thought_signature"].(string); ok {
+								if fnMap, ok := tc["function"].(map[string]interface{}); ok {
+									fnMap["thought_signature"] = sig
+								}
+							}
+						}
+					}
 				}
 				toolCalls = append(toolCalls, tc)
 			}
@@ -420,11 +445,16 @@ func ConvertFromOpenAI(body []byte, originalReq *MessagesRequest) ([]byte, error
 			if toolCall, ok := tc.(map[string]interface{}); ok {
 				// 提取 tool call 信息
 				toolID, _ := toolCall["id"].(string)
+				cacheID := toolID
+				if !strings.HasPrefix(cacheID, "toolu_") {
+					cacheID = "toolu_" + cacheID
+				}
 
 				// 缓存 Gemini 的 extra_content（含 thought_signature）
 				if extraContent, ok := toolCall["extra_content"]; ok {
-					CacheThoughtSignature(toolID, extraContent)
+					CacheThoughtSignature(cacheID, extraContent)
 				}
+
 				// 提取 function 信息
 				if function, ok := toolCall["function"].(map[string]interface{}); ok {
 					name, _ := function["name"].(string)
@@ -442,7 +472,7 @@ func ConvertFromOpenAI(body []byte, originalReq *MessagesRequest) ([]byte, error
 					// 创建 tool_use block
 					toolUseBlock := Block{
 						Type: "tool_use",
-						ID:   toolID,
+						ID:   cacheID,
 						Name: name,
 					}
 
@@ -523,10 +553,19 @@ func (p *StreamParser) ParseLine(line string) (string, error) {
 	p.handleMessageStart(msgID)
 	p.handleThinkingDelta(delta)
 	p.handleTextDelta(delta)
+	p.handleExtraContent(delta)
 	p.handleToolCalls(delta)
 	p.handleFinishReason(choice)
 
 	return p.sb.String(), nil
+}
+
+func (p *StreamParser) handleExtraContent(delta map[string]interface{}) {
+	if extraContent, ok := delta["extra_content"]; ok {
+		if lastID, ok := p.state["last_tool_id"].(string); ok && lastID != "" {
+			CacheThoughtSignature(lastID, extraContent)
+		}
+	}
 }
 
 func (p *StreamParser) getBlockIndex(key string) int {
@@ -676,6 +715,7 @@ func (p *StreamParser) handleToolCalls(delta map[string]interface{}) {
 						} else if !strings.HasPrefix(toolID, "toolu_") {
 							toolID = "toolu_" + toolID
 						}
+						p.state["last_tool_id"] = toolID
 						// 缓存 Gemini 的 extra_content（含 thought_signature）
 						if extraContent, ok := tcMap["extra_content"]; ok {
 							CacheThoughtSignature(toolID, extraContent)

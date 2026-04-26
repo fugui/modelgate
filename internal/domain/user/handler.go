@@ -449,6 +449,10 @@ func (h *Handler) GetAccessLogs(c *gin.Context) {
 
 	if detailed {
 		// 返回完整信息（包含请求/响应体和头信息）
+		// 在返回前也对 UserAgent 进行脱敏/美化处理
+		for i := range logs {
+			logs[i].UserAgent = utils.FormatUserAgentForDisplay(logs[i].UserAgent, logs[i].RequestHeaders["Referer"])
+		}
 		c.JSON(http.StatusOK, gin.H{"data": logs})
 		return
 	}
@@ -501,7 +505,11 @@ func (h *Handler) GetAllAccessLogs(c *gin.Context) {
 	logs := h.usageService.GetAllRecentAccess(limit)
 
 	if detailed {
-		// 返回完整信息
+		// 返回完整信息（包含请求/响应体和头信息）
+		// 在返回前也对 UserAgent 进行脱敏/美化处理
+		for i := range logs {
+			logs[i].UserAgent = utils.FormatUserAgentForDisplay(logs[i].UserAgent, logs[i].RequestHeaders["Referer"])
+		}
 		c.JSON(http.StatusOK, gin.H{"data": logs})
 		return
 	}

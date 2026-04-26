@@ -122,15 +122,31 @@ func FormatUserAgentForDisplay(userAgent string, referer string) string {
 
 	// 浏览器
 	if strings.Contains(uaLower, "edg/") {
+		re := regexp.MustCompile(`(?i)edg/([0-9a-zA-Z.-]+)`)
+		if m := re.FindStringSubmatch(ua); len(m) > 1 {
+			return "Edge " + m[1]
+		}
 		return "Edge"
 	}
 	if strings.Contains(uaLower, "chrome/") && !strings.Contains(uaLower, "edg/") {
+		re := regexp.MustCompile(`(?i)chrome/([0-9a-zA-Z.-]+)`)
+		if m := re.FindStringSubmatch(ua); len(m) > 1 {
+			return "Chrome " + m[1]
+		}
 		return "Chrome"
 	}
 	if strings.Contains(uaLower, "firefox/") {
+		re := regexp.MustCompile(`(?i)firefox/([0-9a-zA-Z.-]+)`)
+		if m := re.FindStringSubmatch(ua); len(m) > 1 {
+			return "Firefox " + m[1]
+		}
 		return "Firefox"
 	}
 	if strings.Contains(uaLower, "safari/") && !strings.Contains(uaLower, "chrome/") {
+		re := regexp.MustCompile(`(?i)version/([0-9a-zA-Z.-]+)`)
+		if m := re.FindStringSubmatch(ua); len(m) > 1 {
+			return "Safari " + m[1]
+		}
 		return "Safari"
 	}
 	if strings.Contains(uaLower, "mozilla/") {
