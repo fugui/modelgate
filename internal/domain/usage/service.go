@@ -33,6 +33,41 @@ type AccessLog struct {
 	DurationMs      int64             `json:"duration_ms"`      // 请求持续时间(毫秒)
 }
 
+// SimpleAccessLog 简化版的访问日志（用于列表显示）
+type SimpleAccessLog struct {
+	UserID        string    `json:"user_id"`
+	Method        string    `json:"method"`
+	Path          string    `json:"path"`
+	ClientIP      string    `json:"client_ip"`
+	UserAgent     string    `json:"user_agent"`
+	ModelName     string    `json:"model_name"`
+	Timestamp     time.Time `json:"timestamp"`
+	StatusCode    int       `json:"status_code"`
+	RequestBytes  int64     `json:"request_bytes"`
+	ResponseBytes int64     `json:"response_bytes"`
+}
+
+// Beautify 对 User-Agent 进行脱敏/美化处理
+func (log *AccessLog) Beautify() {
+	log.UserAgent = utils.FormatUserAgentForDisplay(log.UserAgent, log.RequestHeaders["Referer"])
+}
+
+// ToSimple 转换为简化版访问日志
+func (log *AccessLog) ToSimple() SimpleAccessLog {
+	return SimpleAccessLog{
+		UserID:        log.UserID.String(),
+		Method:        log.Method,
+		Path:          log.Path,
+		ClientIP:      log.ClientIP,
+		UserAgent:     utils.FormatUserAgentForDisplay(log.UserAgent, log.RequestHeaders["Referer"]),
+		ModelName:     log.ModelName,
+		Timestamp:     log.Timestamp,
+		StatusCode:    log.StatusCode,
+		RequestBytes:  log.RequestBytes,
+		ResponseBytes: log.ResponseBytes,
+	}
+}
+
 // Service 使用记录服务
 type Service struct {
 	logger     *logger.UserLogger

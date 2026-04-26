@@ -19,7 +19,6 @@ import (
 	"modelgate/internal/infra/auth"
 	"modelgate/internal/infra/middleware"
 	"modelgate/internal/repository"
-	"modelgate/internal/infra/utils"
 	"modelgate/internal/version"
 )
 
@@ -451,40 +450,16 @@ func (h *Handler) GetAccessLogs(c *gin.Context) {
 		// 返回完整信息（包含请求/响应体和头信息）
 		// 在返回前也对 UserAgent 进行脱敏/美化处理
 		for i := range logs {
-			logs[i].UserAgent = utils.FormatUserAgentForDisplay(logs[i].UserAgent, logs[i].RequestHeaders["Referer"])
+			logs[i].Beautify()
 		}
 		c.JSON(http.StatusOK, gin.H{"data": logs})
 		return
 	}
 
 	// 默认返回简化版本（不包含请求/响应体和头信息，保持兼容性）
-	type SimpleAccessLog struct {
-		UserID        string    `json:"user_id"`
-		Method        string    `json:"method"`
-		Path          string    `json:"path"`
-		ClientIP      string    `json:"client_ip"`
-		UserAgent     string    `json:"user_agent"`
-		ModelName     string    `json:"model_name"`
-		Timestamp     time.Time `json:"timestamp"`
-		StatusCode    int       `json:"status_code"`
-		RequestBytes  int64     `json:"request_bytes"`
-		ResponseBytes int64     `json:"response_bytes"`
-	}
-
-	simpleLogs := make([]SimpleAccessLog, 0, len(logs))
+	simpleLogs := make([]usage.SimpleAccessLog, 0, len(logs))
 	for _, log := range logs {
-		simpleLogs = append(simpleLogs, SimpleAccessLog{
-			UserID:        log.UserID.String(),
-			Method:        log.Method,
-			Path:          log.Path,
-			ClientIP:      log.ClientIP,
-			UserAgent:     utils.FormatUserAgentForDisplay(log.UserAgent, log.RequestHeaders["Referer"]),
-			ModelName:     log.ModelName,
-			Timestamp:     log.Timestamp,
-			StatusCode:    log.StatusCode,
-			RequestBytes:  log.RequestBytes,
-			ResponseBytes: log.ResponseBytes,
-		})
+		simpleLogs = append(simpleLogs, log.ToSimple())
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": simpleLogs})
@@ -508,40 +483,16 @@ func (h *Handler) GetAllAccessLogs(c *gin.Context) {
 		// 返回完整信息（包含请求/响应体和头信息）
 		// 在返回前也对 UserAgent 进行脱敏/美化处理
 		for i := range logs {
-			logs[i].UserAgent = utils.FormatUserAgentForDisplay(logs[i].UserAgent, logs[i].RequestHeaders["Referer"])
+			logs[i].Beautify()
 		}
 		c.JSON(http.StatusOK, gin.H{"data": logs})
 		return
 	}
 
 	// 默认返回简化版本
-	type SimpleAccessLog struct {
-		UserID        string    `json:"user_id"`
-		Method        string    `json:"method"`
-		Path          string    `json:"path"`
-		ClientIP      string    `json:"client_ip"`
-		UserAgent     string    `json:"user_agent"`
-		ModelName     string    `json:"model_name"`
-		Timestamp     time.Time `json:"timestamp"`
-		StatusCode    int       `json:"status_code"`
-		RequestBytes  int64     `json:"request_bytes"`
-		ResponseBytes int64     `json:"response_bytes"`
-	}
-
-	simpleLogs := make([]SimpleAccessLog, 0, len(logs))
+	simpleLogs := make([]usage.SimpleAccessLog, 0, len(logs))
 	for _, log := range logs {
-		simpleLogs = append(simpleLogs, SimpleAccessLog{
-			UserID:        log.UserID.String(),
-			Method:        log.Method,
-			Path:          log.Path,
-			ClientIP:      log.ClientIP,
-			UserAgent:     utils.FormatUserAgentForDisplay(log.UserAgent, log.RequestHeaders["Referer"]),
-			ModelName:     log.ModelName,
-			Timestamp:     log.Timestamp,
-			StatusCode:    log.StatusCode,
-			RequestBytes:  log.RequestBytes,
-			ResponseBytes: log.ResponseBytes,
-		})
+		simpleLogs = append(simpleLogs, log.ToSimple())
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": simpleLogs})
