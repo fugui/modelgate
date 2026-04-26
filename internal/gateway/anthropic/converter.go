@@ -58,6 +58,37 @@ type ToolResult struct {
 
 // ConvertToOpenAI 将 Anthropic 请求转换为 OpenAI 格式
 func ConvertToOpenAI(req *MessagesRequest) ([]byte, error) {
+	messages := convertMessagesToOpenAI(req)
+
+	openaiReq := map[string]interface{}{
+		"model":    req.Model,
+		"messages": messages,
+		"stream":   req.Stream,
+	}
+
+	// 可选参数
+	if req.MaxTokens > 0 {
+		openaiReq["max_tokens"] = req.MaxTokens
+	}
+	if req.Temperature > 0 {
+		openaiReq["temperature"] = req.Temperature
+	}
+	if req.TopP > 0 {
+		openaiReq["top_p"] = req.TopP
+	}
+	if len(req.StopSequences) > 0 {
+		openaiReq["stop"] = req.StopSequences
+	}
+
+	// 转换 tools
+	if len(req.Tools) > 0 {
+		openaiReq["tools"] = convertToolsToOpenAI(req.Tools)
+	}
+
+	return json.Marshal(openaiReq)
+}
+
+func convertMessagesToOpenAI(req *MessagesRequest) []map[string]interface{} {
 	var messages []map[string]interface{}
 
 	// 添加 system 消息（如果有）
@@ -90,44 +121,22 @@ func ConvertToOpenAI(req *MessagesRequest) ([]byte, error) {
 			})
 		}
 	}
+	return messages
+}
 
-	openaiReq := map[string]interface{}{
-		"model":    req.Model,
-		"messages": messages,
-		"stream":   req.Stream,
+func convertToolsToOpenAI(tools []Tool) []map[string]interface{} {
+	var openaiTools []map[string]interface{}
+	for _, tool := range tools {
+		openaiTools = append(openaiTools, map[string]interface{}{
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":        tool.Name,
+				"description": tool.Description,
+				"parameters":  tool.InputSchema,
+			},
+		})
 	}
-
-	// 可选参数
-	if req.MaxTokens > 0 {
-		openaiReq["max_tokens"] = req.MaxTokens
-	}
-	if req.Temperature > 0 {
-		openaiReq["temperature"] = req.Temperature
-	}
-	if req.TopP > 0 {
-		openaiReq["top_p"] = req.TopP
-	}
-	if len(req.StopSequences) > 0 {
-		openaiReq["stop"] = req.StopSequences
-	}
-
-	// 转换 tools
-	if len(req.Tools) > 0 {
-		var openaiTools []map[string]interface{}
-		for _, tool := range req.Tools {
-			openaiTools = append(openaiTools, map[string]interface{}{
-				"type": "function",
-				"function": map[string]interface{}{
-					"name":        tool.Name,
-					"description": tool.Description,
-					"parameters":  tool.InputSchema,
-				},
-			})
-		}
-		openaiReq["tools"] = openaiTools
-	}
-
-	return json.Marshal(openaiReq)
+	return openaiTools
 }
 
 func parseSystemMessage(system interface{}) []map[string]interface{} {
@@ -375,7 +384,6 @@ func ConvertFromOpenAI(body []byte, originalReq *MessagesRequest) ([]byte, error
 		return nil, fmt.Errorf("failed to parse OpenAI response: %w", err)
 	}
 
-	// 提取 content
 	choices, ok := openaiResp["choices"].([]interface{})
 	if !ok || len(choices) == 0 {
 		return nil, fmt.Errorf("invalid choices in OpenAI response")
@@ -390,19 +398,44 @@ func ConvertFromOpenAI(body []byte, originalReq *MessagesRequest) ([]byte, error
 	content, _ := message["content"].(string)
 	reasoning, _ := message["reasoning_content"].(string)
 
-	// 提取 usage
-	var inputTokens, outputTokens int
-	if usage, ok := openaiResp["usage"].(map[string]interface{}); ok {
-		if pt, ok := usage["prompt_tokens"].(float64); ok {
-			inputTokens = int(pt)
-		}
-		if ct, ok := usage["completion_tokens"].(float64); ok {
-			outputTokens = int(ct)
-		}
+	// 构建 content blocks
+	contentBlocks := buildAnthropicContentBlocks(content, reasoning, message)
+
+	anthropicResp := MessagesResponse{
+		ID:      extractOpenAIResponseID(openaiResp),
+		Type:    "message",
+		Role:    "assistant",
+		Model:   originalReq.Model,
+		Content: contentBlocks,
+		StopReason: extractStopReason(choice, message),
+		Usage:   extractUsage(openaiResp),
 	}
 
-	// 提取 finish_reason
-	var stopReason *string
+	return json.Marshal(anthropicResp)
+}
+
+func extractOpenAIResponseID(resp map[string]interface{}) string {
+	id, _ := resp["id"].(string)
+	if id == "" {
+		return generateID()
+	}
+	return id
+}
+
+func extractUsage(resp map[string]interface{}) Usage {
+	var u Usage
+	if usage, ok := resp["usage"].(map[string]interface{}); ok {
+		if pt, ok := usage["prompt_tokens"].(float64); ok {
+			u.InputTokens = int(pt)
+		}
+		if ct, ok := usage["completion_tokens"].(float64); ok {
+			u.OutputTokens = int(ct)
+		}
+	}
+	return u
+}
+
+func extractStopReason(choice map[string]interface{}, message map[string]interface{}) *string {
 	if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
 		// Gemini 在有 tool_calls 时仍返回 "stop"，需要修正
 		if fr == "stop" {
@@ -411,106 +444,69 @@ func ConvertFromOpenAI(body []byte, originalReq *MessagesRequest) ([]byte, error
 			}
 		}
 		anthropicStop := convertStopReason(fr)
-		stopReason = &anthropicStop
+		return &anthropicStop
 	}
+	return nil
+}
 
-	// 生成 ID
-	id, _ := openaiResp["id"].(string)
-	if id == "" {
-		id = generateID()
-	}
+func buildAnthropicContentBlocks(content, reasoning string, message map[string]interface{}) []Block {
+	var blocks []Block
 
-	// 构建 content blocks
-	var contentBlocks []Block
-
-	// 添加推理内容（如果有）
 	if reasoning != "" {
-		contentBlocks = append(contentBlocks, Block{
-			Type:     "thinking",
-			Thinking: reasoning,
-		})
+		blocks = append(blocks, Block{Type: "thinking", Thinking: reasoning})
 	}
 
-	// 添加文本内容（如果有）
 	if content != "" {
-		contentBlocks = append(contentBlocks, Block{
-			Type: "text",
-			Text: content,
-		})
+		blocks = append(blocks, Block{Type: "text", Text: content})
 	}
 
-	// 提取 tool_calls 并转换为 tool_use blocks
 	if toolCalls, ok := message["tool_calls"].([]interface{}); ok && len(toolCalls) > 0 {
-		for _, tc := range toolCalls {
-			if toolCall, ok := tc.(map[string]interface{}); ok {
-				// 提取 tool call 信息
-				toolID, _ := toolCall["id"].(string)
-				cacheID := toolID
-				if !strings.HasPrefix(cacheID, "toolu_") {
-					cacheID = "toolu_" + cacheID
+		blocks = append(blocks, convertToolCallsToBlocks(toolCalls)...)
+	}
+
+	if len(blocks) == 0 {
+		blocks = append(blocks, Block{Type: "text", Text: ""})
+	}
+	return blocks
+}
+
+func convertToolCallsToBlocks(toolCalls []interface{}) []Block {
+	var blocks []Block
+	for _, tc := range toolCalls {
+		if toolCall, ok := tc.(map[string]interface{}); ok {
+			toolID, _ := toolCall["id"].(string)
+			cacheID := toolID
+			if !strings.HasPrefix(cacheID, "toolu_") {
+				cacheID = "toolu_" + cacheID
+			}
+
+			if extraContent, ok := toolCall["extra_content"]; ok {
+				CacheThoughtSignature(cacheID, extraContent)
+			}
+
+			if function, ok := toolCall["function"].(map[string]interface{}); ok {
+				name, _ := function["name"].(string)
+				arguments, _ := function["arguments"].(string)
+
+				var inputMap map[string]interface{}
+				if arguments != "" {
+					_ = json.Unmarshal([]byte(arguments), &inputMap)
+				}
+				if inputMap == nil {
+					inputMap = make(map[string]interface{})
 				}
 
-				// 缓存 Gemini 的 extra_content（含 thought_signature）
-				if extraContent, ok := toolCall["extra_content"]; ok {
-					CacheThoughtSignature(cacheID, extraContent)
-				}
-
-				// 提取 function 信息
-				if function, ok := toolCall["function"].(map[string]interface{}); ok {
-					name, _ := function["name"].(string)
-					arguments, _ := function["arguments"].(string)
-
-					// 解析 arguments JSON
-					var inputMap map[string]interface{}
-					if arguments != "" {
-						if err := json.Unmarshal([]byte(arguments), &inputMap); err != nil {
-							// 解析失败时使用空对象
-							inputMap = make(map[string]interface{})
-						}
-					}
-
-					// 创建 tool_use block
-					toolUseBlock := Block{
-						Type: "tool_use",
-						ID:   cacheID,
-						Name: name,
-					}
-
-					// 将 input 序列化为 JSON
-					if inputData, err := json.Marshal(inputMap); err == nil {
-						toolUseBlock.Input = inputData
-					} else {
-						toolUseBlock.Input = []byte("{}")
-					}
-
-					contentBlocks = append(contentBlocks, toolUseBlock)
-				}
+				inputData, _ := json.Marshal(inputMap)
+				blocks = append(blocks, Block{
+					Type:  "tool_use",
+					ID:    cacheID,
+					Name:  name,
+					Input: inputData,
+				})
 			}
 		}
 	}
-
-	// 如果没有 content blocks，添加一个空的 text block
-	if len(contentBlocks) == 0 {
-		contentBlocks = append(contentBlocks, Block{
-			Type: "text",
-			Text: "",
-		})
-	}
-
-	anthropicResp := MessagesResponse{
-		ID:         id,
-		Type:       "message",
-		Role:       "assistant",
-		Model:      originalReq.Model,
-		Content:    contentBlocks,
-		StopReason: stopReason,
-		Usage: Usage{
-			InputTokens:  inputTokens,
-			OutputTokens: outputTokens,
-		},
-	}
-
-	return json.Marshal(anthropicResp)
+	return blocks
 }
 
 // ConvertStreamLine 转换流式响应的每一行

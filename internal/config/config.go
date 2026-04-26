@@ -5,15 +5,18 @@ import (
 	"os"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"gopkg.in/yaml.v3"
 )
 
+var validate = validator.New()
+
 type Config struct {
-	Server      ServerConfig      `yaml:"server"`
-	Database    DatabaseConfig    `yaml:"database"`
-	JWT         JWTConfig         `yaml:"jwt"`
-	Models      []ModelConfig     `yaml:"models"`
-	Policies    []PolicyConfig    `yaml:"quota_policies"`
+	Server      ServerConfig      `yaml:"server" validate:"required"`
+	Database    DatabaseConfig    `yaml:"database" validate:"required"`
+	JWT         JWTConfig         `yaml:"jwt" validate:"required"`
+	Models      []ModelConfig     `yaml:"models" validate:"dive"`
+	Policies    []PolicyConfig    `yaml:"quota_policies" validate:"dive"`
 	Admin       AdminConfig       `yaml:"admin"`
 	Logs        LogConfig         `yaml:"logs"`
 	Frontend    FrontendConfig    `yaml:"frontend"`
@@ -22,8 +25,8 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port            int           `yaml:"port"`
-	Mode            string        `yaml:"mode"`
+	Port            int           `yaml:"port" validate:"required,min=1,max=65535"`
+	Mode            string        `yaml:"mode" validate:"oneof=debug release test"`
 	ReadTimeout     time.Duration `yaml:"read_timeout"`
 	WriteTimeout    time.Duration `yaml:"write_timeout"`
 	IdleTimeout     time.Duration `yaml:"idle_timeout"`
@@ -32,89 +35,85 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Path string `yaml:"path"`
+	Path string `yaml:"path" validate:"required"`
 }
 
 type JWTConfig struct {
-	Secret      string `yaml:"secret"`
-	ExpireHours int    `yaml:"expire_hours"`
+	Secret      string `yaml:"secret" validate:"required,min=8"`
+	ExpireHours int    `yaml:"expire_hours" validate:"required,min=1"`
 }
 
 type LogConfig struct {
 	Path             string `yaml:"path"`
-	RetentionDays    int    `yaml:"retention_days"`
+	RetentionDays    int    `yaml:"retention_days" validate:"min=0"`
 	LogPayloads      bool   `yaml:"log_payloads"`
-	DebugRawPayloads string `yaml:"debug_raw_payloads"` // "none", "error", or "full"
+	DebugRawPayloads string `yaml:"debug_raw_payloads" validate:"oneof=none error full"`
 }
 
 type ModelConfig struct {
-	ID            string                 `yaml:"id"`
-	Name          string                 `yaml:"name"`
+	ID            string                 `yaml:"id" validate:"required"`
+	Name          string                 `yaml:"name" validate:"required"`
 	Description   string                 `yaml:"description"`
 	Enabled       bool                   `yaml:"enabled"`
-	ContextWindow int                    `yaml:"context_window"` // Max allowed tokens (input + output)
+	ContextWindow int                    `yaml:"context_window" validate:"min=0"`
 	ModelParams   map[string]interface{} `yaml:"model_params"`
-	Backends      []BackendConfig        `yaml:"backends"`
+	Backends      []BackendConfig        `yaml:"backends" validate:"dive"`
 }
 
 type BackendConfig struct {
-	ID        string `yaml:"id"`
-	Name      string `yaml:"name"`
-	BaseURL   string `yaml:"base_url"`
-	APIKey    string `yaml:"api_key"`
-	ModelName string `yaml:"model_name"`
-	Weight    int    `yaml:"weight"`
+	ID        string `yaml:"id" validate:"required"`
+	Name      string `yaml:"name" validate:"required"`
+	BaseURL   string `yaml:"base_url" validate:"required,url"`
+	APIKey    string `yaml:"api_key" validate:"required"`
+	ModelName string `yaml:"model_name" validate:"required"`
+	Weight    int    `yaml:"weight" validate:"min=0"`
 	Region    string `yaml:"region"`
 	Enabled   bool   `yaml:"enabled"`
 }
 
 type TimeRangeConfig struct {
-	Start string `yaml:"start"` // "HH:MM" 格式, e.g. "00:00"
-	End   string `yaml:"end"`   // "HH:MM" 格式, e.g. "10:00"
+	Start string `yaml:"start" validate:"omitempty,datetime=15:04"` // "HH:MM" 格式
+	End   string `yaml:"end" validate:"omitempty,datetime=15:04"`   // "HH:MM" 格式
 }
 
 type PolicyConfig struct {
-	Name                string            `yaml:"name"`
-	RateLimit           int               `yaml:"rate_limit"`
-	RateLimitWindow     int               `yaml:"rate_limit_window"`
-	RequestQuotaDaily   int               `yaml:"request_quota_daily"`
-	AvailableTimeRanges []TimeRangeConfig `yaml:"available_time_ranges"`
+	Name                string            `yaml:"name" validate:"required"`
+	RateLimit           int               `yaml:"rate_limit" validate:"min=0"`
+	RateLimitWindow     int               `yaml:"rate_limit_window" validate:"min=0"`
+	RequestQuotaDaily   int               `yaml:"request_quota_daily" validate:"min=0"`
+	AvailableTimeRanges []TimeRangeConfig `yaml:"available_time_ranges" validate:"dive"`
 	Models              []string          `yaml:"models"`
 	Description         string            `yaml:"description"`
 	DefaultModel        string            `yaml:"default_model"`
 }
 
 type AdminConfig struct {
-	DefaultEmail    string `yaml:"default_email"`
-	DefaultPassword string `yaml:"default_password"`
+	DefaultEmail    string `yaml:"default_email" validate:"omitempty,email"`
+	DefaultPassword string `yaml:"default_password" validate:"omitempty,min=6"`
 }
 
 type FrontendConfig struct {
-	FeedbackURL         string `yaml:"feedback_url" json:"feedback_url"`
-	DevManualURL        string `yaml:"dev_manual_url" json:"dev_manual_url"`
+	FeedbackURL         string `yaml:"feedback_url" json:"feedback_url" validate:"omitempty,url"`
+	DevManualURL        string `yaml:"dev_manual_url" json:"dev_manual_url" validate:"omitempty,url"`
 	RegistrationEnabled bool   `yaml:"registration_enabled" json:"registration_enabled"`
 }
 
-// SSOConfig 企业 SSO 配置
 type SSOConfig struct {
 	Enabled      bool   `yaml:"enabled"`
-	Provider     string `yaml:"provider"`
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
-	IssuerURL    string `yaml:"issuer_url"`
+	Provider     string `yaml:"provider" validate:"required_if=Enabled true"`
+	ClientID     string `yaml:"client_id" validate:"required_if=Enabled true"`
+	ClientSecret string `yaml:"client_secret" validate:"required_if=Enabled true"`
+	IssuerURL    string `yaml:"issuer_url" validate:"required_if=Enabled true"`
 	EmailClaim   string `yaml:"email_claim"`
 }
 
-// GetAuthorizeURL 获取授权端点
 func (s SSOConfig) GetAuthorizeURL() string {
 	if s.Provider == "azure" {
 		return s.IssuerURL + "/oauth2/v2.0/authorize"
 	}
-	// 通用 OIDC
 	return s.IssuerURL + "/authorize"
 }
 
-// GetTokenURL 获取 Token 端点
 func (s SSOConfig) GetTokenURL() string {
 	if s.Provider == "azure" {
 		return s.IssuerURL + "/oauth2/v2.0/token"
@@ -123,8 +122,13 @@ func (s SSOConfig) GetTokenURL() string {
 }
 
 type ConcurrencyConfig struct {
-	GlobalLimit int `yaml:"global_limit"` // 全局并发限制，0 表示不限制
-	UserLimit   int `yaml:"user_limit"`   // 每个用户并发限制，0 表示不限制
+	GlobalLimit int `yaml:"global_limit" validate:"min=0"`
+	UserLimit   int `yaml:"user_limit" validate:"min=0"`
+}
+
+// Validate 校验配置
+func (c *Config) Validate() error {
+	return validate.Struct(c)
 }
 
 func Load(path string) (*Config, error) {
@@ -139,6 +143,17 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Set defaults
+	setDefaults(&cfg)
+
+	// Validate
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+func setDefaults(cfg *Config) {
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 8080
 	}
@@ -175,11 +190,10 @@ func Load(path string) (*Config, error) {
 	if cfg.Logs.RetentionDays == 0 {
 		cfg.Logs.RetentionDays = 7
 	}
-
-	// SSO 默认值
+	if cfg.Logs.DebugRawPayloads == "" {
+		cfg.Logs.DebugRawPayloads = "none"
+	}
 	if cfg.SSO.Enabled && cfg.SSO.EmailClaim == "" {
 		cfg.SSO.EmailClaim = "email"
 	}
-
-	return &cfg, nil
 }
