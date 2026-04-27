@@ -56,6 +56,7 @@ func (s *Service) GenerateKey(userID uuid.UUID, req *entity.APIKeyCreateRequest)
 		UserID:    userID,
 		Name:      req.Name,
 		KeyHash:   string(keyHash),
+		PlainKey:  plainKey,
 		KeyPrefix: plainKey[:prefixLen],
 		Enabled:   true,
 		ExpiresAt: req.ExpiresAt,

@@ -228,6 +228,7 @@ const DashboardStats: React.FC = () => {
                       return [`${value ?? 0}`, `模型: ${name}`];
                     }}
                     labelFormatter={(label: any) => `${label}`}
+                    itemSorter={(item: any) => (item.name === 'Token 总量' ? -1 : 1)}
                   />
                   <Legend />
                   {uniqueModels.length > 0 ? (

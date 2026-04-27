@@ -6,6 +6,7 @@ import api from '../api';
 interface APIKey {
   id: string;
   name: string;
+  key?: string;
   key_prefix: string;
   key_hash?: string;
   created_at: string;
@@ -114,7 +115,7 @@ const APIKeyManage: React.FC = () => {
         return (
           <Space>
             <span style={{ fontFamily: 'monospace' }}>
-              {isShow ? `${record.key_prefix}****************` : `${record.key_prefix}****`}
+              {isShow ? (record.key || `${record.key_prefix}****************`) : `${record.key_prefix}****`}
             </span>
             <Button
               type="link"
@@ -230,7 +231,7 @@ const APIKeyManage: React.FC = () => {
                 API Key 创建成功！
               </p>
               <p style={{ margin: '0 0 8px 0', color: '#666' }}>
-                请立即复制并保存，它只会显示这一次：
+                请妥善保管您的 API Key：
               </p>
               <div style={{
                 background: '#fff',

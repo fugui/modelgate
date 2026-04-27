@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     total_tokens_used INTEGER DEFAULT 0,
+    plain_key TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -105,6 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_quota_usage_date ON quota_usage_daily(date);
 		"ALTER TABLE api_keys ADD COLUMN total_tokens_used INTEGER DEFAULT 0;",
 		"ALTER TABLE quota_usage_daily ADD COLUMN input_tokens INTEGER DEFAULT 0;",
 		"ALTER TABLE quota_usage_daily ADD COLUMN output_tokens INTEGER DEFAULT 0;",
+		"ALTER TABLE api_keys ADD COLUMN plain_key TEXT;",
 	}
 
 	for _, query := range migrations {

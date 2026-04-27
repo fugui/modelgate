@@ -12,6 +12,7 @@ type APIKey struct {
 	UserID          uuid.UUID  `json:"user_id"`
 	Name            string     `json:"name"`
 	KeyHash         string     `json:"-"`
+	PlainKey        string     `json:"-"`
 	KeyPrefix       string     `json:"key_prefix"`
 	Enabled         bool       `json:"enabled"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
@@ -30,6 +31,7 @@ type APIKeyResponse struct {
 	ID              uuid.UUID  `json:"id"`
 	UserID          uuid.UUID  `json:"user_id"`
 	Name            string     `json:"name"`
+	Key             string     `json:"key,omitempty"`
 	KeyPrefix       string     `json:"key_prefix"`
 	Enabled         bool       `json:"enabled"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
@@ -48,6 +50,7 @@ func (k *APIKey) ToResponse() APIKeyResponse {
 		ID:              k.ID,
 		UserID:          k.UserID,
 		Name:            k.Name,
+		Key:             k.PlainKey,
 		KeyPrefix:       k.KeyPrefix,
 		Enabled:         k.Enabled,
 		ExpiresAt:       k.ExpiresAt,
@@ -71,7 +74,7 @@ func scanAPIKey(s scanner) (*APIKey, error) {
 	err := s.Scan(
 		&key.ID, &key.UserID, &key.Name, &key.KeyHash, &key.KeyPrefix,
 		&key.Enabled, &key.ExpiresAt, &key.LastUsedAt, &key.CreatedAt, &key.UpdatedAt,
-		&key.TotalTokensUsed,
+		&key.TotalTokensUsed, &key.PlainKey,
 	)
 	return key, err
 }
@@ -79,20 +82,20 @@ func scanAPIKey(s scanner) (*APIKey, error) {
 func (s *APIKeyStore) Create(key *APIKey) error {
 	key.ID = uuid.New()
 	query := `
-		INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, enabled, expires_at, total_tokens_used)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+		INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, enabled, expires_at, total_tokens_used, plain_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
 		RETURNING created_at, updated_at`
 
 	return s.db.QueryRow(query,
 		key.ID.String(), key.UserID.String(), key.Name, key.KeyHash, key.KeyPrefix,
-		key.Enabled, key.ExpiresAt,
+		key.Enabled, key.ExpiresAt, key.PlainKey,
 	).Scan(&key.CreatedAt, &key.UpdatedAt)
 }
 
 func (s *APIKeyStore) GetByID(id uuid.UUID) (*APIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
-		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
+		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used, IFNULL(plain_key, '')
 		FROM api_keys WHERE id = ?`
 
 	key, err := scanAPIKey(s.db.QueryRow(query, id.String()))
@@ -108,7 +111,7 @@ func (s *APIKeyStore) GetByID(id uuid.UUID) (*APIKey, error) {
 func (s *APIKeyStore) GetByHash(hash string) (*APIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
-		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
+		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used, IFNULL(plain_key, '')
 		FROM api_keys WHERE key_hash = ? AND enabled = 1`
 
 	key, err := scanAPIKey(s.db.QueryRow(query, hash))
@@ -124,7 +127,7 @@ func (s *APIKeyStore) GetByHash(hash string) (*APIKey, error) {
 func (s *APIKeyStore) GetByKeyPrefix(prefix string) (*APIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
-		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
+		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used, IFNULL(plain_key, '')
 		FROM api_keys WHERE key_prefix = ? AND enabled = 1`
 
 	key, err := scanAPIKey(s.db.QueryRow(query, prefix))
@@ -140,7 +143,7 @@ func (s *APIKeyStore) GetByKeyPrefix(prefix string) (*APIKey, error) {
 func (s *APIKeyStore) ListByUser(userID uuid.UUID) ([]*APIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_hash, key_prefix,
-		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used
+		       enabled, expires_at, last_used_at, created_at, updated_at, total_tokens_used, IFNULL(plain_key, '')
 		FROM api_keys WHERE user_id = ? ORDER BY created_at DESC`
 
 	rows, err := s.db.Query(query, userID.String())
