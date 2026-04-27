@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Input, Button, Typography, Divider, message } from 'antd';
-import { UserOutlined, LockOutlined, GlobalOutlined, CodeOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../api';
 
@@ -184,12 +184,13 @@ const Login: React.FC = () => {
               loading={loading}
               style={{
                 height: '48px',
-                background: ssoConfig.enabled ? '#fff' : '#4f46e5',
+                background: ssoConfig.enabled ? '#fff' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                 color: ssoConfig.enabled ? '#1f2937' : '#fff',
-                borderColor: ssoConfig.enabled ? '#d1d5db' : '#4f46e5',
-                boxShadow: ssoConfig.enabled ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : '0 4px 14px 0 rgba(79, 70, 229, 0.39)',
+                borderColor: ssoConfig.enabled ? '#d1d5db' : 'transparent',
+                boxShadow: ssoConfig.enabled ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : '0 4px 15px rgba(102, 126, 234, 0.35)',
                 fontSize: '16px',
                 fontWeight: 500,
+                border: ssoConfig.enabled ? undefined : 'none',
               }}
             >
               登 录
@@ -205,23 +206,21 @@ const Login: React.FC = () => {
           )}
         </Form>
 
-        {versionInfo.version && (
-          <div style={{
-            marginTop: '60px',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-            color: '#9ca3af',
-            fontSize: '12px'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '16px' }}>
-              <span title="Version"><GlobalOutlined style={{ marginRight: 4 }} />{versionInfo.version}</span>
-              {versionInfo.commit && <span title="Commit"><CodeOutlined style={{ marginRight: 4 }} />{versionInfo.commit.substring(0, 7)}</span>}
-            </div>
-            {versionInfo.build_time && <span title="Build Time"><ClockCircleOutlined style={{ marginRight: 4 }} />{versionInfo.build_time}</span>}
+        {/* 底部版权 */}
+        <div style={{
+          position: 'absolute',
+          bottom: '24px',
+          left: 0,
+          color: '#bfbfbf',
+          fontSize: '12px',
+          textAlign: 'center',
+          width: '100%',
+        }}>
+          <div>© {new Date().getFullYear()} 模界(Model Gate) · 企业大模型统一接入网关</div>
+          <div style={{ marginTop: '4px', opacity: 0.8, fontSize: '11px' }}>
+            版本: {versionInfo?.version || 'N/A'} ({versionInfo?.commit?.substring(0, 7) || 'N/A'}) | 编译时间: {versionInfo?.build_time || 'N/A'}
           </div>
-        )}
+        </div>
       </div>
     </AuthLayout>
   );

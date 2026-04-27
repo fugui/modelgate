@@ -21,7 +21,7 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({ children, title, descrip
       {/* 左侧品牌展示 */}
       <div style={{
         flex: 1,
-        background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+        background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
@@ -84,7 +84,8 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({ children, title, descrip
         flexDirection: 'column',
         justifyContent: 'center',
         padding: '0 8%',
-        background: '#fff',
+        background: '#f5f7fa',
+        position: 'relative',
       }}>
         {children}
       </div>
