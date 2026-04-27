@@ -411,8 +411,8 @@ const Admin: React.FC = () => {
   const handleModelSubmit = async (values: ModelFormValues) => {
     try {
       // 解析 model_params JSON
-      let modelParams = undefined;
-      if (values.model_params) {
+      let modelParams: any = {};
+      if (values.model_params && values.model_params.trim() !== '') {
         try {
           modelParams = JSON.parse(values.model_params);
         } catch {
@@ -1805,7 +1805,10 @@ const Admin: React.FC = () => {
               mode="multiple"
               placeholder="请选择关联模型"
               style={{ width: '100%' }}
-              options={models.map(model => ({ label: model.name, value: model.id }))}
+              options={[
+                { label: '全部模型 (*)', value: '*' },
+                ...models.map(model => ({ label: model.name, value: model.id }))
+              ]}
             />
           </Form.Item>
           <Form.Item

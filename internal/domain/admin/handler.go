@@ -150,6 +150,9 @@ func (h *ModelHandler) Update(c *gin.Context) {
 	if req.ContextWindow != nil {
 		model.ContextWindow = *req.ContextWindow
 	}
+	if req.ModelParams != nil {
+		model.ModelParams = req.ModelParams
+	}
 
 	if err := h.store.Update(model); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
