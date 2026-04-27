@@ -7,11 +7,9 @@ import api from '../api';
 interface Backend {
   id: string;
   model_id: string;
-  name: string;
   base_url: string;
   model_name: string;
   weight: number;
-  region: string;
   enabled: boolean;
   healthy: boolean;
   last_check_at: string;
@@ -28,12 +26,10 @@ interface Model {
 
 interface BackendFormValues {
   id: string;
-  name: string;
   base_url: string;
   model_name: string;
   api_key: string;
   weight: number;
-  region: string;
   enabled: boolean;
 }
 
@@ -109,11 +105,9 @@ const BackendManage: React.FC = () => {
     setBackendModalTitle('编辑后端');
     backendForm.setFieldsValue({
       id: backend.id,
-      name: backend.name,
       base_url: backend.base_url,
       model_name: backend.model_name,
       weight: backend.weight,
-      region: backend.region,
       enabled: backend.enabled,
     });
     setBackendModalVisible(true);
@@ -150,7 +144,6 @@ const BackendManage: React.FC = () => {
     try {
       await api.put(`/api/v1/admin/models/${modelId}/backends/${backend.id}`, {
         ...backend,
-        region: backend.region,
         enabled: !backend.enabled,
       });
       messageApi.success(backend.enabled ? '后端已禁用' : '后端已启用');
@@ -163,12 +156,6 @@ const BackendManage: React.FC = () => {
 
   const backendColumns = [
     { title: 'ID', dataIndex: 'id', key: 'id', ellipsis: true },
-    {
-      title: '名称',
-      dataIndex: 'name',
-      key: 'name',
-      render: (name: string) => name || '-',
-    },
     {
       title: 'BaseURL',
       dataIndex: 'base_url',
@@ -186,12 +173,6 @@ const BackendManage: React.FC = () => {
       dataIndex: 'weight',
       key: 'weight',
       render: (weight: number) => <Tag color="blue">{weight}</Tag>,
-    },
-    {
-      title: 'Region',
-      dataIndex: 'region',
-      key: 'region',
-      render: (region: string) => region || '-',
     },
     {
       title: '健康状态',
@@ -245,7 +226,7 @@ const BackendManage: React.FC = () => {
           </Tooltip>
           <Popconfirm
             title="确认删除"
-            description={`删除后端 "${record.name || record.id}"，确定要继续吗？`}
+            description={`删除后端 "${record.id}"，确定要继续吗？`}
             onConfirm={() => handleDeleteBackend(record)}
             okText="删除"
             cancelText="取消"
@@ -338,13 +319,6 @@ const BackendManage: React.FC = () => {
           </Form.Item>
 
           <Form.Item
-            name="name"
-            label="名称"
-          >
-            <Input placeholder="显示名称（可选）" />
-          </Form.Item>
-
-          <Form.Item
             name="base_url"
             label="BaseURL"
             rules={[
@@ -379,14 +353,6 @@ const BackendManage: React.FC = () => {
             extra="负载均衡权重，数值越大分配越多请求（默认1）"
           >
             <InputNumber min={1} max={100} style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item
-            name="region"
-            label="Region"
-            extra="地区标识（可选），如：cn-north-1, us-west-2"
-          >
-            <Input placeholder="如：cn-north-1" />
           </Form.Item>
 
           <Form.Item

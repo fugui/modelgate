@@ -62,12 +62,10 @@ type ModelConfig struct {
 
 type BackendConfig struct {
 	ID        string `yaml:"id" validate:"required"`
-	Name      string `yaml:"name"`
 	BaseURL   string `yaml:"base_url" validate:"required,url"`
 	APIKey    string `yaml:"api_key"`
 	ModelName string `yaml:"model_name"`
 	Weight    int    `yaml:"weight" validate:"min=0"`
-	Region    string `yaml:"region"`
 	Enabled   bool   `yaml:"enabled"`
 }
 

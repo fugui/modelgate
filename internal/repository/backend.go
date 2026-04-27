@@ -11,13 +11,11 @@ import (
 type Backend struct {
 	ID           string       `json:"id"`
 	ModelID      string       `json:"model_id"`
-	Name         string       `json:"name"`
 	BaseURL      string       `json:"base_url"`
 	APIKey       string       `json:"-"`       // Never return API key in JSON
 	APIKeyMasked string       `json:"api_key"` // Masked version for display
 	ModelName    string       `json:"model_name"`
 	Weight       int          `json:"weight"`
-	Region       string       `json:"region"`
 	Enabled      bool         `json:"enabled"`
 	Healthy      bool         `json:"healthy"`
 	LastCheckAt  sql.NullTime `json:"last_check_at"`
@@ -28,23 +26,19 @@ type Backend struct {
 // BackendCreateRequest represents a request to create a backend
 type BackendCreateRequest struct {
 	ID        string `json:"id" binding:"required"`
-	Name      string `json:"name"`
 	BaseURL   string `json:"base_url" binding:"required,url"`
 	APIKey    string `json:"api_key"`
 	ModelName string `json:"model_name"`
 	Weight    int    `json:"weight"`
-	Region    string `json:"region"`
 	Enabled   bool   `json:"enabled"`
 }
 
 // BackendUpdateRequest represents a request to update a backend
 type BackendUpdateRequest struct {
-	Name      string `json:"name"`
 	BaseURL   string `json:"base_url" binding:"omitempty,url"`
 	APIKey    string `json:"api_key"`
 	ModelName string `json:"model_name"`
 	Weight    int    `json:"weight"`
-	Region    string `json:"region"`
 	Enabled   *bool  `json:"enabled"`
 }
 
@@ -71,13 +65,11 @@ func (s *BackendStore) configToBackend(modelID string, cfg config.BackendConfig)
 	return &Backend{
 		ID:           cfg.ID,
 		ModelID:      modelID,
-		Name:         cfg.Name,
 		BaseURL:      cfg.BaseURL,
 		APIKey:       cfg.APIKey,
 		APIKeyMasked: masked,
 		ModelName:    cfg.ModelName,
 		Weight:       cfg.Weight,
-		Region:       cfg.Region,
 		Enabled:      cfg.Enabled,
 		Healthy:      true,
 		CreatedAt:    time.Now(),
@@ -89,12 +81,10 @@ func (s *BackendStore) configToBackend(modelID string, cfg config.BackendConfig)
 func (s *BackendStore) backendToConfig(backend *Backend) config.BackendConfig {
 	return config.BackendConfig{
 		ID:        backend.ID,
-		Name:      backend.Name,
 		BaseURL:   backend.BaseURL,
 		APIKey:    backend.APIKey,
 		ModelName: backend.ModelName,
 		Weight:    backend.Weight,
-		Region:    backend.Region,
 		Enabled:   backend.Enabled,
 	}
 }

@@ -102,11 +102,9 @@ func (h *ModelHandler) Create(c *gin.Context) {
 		backend := &entity.Backend{
 			ID:        backendInput.ID,
 			ModelID:   model.ID,
-			Name:      backendInput.Name,
 			BaseURL:   backendInput.BaseURL,
 			ModelName: backendInput.ModelName,
 			Weight:    backendInput.Weight,
-			Region:    backendInput.Region,
 			Enabled:   backendInput.Enabled,
 		}
 		if backend.Weight == 0 {
@@ -226,12 +224,10 @@ func (h *ModelHandler) CreateBackend(c *gin.Context) {
 	backend := &entity.Backend{
 		ID:        req.ID,
 		ModelID:   modelID,
-		Name:      req.Name,
 		BaseURL:   req.BaseURL,
 		APIKey:    req.APIKey,
 		ModelName: req.ModelName,
 		Weight:    req.Weight,
-		Region:    req.Region,
 		Enabled:   req.Enabled,
 	}
 
@@ -266,9 +262,6 @@ func (h *ModelHandler) UpdateBackend(c *gin.Context) {
 		return
 	}
 
-	if req.Name != "" {
-		backend.Name = req.Name
-	}
 	if req.BaseURL != "" {
 		backend.BaseURL = req.BaseURL
 	}
@@ -280,9 +273,6 @@ func (h *ModelHandler) UpdateBackend(c *gin.Context) {
 	}
 	if req.Weight > 0 {
 		backend.Weight = req.Weight
-	}
-	if req.Region != "" {
-		backend.Region = req.Region
 	}
 	if req.Enabled != nil {
 		backend.Enabled = *req.Enabled
@@ -418,7 +408,6 @@ func (h *ModelHandler) ImportFromGateway(c *gin.Context) {
 				backend := &entity.Backend{
 					ID:        backendID,
 					ModelID:   sanitizedModelID,
-					Name:      fmt.Sprintf("%s Backend %d", req.Prefix, seq),
 					BaseURL:   req.BaseURL,
 					APIKey:    req.APIKey,
 					ModelName: modelID,
