@@ -75,4 +75,4 @@ config.yaml
 # 本地运行时文件
 *.service
 test_*.go
-server
+/server
