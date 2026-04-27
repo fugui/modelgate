@@ -879,12 +879,17 @@ func adjustMaxTokens(body []byte, contextWindow int) []byte {
 		}
 	}
 
-	if maxTokens > 0 && tokenKey != "" {
-		if inputTokens+maxTokens > contextWindow {
+	if tokenKey != "" {
+		if inputTokens >= contextWindow {
+			payload[tokenKey] = 100
+			if newBody, err := json.Marshal(payload); err == nil {
+				return newBody
+			}
+		} else if maxTokens <= 0 || inputTokens+maxTokens > contextWindow {
 			newMax := contextWindow - inputTokens
 			// Minimum safeguard
-			if newMax < 1000 {
-				newMax = 1000
+			if newMax < 100 {
+				newMax = 100
 			}
 			payload[tokenKey] = newMax
 
