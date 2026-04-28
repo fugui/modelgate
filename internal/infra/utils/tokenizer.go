@@ -82,3 +82,48 @@ func EstimateTokensFromOpenAIRequest(body []byte) int {
 
 	return EstimateTokens(contentBuilder.String())
 }
+
+// EstimateTokensFromPayload 从已解析的 map 中提取内容并估算 token 数
+// 与 EstimateTokensFromOpenAIRequest 逻辑相同，但跳过 JSON 解析步骤
+func EstimateTokensFromPayload(payload map[string]interface{}) int {
+	if payload == nil {
+		return 0
+	}
+
+	var contentBuilder strings.Builder
+
+	// Traverse messages
+	if messages, ok := payload["messages"].([]interface{}); ok {
+		for _, msgObj := range messages {
+			if msgMap, ok := msgObj.(map[string]interface{}); ok {
+				if content, ok := msgMap["content"]; ok {
+					switch v := content.(type) {
+					case string:
+						contentBuilder.WriteString(v)
+					case []interface{}:
+						for _, blockObj := range v {
+							if blockMap, ok := blockObj.(map[string]interface{}); ok {
+								if bType, _ := blockMap["type"].(string); bType == "text" {
+									if bText, _ := blockMap["text"].(string); bText != "" {
+										contentBuilder.WriteString(bText)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Traverse tools/functions
+	if tools, ok := payload["tools"].([]interface{}); ok {
+		for _, toolObj := range tools {
+			if b, err := json.Marshal(toolObj); err == nil {
+				contentBuilder.Write(b)
+			}
+		}
+	}
+
+	return EstimateTokens(contentBuilder.String())
+}

@@ -92,19 +92,15 @@ type StreamChoice struct {
 	FinishReason *string                `json:"finish_reason"`
 }
 
-// BackendRequest 后端请求参数
+// BackendRequest 后端请求参数（纯输入，由协议 Handler 构造）
 type BackendRequest struct {
-	ModelID        string
-	UserID         uuid.UUID
-	UserName       string
-	UserEmail      string
-	APIKeyID       uuid.UUID
-	RequestBody    []byte
-	IsStream       bool
-	ClientIP       string
-	UserAgent      string
-	TraceID        string
-	RequestPayload map[string]interface{}
+	ModelID     string
+	UserID      uuid.UUID
+	APIKeyID    uuid.UUID
+	RequestBody []byte
+	IsStream    bool
+	ClientIP    string
+	UserAgent   string
 }
 
 // BackendResponse 后端响应
@@ -121,49 +117,51 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	req *BackendRequest,
 	proto Protocol,
 ) {
-	startTime := time.Now()
+	pctx := p.NewProxyContext(c, req, proto)
 
-	req.TraceID = c.GetHeader("X-Request-ID")
-	if req.TraceID == "" {
-		req.TraceID = c.Writer.Header().Get("X-Request-ID")
-	}
-	if req.TraceID == "" {
-		req.TraceID = "req-" + uuid.New().String()
+	// 1. 认证用户并检查配额
+	if !p.authenticateAndCheckQuota(pctx) {
+		return
 	}
 
-	var requestPayload map[string]interface{}
-	_ = json.Unmarshal(req.RequestBody, &requestPayload)
-	req.RequestPayload = requestPayload
-
-	// 统一发送错误的工具函数闭包，捕获 proto 实例
-	sendErr := func(statusCode int, errType, message string) {
-		if proto != nil {
-			c.Data(statusCode, "application/json", proto.BuildErrorResponse(errType, message))
-		} else {
-			c.JSON(statusCode, gin.H{"error": message})
-		}
+	// 2. 选择后端
+	backend := p.selectBackend(pctx)
+	if backend == nil {
+		return
 	}
 
-	// 获取用户信息
+	// 3. 准备并发送请求
+	resp := p.prepareAndSendRequest(pctx, backend)
+	if resp == nil {
+		return
+	}
+
+	// 4. 处理响应
+	p.dispatchResponse(pctx, resp)
+}
+
+// authenticateAndCheckQuota 获取用户信息并检查配额
+// 返回 false 表示请求已被终止（错误已发送给客户端）
+func (p *Proxy) authenticateAndCheckQuota(pctx *ProxyContext) bool {
+	req := pctx.Request
+
 	user, err := p.userStore.GetByID(req.UserID)
 	if err != nil {
-		sendErr(http.StatusInternalServerError, "api_error", "failed to get user info")
-		return
+		pctx.SendError(http.StatusInternalServerError, "api_error", "failed to get user info")
+		return false
 	}
 	if user == nil {
-		sendErr(http.StatusUnauthorized, "invalid_request_error", "user not found")
-		return
+		pctx.SendError(http.StatusUnauthorized, "invalid_request_error", "user not found")
+		return false
 	}
 
-	// 将用户信息填充到请求中，便于后续日志记录
-	req.UserName = user.Name
-	req.UserEmail = user.Email
+	pctx.User = user
 
 	// 检查配额
 	quotaResult, err := p.quotaService.CheckQuota(req.UserID, user.QuotaPolicy, req.ModelID)
 	if err != nil {
-		sendErr(http.StatusInternalServerError, "api_error", "quota check failed")
-		return
+		pctx.SendError(http.StatusInternalServerError, "api_error", "quota check failed")
+		return false
 	}
 
 	// 当指定的模型不被允许时，降级使用默认模型重试
@@ -171,62 +169,74 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		req.ModelID = quotaResult.DefaultModel
 		quotaResult, err = p.quotaService.CheckQuota(req.UserID, user.QuotaPolicy, req.ModelID)
 		if err != nil {
-			sendErr(http.StatusInternalServerError, "api_error", "quota check failed")
-			return
+			pctx.SendError(http.StatusInternalServerError, "api_error", "quota check failed")
+			return false
 		}
 	}
 
 	if !quotaResult.Allowed {
-		// quotaResult.Reason 可能需要客户端处理，传递为 error message
-		sendErr(http.StatusTooManyRequests, "rate_limit_error", quotaResult.Reason)
-		return
+		pctx.SendError(http.StatusTooManyRequests, "rate_limit_error", quotaResult.Reason)
+		return false
 	}
 
-	// CheckQuota 只是校验限额，这里需要真实累加内存中的 rate limit 计数器，否则速率限制永远为 0
+	// CheckQuota 只是校验限额，这里需要真实累加内存中的 rate limit 计数器
 	_ = p.quotaService.IncrementRate(req.UserID, quotaResult.RateLimitWindow)
+	pctx.DefaultModel = quotaResult.DefaultModel
+	return true
+}
 
-	// 选择后端
-	backend, actualModelID, ok := p.lb.Next(req.ModelID, quotaResult.DefaultModel)
+// selectBackend 通过负载均衡选择后端，并更新 pctx 上的 BackendID 和 ModelID
+// 返回 nil 表示无可用后端（错误已发送给客户端）
+func (p *Proxy) selectBackend(pctx *ProxyContext) *Backend {
+	req := pctx.Request
+
+	backend, actualModelID, ok := p.lb.Next(req.ModelID, pctx.DefaultModel)
 	if !ok {
-		p.usageService.RecordUsageDetailed(&usage.Record{
-			UserID:         req.UserID,
-			UserName:       req.UserName,
-			UserEmail:      req.UserEmail,
-			ModelID:        req.ModelID,
-			ClientIP:       req.ClientIP,
-			UserAgent:      req.UserAgent,
-			StatusCode:     http.StatusServiceUnavailable,
-			Error:          "no backend available",
-			TraceID:        req.TraceID,
-			RequestPayload: req.RequestPayload,
-		})
-		sendErr(http.StatusServiceUnavailable, "api_error", "no backend available for model: "+req.ModelID)
-		return
+		pctx.RecordErrorUsage(http.StatusServiceUnavailable, "no backend available")
+		pctx.SendError(http.StatusServiceUnavailable, "api_error", "no backend available for model: "+req.ModelID)
+		return nil
 	}
 
-	// 使用实际的模型 ID（可能是 fallback 后的模型）
 	req.ModelID = actualModelID
-	c.Set("model_id", actualModelID)
+	pctx.GinCtx.Set("model_id", actualModelID)
+	pctx.BackendID = backend.ID
 
-	// 获取模型配置并注入参数
+	return backend
+}
+
+// prepareAndSendRequest 准备请求体、构造 HTTP 请求并发送到后端
+// 返回 nil 表示请求失败（错误已发送给客户端）
+func (p *Proxy) prepareAndSendRequest(pctx *ProxyContext, backend *Backend) *http.Response {
+	req := pctx.Request
+	c := pctx.GinCtx
+
+	// 获取模型配置并处理请求体（所有修改在 map 上完成，只序列化一次）
 	modelConfig, _ := p.modelStore.GetByID(req.ModelID)
-	requestBody := req.RequestBody
 
-	if modelConfig != nil {
-		if len(modelConfig.ModelParams) > 0 {
-			requestBody = injectModelParams(requestBody, modelConfig.ModelParams)
-		}
-		if modelConfig.ContextWindow > 0 {
-			requestBody = adjustMaxTokens(requestBody, modelConfig.ContextWindow)
-		}
+	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
+		injectModelParams(pctx.Payload, modelConfig.ModelParams)
 	}
 
-	// 修改请求体以替换 model 名称
+	// 计算请求的 InputTokens（只计算一次，复用于 adjustMaxTokens 和日志记录）
+	pctx.InputTokens = utils.EstimateTokensFromPayload(pctx.Payload)
+
+	if modelConfig != nil && modelConfig.ContextWindow > 0 {
+		adjustMaxTokens(pctx.Payload, modelConfig.ContextWindow, pctx.InputTokens)
+	}
+
+	// 替换 model 名称
 	if backend.ModelName != "" {
-		requestBody = modifyRequestModel(requestBody, backend.ModelName)
+		pctx.Payload["model"] = backend.ModelName
 	}
 
-	// 构造目标 URL：如果 base_url 已含 /openai 路径（如 Gemini），只追加 /chat/completions
+	// 序列化请求体（整个流程只序列化这一次）
+	requestBody, err := pctx.MarshalRequestBody()
+	if err != nil {
+		pctx.SendError(http.StatusInternalServerError, "api_error", "failed to marshal request body")
+		return nil
+	}
+
+	// 构造目标 URL
 	baseURL := strings.TrimSuffix(backend.URL, "/")
 	var url string
 	if strings.HasSuffix(baseURL, "/openai") {
@@ -236,8 +246,8 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	}
 	proxyReq, err := http.NewRequest(c.Request.Method, url, bytes.NewReader(requestBody))
 	if err != nil {
-		sendErr(http.StatusInternalServerError, "api_error", "failed to create proxy request")
-		return
+		pctx.SendError(http.StatusInternalServerError, "api_error", "failed to create proxy request")
+		return nil
 	}
 
 	// 复制请求头（排除 Accept-Encoding，避免后端返回 gzip 压缩响应）
@@ -274,137 +284,90 @@ func (p *Proxy) ExecuteCoreWorkflow(
 	if err != nil {
 		p.lb.MarkFailed(backend.ID)
 		if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
-			sendErr(http.StatusGatewayTimeout, "api_error", "backend request timeout")
+			pctx.SendError(http.StatusGatewayTimeout, "api_error", "backend request timeout")
 		} else {
-			sendErr(http.StatusServiceUnavailable, "api_error", "backend unavailable: "+err.Error())
+			pctx.SendError(http.StatusServiceUnavailable, "api_error", "backend unavailable: "+err.Error())
 		}
-		return
+		return nil
 	}
-	// 注意：这里不能使用 defer resp.Body.Close()，因为如果是流式响应，
-	// 需要在 handleConvertedStreamResponse 中异步或同步读取完后再关闭。
-	// 对于非流式响应，我们在处理完后关闭。
 
 	p.lb.MarkSuccess(backend.ID)
+	return resp
+}
 
-	// 计算请求的 InputTokens
-	inputTokens := utils.EstimateTokens(string(req.RequestBody))
-
+// dispatchResponse 根据响应状态码和内容类型分派到对应的处理器
+func (p *Proxy) dispatchResponse(pctx *ProxyContext, resp *http.Response) {
 	// 透传非 200 状态码
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		respBody, _ := io.ReadAll(resp.Body)
-
-		outputTokens := utils.EstimateTokens(string(respBody))
-		c.Set("input_tokens", inputTokens)
-		c.Set("output_tokens", outputTokens)
-		p.usageService.RecordUsageDetailed(&usage.Record{
-			UserID:          req.UserID,
-			UserName:        req.UserName,
-			UserEmail:       req.UserEmail,
-			ModelID:         req.ModelID,
-			LatencyMs:       int(time.Since(startTime).Milliseconds()),
-			ClientIP:        req.ClientIP,
-			UserAgent:       req.UserAgent,
-			BackendID:       backend.ID,
-			StatusCode:      resp.StatusCode,
-			InputTokens:     inputTokens,
-			OutputTokens:    outputTokens,
-			TraceID:         req.TraceID,
-			RequestPayload:  req.RequestPayload,
-			ResponsePayload: string(respBody),
-			TTFTMs:          time.Since(startTime).Milliseconds(),
-		})
-		// 尝试从后端返回的 OpenAI 错误中提取真正的错误信息
-		errType := "api_error"
-		errMsg := string(respBody)
-		var backendErr struct {
-			Error struct {
-				Type    string `json:"type"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal(respBody, &backendErr); err == nil && backendErr.Error.Message != "" {
-			errType = backendErr.Error.Type
-			if errType == "" {
-				errType = "api_error"
-			}
-			errMsg = backendErr.Error.Message
-		}
-
-		var finalRespBody []byte
-		if proto != nil {
-			finalRespBody = proto.BuildErrorResponse(errType, errMsg)
-			c.Data(resp.StatusCode, "application/json", finalRespBody)
-		} else {
-			finalRespBody = respBody
-			c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), finalRespBody)
-		}
-
-		// 在发生 HTTP 错误时，也必须记录阶段 3 和 4 的 Dump，否则 RAW Dump 链路不完整
-		if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
-			filename3 := fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode)
-			filename4 := fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode)
-			p.trafficDumper.Dump(req.TraceID, filename3, respBody, false)
-			p.trafficDumper.Dump(req.TraceID, filename4, finalRespBody, false)
-		}
+		p.handleErrorResponse(pctx, resp)
 		return
 	}
 
 	// 检查后端实际响应的内容类型
 	contentType := resp.Header.Get("Content-Type")
-	isStreamResponse := req.IsStream && (strings.Contains(contentType, "text/event-stream") || strings.Contains(contentType, "application/x-ndjson"))
+	isStreamResponse := pctx.Request.IsStream && (strings.Contains(contentType, "text/event-stream") || strings.Contains(contentType, "application/x-ndjson"))
 
 	// 根据是否流式响应选择处理方式
 	if isStreamResponse {
-		// handleConvertedStreamResponse 负责在结束后调用 resp.Body.Close()
-		p.handleConvertedStreamResponse(c, resp, req, backend.ID, startTime, proto, inputTokens)
+		p.handleStreamResponse(pctx, resp)
 	} else {
 		defer resp.Body.Close()
-		p.handleConvertedNormalResponse(c, resp, req, backend.ID, startTime, proto, inputTokens)
+		p.handleNormalResponse(pctx, resp)
 	}
 }
 
-// recordFinalUsage records the final usage metrics to usageService and quotaService.
-func (p *Proxy) recordFinalUsage(record *usage.Record, userID uuid.UUID, modelID string, apiKeyID uuid.UUID, inputTokens, outputTokens int, latencyMs int64) {
-	// 记录使用日志
-	p.usageService.RecordUsageDetailed(record)
+// handleErrorResponse 处理后端返回的非 200 状态码
+func (p *Proxy) handleErrorResponse(pctx *ProxyContext, resp *http.Response) {
+	respBody, _ := io.ReadAll(resp.Body)
 
-	// 记录请求并扣除 Token
-	_ = p.quotaService.RecordRequestTokens(
-		userID,
-		modelID,
-		apiKeyID,
-		inputTokens,
-		outputTokens,
-		latencyMs,
-	)
+	outputTokens := utils.EstimateTokens(string(respBody))
+	latency := pctx.Latency()
+
+	// 错误场景只记录日志，不扣除 Token 配额
+	pctx.GinCtx.Set("input_tokens", pctx.InputTokens)
+	pctx.GinCtx.Set("output_tokens", outputTokens)
+	p.usageService.RecordUsageDetailed(pctx.buildUsageRecord(resp.StatusCode, pctx.InputTokens, outputTokens, latency, string(respBody), latency))
+
+	// 尝试从后端返回的 OpenAI 错误中提取真正的错误信息
+	errType := "api_error"
+	errMsg := string(respBody)
+	var backendErr struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &backendErr); err == nil && backendErr.Error.Message != "" {
+		errType = backendErr.Error.Type
+		if errType == "" {
+			errType = "api_error"
+		}
+		errMsg = backendErr.Error.Message
+	}
+
+	var finalRespBody []byte
+	if pctx.Proto != nil {
+		finalRespBody = pctx.Proto.BuildErrorResponse(errType, errMsg)
+		pctx.GinCtx.Data(resp.StatusCode, "application/json", finalRespBody)
+	} else {
+		finalRespBody = respBody
+		pctx.GinCtx.Data(resp.StatusCode, resp.Header.Get("Content-Type"), finalRespBody)
+	}
+
+	// 在发生 HTTP 错误时，也必须记录阶段 3 和 4 的 Dump
+	pctx.DumpTraffic(fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode), respBody, false)
+	pctx.DumpTraffic(fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode), finalRespBody, false)
 }
 
-// handleConvertedNormalResponse 处理非流式响应（带转换）
-func (p *Proxy) handleConvertedNormalResponse(
-	c *gin.Context,
-	resp *http.Response,
-	req *BackendRequest,
-	backendID string,
-	startTime time.Time,
-	proto Protocol,
-	inputTokens int,
-) {
+// handleNormalResponse 处理非流式响应（带转换）
+func (p *Proxy) handleNormalResponse(pctx *ProxyContext, resp *http.Response) {
+	inputTokens := pctx.InputTokens
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		p.usageService.RecordUsageDetailed(&usage.Record{
-			UserID:      req.UserID,
-			UserName:    req.UserName,
-			UserEmail:   req.UserEmail,
-			ModelID:     req.ModelID,
-			ClientIP:    req.ClientIP,
-			UserAgent:   req.UserAgent,
-			BackendID:   backendID,
-			StatusCode:  http.StatusBadGateway,
-			Error:       "failed to read backend response",
-			InputTokens: inputTokens,
-		})
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read backend response"})
+		pctx.RecordErrorUsage(http.StatusBadGateway, "failed to read backend response")
+		pctx.GinCtx.JSON(http.StatusBadGateway, gin.H{"error": "failed to read backend response"})
 		return
 	}
 
@@ -429,23 +392,19 @@ func (p *Proxy) handleConvertedNormalResponse(
 	// 使用协议接口转换响应并获取精准 Token
 	var preciseInput, preciseOutput int
 	var convertedRespBody []byte
-	if proto != nil {
+	if pctx.Proto != nil {
 		var err error
-		convertedRespBody, preciseInput, preciseOutput, err = proto.FormatResponse(respBody)
+		convertedRespBody, preciseInput, preciseOutput, err = pctx.Proto.FormatResponse(respBody)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert response: " + err.Error()})
+			pctx.GinCtx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert response: " + err.Error()})
 			return
 		}
 	} else {
 		convertedRespBody = respBody
 	}
 
-	if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
-		filename3 := fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode)
-		filename4 := fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode)
-		p.trafficDumper.Dump(req.TraceID, filename3, respBody, false)
-		p.trafficDumper.Dump(req.TraceID, filename4, convertedRespBody, false)
-	}
+	pctx.DumpTraffic(fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode), respBody, false)
+	pctx.DumpTraffic(fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode), convertedRespBody, false)
 
 	// 计算最终 Token（优先使用精确 Token）
 	if preciseInput > 0 {
@@ -456,27 +415,8 @@ func (p *Proxy) handleConvertedNormalResponse(
 		outputTokens = utils.EstimateTokens(string(convertedRespBody))
 	}
 
-	latency := int(time.Since(startTime).Milliseconds())
-	c.Set("input_tokens", inputTokens)
-	c.Set("output_tokens", outputTokens)
-
-	p.recordFinalUsage(&usage.Record{
-		UserID:          req.UserID,
-		UserName:        req.UserName,
-		UserEmail:       req.UserEmail,
-		ModelID:         req.ModelID,
-		LatencyMs:       latency,
-		ClientIP:        req.ClientIP,
-		UserAgent:       req.UserAgent,
-		BackendID:       backendID,
-		StatusCode:      resp.StatusCode,
-		InputTokens:     inputTokens,
-		OutputTokens:    outputTokens,
-		TraceID:         req.TraceID,
-		RequestPayload:  req.RequestPayload,
-		ResponsePayload: string(convertedRespBody),
-		TTFTMs:          int64(latency),
-	}, req.UserID, req.ModelID, req.APIKeyID, inputTokens, outputTokens, int64(latency))
+	latency := pctx.Latency()
+	pctx.RecordUsage(resp.StatusCode, inputTokens, outputTokens, latency, string(convertedRespBody), latency)
 
 	// 只有在成功解压后才删除 Content-Encoding header
 	if decompressed {
@@ -488,22 +428,17 @@ func (p *Proxy) handleConvertedNormalResponse(
 	if contentType == "" {
 		contentType = "application/json" // 默认 Content-Type
 	}
-	c.Header("Content-Type", contentType)
+	pctx.GinCtx.Header("Content-Type", contentType)
 
 	// 返回响应
-	c.Data(resp.StatusCode, contentType, convertedRespBody)
+	pctx.GinCtx.Data(resp.StatusCode, contentType, convertedRespBody)
 }
 
-// handleConvertedStreamResponse 处理流式响应（带转换）
-func (p *Proxy) handleConvertedStreamResponse(
-	c *gin.Context,
-	resp *http.Response,
-	req *BackendRequest,
-	backendID string,
-	startTime time.Time,
-	proto Protocol,
-	inputTokens int,
-) {
+// handleStreamResponse 处理流式响应（带转换）
+func (p *Proxy) handleStreamResponse(pctx *ProxyContext, resp *http.Response) {
+	c := pctx.GinCtx
+	inputTokens := pctx.InputTokens
+
 	defer resp.Body.Close()
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -512,8 +447,8 @@ func (p *Proxy) handleConvertedStreamResponse(
 	c.Status(resp.StatusCode)
 
 	pingMessage := ": ping\n\n"
-	if proto != nil && proto.PingMessage() != "" {
-		pingMessage = proto.PingMessage()
+	if pctx.Proto != nil && pctx.Proto.PingMessage() != "" {
+		pingMessage = pctx.Proto.PingMessage()
 	}
 
 	// 立即发送一个 SSE 注释并 Flush，确保客户端收到 Header，防止首字节超时
@@ -539,7 +474,6 @@ func (p *Proxy) handleConvertedStreamResponse(
 				return
 			case <-ticker.C:
 				writeMu.Lock()
-				// 发送 SSE 注释作为心跳
 				if pingMessage != "" {
 					_, _ = c.Writer.WriteString(pingMessage)
 				} else {
@@ -574,40 +508,22 @@ func (p *Proxy) handleConvertedStreamResponse(
 
 	// 使用 defer 确保无论流式循环如何退出（正常 EOF、错误、ctx 取消），都记录 Token
 	defer func() {
-		// 优先使用精确的 OutputTokens，如果未获取到则进行估算
 		outputTokens := preciseOutputTokens
 		if outputTokens == 0 {
 			outputTokens = utils.EstimateTokens(fullCollectedText.String())
 		}
 
-		// 优先使用精确的 InputTokens
 		finalInputTokens := inputTokens
 		if preciseInputTokens > 0 {
 			finalInputTokens = preciseInputTokens
 		}
-		latency := int(time.Since(startTime).Milliseconds())
 
-		c.Set("input_tokens", finalInputTokens)
-		c.Set("output_tokens", outputTokens)
-
-		p.recordFinalUsage(&usage.Record{
-			UserID:          req.UserID,
-			UserName:        req.UserName,
-			UserEmail:       req.UserEmail,
-			ModelID:         req.ModelID,
-			LatencyMs:       latency,
-			ClientIP:        req.ClientIP,
-			UserAgent:       req.UserAgent,
-			BackendID:       backendID,
-			StatusCode:      resp.StatusCode,
-			InputTokens:     finalInputTokens,
-			OutputTokens:    outputTokens,
-			TraceID:         req.TraceID,
-			RequestPayload:  req.RequestPayload,
-			ResponsePayload: fullCollectedText.String(),
-			TTFTMs:          ttftMs,
-		}, req.UserID, req.ModelID, req.APIKeyID, finalInputTokens, outputTokens, int64(latency))
+		latency := pctx.Latency()
+		pctx.RecordUsage(resp.StatusCode, finalInputTokens, outputTokens, latency, fullCollectedText.String(), ttftMs)
 	}()
+
+	dumpFilename3 := fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode)
+	dumpFilename4 := fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode)
 
 	for {
 		select {
@@ -619,7 +535,7 @@ func (p *Proxy) handleConvertedStreamResponse(
 
 		line, err := reader.ReadString('\n')
 		firstTokenOnce.Do(func() {
-			ttftMs = time.Since(startTime).Milliseconds()
+			ttftMs = pctx.Latency()
 		})
 
 		if err != nil {
@@ -631,8 +547,8 @@ func (p *Proxy) handleConvertedStreamResponse(
 		}
 
 		// 转换每一行
-		if proto != nil {
-			converted, inToks, outToks, contentDelta, err := proto.FormatStreamLine(line, streamState)
+		if pctx.Proto != nil {
+			converted, inToks, outToks, contentDelta, err := pctx.Proto.FormatStreamLine(line, streamState)
 			if inToks > 0 {
 				preciseInputTokens = inToks
 			}
@@ -641,20 +557,15 @@ func (p *Proxy) handleConvertedStreamResponse(
 			}
 
 			// Dump Stage 3 & 4
-			if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
-				filename3 := fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode)
-				filename4 := fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode)
-				p.trafficDumper.Dump(req.TraceID, filename3, []byte(line), true)
-				if err == nil {
-					p.trafficDumper.Dump(req.TraceID, filename4, []byte(converted), true)
-				} else {
-					p.trafficDumper.Dump(req.TraceID, filename4, []byte(line), true)
-				}
+			pctx.DumpTraffic(dumpFilename3, []byte(line), true)
+			if err == nil {
+				pctx.DumpTraffic(dumpFilename4, []byte(converted), true)
+			} else {
+				pctx.DumpTraffic(dumpFilename4, []byte(line), true)
 			}
 
 			writeMu.Lock()
 			if err != nil {
-				// 转换失败时透传原始行，并尝试提取原始行的文本
 				_, _ = c.Writer.WriteString(line)
 				content, _, _ := ParseOpenAISSE(line)
 				fullCollectedText.WriteString(content)
@@ -666,12 +577,8 @@ func (p *Proxy) handleConvertedStreamResponse(
 			writeMu.Unlock()
 		} else {
 			// Dump Stage 3 & 4 for direct proxy
-			if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
-				filename3 := fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode)
-				filename4 := fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode)
-				p.trafficDumper.Dump(req.TraceID, filename3, []byte(line), true)
-				p.trafficDumper.Dump(req.TraceID, filename4, []byte(line), true)
-			}
+			pctx.DumpTraffic(dumpFilename3, []byte(line), true)
+			pctx.DumpTraffic(dumpFilename4, []byte(line), true)
 
 			writeMu.Lock()
 			_, _ = c.Writer.WriteString(line)
@@ -785,29 +692,14 @@ func (p *Proxy) HandleListModels(c *gin.Context) {
 	})
 }
 
-// injectModelParams 将模型参数注入请求体
+// injectModelParams 将模型参数注入已解析的请求 payload
 // 注意：不覆盖用户已经传入的参数
-func injectModelParams(reqBody []byte, params map[string]interface{}) []byte {
-	var req map[string]interface{}
-	if err := json.Unmarshal(reqBody, &req); err != nil {
-		// 如果解析失败，返回原始请求体
-		return reqBody
-	}
-
-	// 注入参数（不覆盖用户传入的）
+func injectModelParams(payload map[string]interface{}, params map[string]interface{}) {
 	for key, value := range params {
-		if _, exists := req[key]; !exists {
-			req[key] = value
+		if _, exists := payload[key]; !exists {
+			payload[key] = value
 		}
 	}
-
-	// 重新序列化
-	modifiedBody, err := json.Marshal(req)
-	if err != nil {
-		return reqBody
-	}
-
-	return modifiedBody
 }
 
 // convertHeaderName 将 __user_agent__ 转换为 User-Agent
@@ -833,36 +725,9 @@ func convertHeaderName(key string) string {
 	return strings.Join(parts, "-")
 }
 
-// modifyRequestModel modifies the request body to replace the model name
-func modifyRequestModel(reqBody []byte, modelName string) []byte {
-	var req map[string]interface{}
-	if err := json.Unmarshal(reqBody, &req); err != nil {
-		// 如果解析失败，返回原始请求体
-		return reqBody
-	}
-
-	// 替换 model 名称
-	req["model"] = modelName
-
-	// 重新序列化
-	modifiedBody, err := json.Marshal(req)
-	if err != nil {
-		return reqBody
-	}
-
-	return modifiedBody
-}
-
-// adjustMaxTokens intercepts the request body, counts the tokens roughly,
-// and clamps max_tokens or max_completion_tokens if they would exceed the context window.
-func adjustMaxTokens(body []byte, contextWindow int) []byte {
-	var payload map[string]interface{}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return body
-	}
-
-	inputTokens := utils.EstimateTokensFromOpenAIRequest(body)
-
+// adjustMaxTokens 检查并裁剪 max_tokens 或 max_completion_tokens
+// 直接操作已解析的 payload map，inputTokens 由调用方预先计算并传入
+func adjustMaxTokens(payload map[string]interface{}, contextWindow int, inputTokens int) {
 	// 获取客户端请求的最大 Token 数
 	var maxTokens int
 	var tokenKey string
@@ -879,25 +744,17 @@ func adjustMaxTokens(body []byte, contextWindow int) []byte {
 		}
 	}
 
-	if tokenKey != "" {
-		if inputTokens >= contextWindow {
-			payload[tokenKey] = 100
-			if newBody, err := json.Marshal(payload); err == nil {
-				return newBody
-			}
-		} else if maxTokens <= 0 || inputTokens+maxTokens > contextWindow {
-			newMax := contextWindow - inputTokens
-			// Minimum safeguard
-			if newMax < 100 {
-				newMax = 100
-			}
-			payload[tokenKey] = newMax
-
-			if newBody, err := json.Marshal(payload); err == nil {
-				return newBody
-			}
-		}
+	if tokenKey == "" {
+		return
 	}
 
-	return body
+	if inputTokens >= contextWindow {
+		payload[tokenKey] = 100
+	} else if maxTokens <= 0 || inputTokens+maxTokens > contextWindow {
+		newMax := contextWindow - inputTokens
+		if newMax < 100 {
+			newMax = 100
+		}
+		payload[tokenKey] = newMax
+	}
 }
