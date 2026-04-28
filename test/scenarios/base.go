@@ -14,7 +14,7 @@ import (
 	"modelgate/internal/infra/cache"
 	"modelgate/internal/repository"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // TestScenario 测试场景基座
@@ -35,7 +35,7 @@ type TestScenario struct {
 func SetupTestDB(t *testing.T) *TestScenario {
 	// 使用命名共享内存 DB，避免多连接时每个连接看到不同的空 DB
 	dbName := fmt.Sprintf("file:testdb_%s?mode=memory&cache=shared", uuid.New().String()[:8])
-	db, err := sql.Open("sqlite3", dbName)
+	db, err := sql.Open("sqlite", dbName)
 	require.NoError(t, err)
 	// 关锁到单连接，确保所有 goroutine 用同一物理连接
 	db.SetMaxOpenConns(1)
