@@ -17,6 +17,8 @@ func ParseClientType(userAgent string) string {
 	switch {
 	case strings.Contains(ua, "claude-code") || strings.Contains(ua, "claude-cli"):
 		return "Claude Code"
+	case strings.Contains(ua, "opencode"):
+		return "OpenCode"
 	case strings.Contains(ua, "cursor"):
 		return "Cursor"
 	case strings.Contains(ua, "vscode") || strings.Contains(ua, "visual studio code"):
@@ -75,7 +77,7 @@ func FormatUserAgentForDisplay(userAgent string, referer string) string {
 	uaLower := strings.ToLower(ua)
 
 	// 提取名称和版本号，例如 "Claude Code/2.1.84" 或 "Cursor 0.45.0"
-	re := regexp.MustCompile(`(?i)(claude-code|claude-cli|cursor|vscode|jetbrains|intellij|copilot|postman|curl|wget)[/\s]?([0-9a-zA-Z.-]+)?`)
+	re := regexp.MustCompile(`(?i)(claude-code|claude-cli|opencode|cursor|vscode|jetbrains|intellij|copilot|postman|curl|wget)[/\s]?([0-9a-zA-Z.-]+)?`)
 	matches := re.FindStringSubmatch(ua)
 
 	if len(matches) > 1 {
@@ -89,6 +91,8 @@ func FormatUserAgentForDisplay(userAgent string, referer string) string {
 		switch strings.ToLower(name) {
 		case "claude-code", "claude-cli":
 			name = "Claude Code"
+		case "opencode":
+			name = "OpenCode"
 		case "cursor":
 			name = "Cursor"
 		case "vscode":
