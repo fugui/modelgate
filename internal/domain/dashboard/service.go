@@ -219,11 +219,99 @@ func (mc *MetricsCollector) GetHistory() []MetricsSnapshot {
 	return result
 }
 
+// BackendMetricsSnapshot 单个后端的指标快照
+type BackendMetricsSnapshot struct {
+	TimeLabel    string  `json:"time_label"`
+	AvgLatencyMs float64 `json:"avg_latency_ms"`
+	RequestCount int     `json:"request_count"`
+}
+
+// backendMetricsSlot 内部使用的可变槽位
+type backendMetricsSlot struct {
+	timestamp     time.Time
+	totalDuration int64
+	requestCount  int
+}
+
+// BackendMetricsCollector 按后端分组的指标采集器
+type BackendMetricsCollector struct {
+	backends map[string]*ring.Ring            // backendID -> ring of *backendMetricsSlot
+	current  map[string]*backendMetricsSlot   // backendID -> 当前正在累积的槽位
+	mu       sync.RWMutex
+}
+
+func NewBackendMetricsCollector() *BackendMetricsCollector {
+	return &BackendMetricsCollector{
+		backends: make(map[string]*ring.Ring),
+		current:  make(map[string]*backendMetricsSlot),
+	}
+}
+
+// RecordDuration 记录某后端一次请求的耗时
+func (bmc *BackendMetricsCollector) RecordDuration(backendID string, durationMs int64) {
+	bmc.mu.Lock()
+	defer bmc.mu.Unlock()
+
+	if _, ok := bmc.current[backendID]; !ok {
+		bmc.current[backendID] = &backendMetricsSlot{timestamp: time.Now()}
+		bmc.backends[backendID] = ring.New(metricsSlotCount)
+	}
+	bmc.current[backendID].totalDuration += durationMs
+	bmc.current[backendID].requestCount++
+}
+
+// SnapshotAll 快照所有后端的当前槽位并推进到下一个区间
+func (bmc *BackendMetricsCollector) SnapshotAll() {
+	bmc.mu.Lock()
+	defer bmc.mu.Unlock()
+
+	for backendID, slot := range bmc.current {
+		r := bmc.backends[backendID]
+		r.Value = slot
+		bmc.backends[backendID] = r.Next()
+		bmc.current[backendID] = &backendMetricsSlot{timestamp: time.Now()}
+	}
+}
+
+// GetHistory 获取所有后端的指标历史
+func (bmc *BackendMetricsCollector) GetHistory() map[string][]BackendMetricsSnapshot {
+	bmc.mu.RLock()
+	defer bmc.mu.RUnlock()
+
+	result := make(map[string][]BackendMetricsSnapshot)
+	for backendID, r := range bmc.backends {
+		var snapshots []BackendMetricsSnapshot
+		r.Do(func(v interface{}) {
+			if v == nil {
+				return
+			}
+			slot := v.(*backendMetricsSlot)
+			if slot.timestamp.IsZero() {
+				return
+			}
+			avgLatency := float64(0)
+			if slot.requestCount > 0 {
+				avgLatency = float64(slot.totalDuration) / float64(slot.requestCount)
+			}
+			snapshots = append(snapshots, BackendMetricsSnapshot{
+				TimeLabel:    slot.timestamp.Format("15:04"),
+				AvgLatencyMs: avgLatency,
+				RequestCount: slot.requestCount,
+			})
+		})
+		if len(snapshots) > 0 {
+			result[backendID] = snapshots
+		}
+	}
+	return result
+}
+
 // Service 仪表板服务
 type Service struct {
 	db                 *sql.DB
 	hourlyCounter      *HourlyCounter
 	metricsCollector   *MetricsCollector
+	backendMetrics     *BackendMetricsCollector
 	concurrencyLimiter ConcurrencyStatsProvider
 }
 
@@ -233,6 +321,7 @@ func NewService(db *sql.DB) *Service {
 		db:               db,
 		hourlyCounter:    NewHourlyCounter(),
 		metricsCollector: NewMetricsCollector(),
+		backendMetrics:   NewBackendMetricsCollector(),
 	}
 	// 启动清理任务
 	go s.dateCheckLoop()
@@ -253,10 +342,10 @@ func (s *Service) metricsLoop() {
 	for range ticker.C {
 		concurrency := 0
 		if s.concurrencyLimiter != nil {
-			// 使用窗口峰值而非瞬时值，确保短命请求不会被遗漏
 			concurrency = s.concurrencyLimiter.GetAndResetIntervalPeak()
 		}
 		s.metricsCollector.SnapshotConcurrency(concurrency)
+		s.backendMetrics.SnapshotAll()
 	}
 }
 
@@ -279,17 +368,25 @@ func (s *Service) dateCheckLoop() {
 }
 
 // RecordHourlyStat 记录小时级统计
-func (s *Service) RecordHourlyStat(userID string, modelID string, inputTokens, outputTokens int, durationMs int64) {
+func (s *Service) RecordHourlyStat(userID string, modelID string, backendID string, inputTokens, outputTokens int, durationMs int64) {
 	s.hourlyCounter.Increment(userID, modelID, inputTokens, outputTokens)
 	// 同时记录到5分钟级指标采集器
 	if durationMs > 0 {
 		s.metricsCollector.RecordDuration(durationMs)
+		if backendID != "" {
+			s.backendMetrics.RecordDuration(backendID, durationMs)
+		}
 	}
 }
 
 // GetMetricsHistory 获取最近24小时的5分钟级指标历史
 func (s *Service) GetMetricsHistory() []MetricsSnapshot {
 	return s.metricsCollector.GetHistory()
+}
+
+// GetBackendMetricsHistory 获取按后端分组的5分钟级指标历史
+func (s *Service) GetBackendMetricsHistory() map[string][]BackendMetricsSnapshot {
+	return s.backendMetrics.GetHistory()
 }
 
 // DashboardStats 系统概览

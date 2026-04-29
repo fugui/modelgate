@@ -27,6 +27,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/departments", h.GetDepartmentStats)
 	r.GET("/models", h.GetModelStats)
 	r.GET("/metrics", h.GetMetrics)
+	r.GET("/backend-metrics", h.GetBackendMetrics)
 }
 
 // GetDashboardStats 获取系统概览数据
@@ -125,6 +126,17 @@ func (h *Handler) GetMetrics(c *gin.Context) {
 	metrics := h.service.GetMetricsHistory()
 	if metrics == nil {
 		metrics = []MetricsSnapshot{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data": metrics,
+	})
+}
+
+// GetBackendMetrics 获取按后端分组的5分钟级时延指标
+func (h *Handler) GetBackendMetrics(c *gin.Context) {
+	metrics := h.service.GetBackendMetricsHistory()
+	if metrics == nil {
+		metrics = make(map[string][]BackendMetricsSnapshot)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"data": metrics,

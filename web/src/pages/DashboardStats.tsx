@@ -67,6 +67,12 @@ interface DashboardData {
     avg_latency_ms: number;
     request_count: number;
   }[];
+
+  backend_metrics: {
+    time_label: string;
+    [backendId: string]: number | string; // dynamic keys: backend_xxx for latency values
+  }[];
+  backend_ids: string[];
 }
 
 
@@ -77,11 +83,12 @@ const DashboardStats: React.FC = () => {
 
   const fetchStats = async () => {
     try {
-      const [statsRes, hourlyRes, topUsersRes, metricsRes] = await Promise.all([
+      const [statsRes, hourlyRes, topUsersRes, metricsRes, backendMetricsRes] = await Promise.all([
         api.get('/api/v1/dashboard/stats'),
         api.get('/api/v1/dashboard/hourly'),
         api.get('/api/v1/dashboard/top-users'),
         api.get('/api/v1/dashboard/metrics'),
+        api.get('/api/v1/dashboard/backend-metrics'),
       ]);
       const stats = statsRes.data.data || {};
       setData({
@@ -115,6 +122,29 @@ const DashboardStats: React.FC = () => {
           ...m,
           avg_latency_ms: Math.round((m.avg_latency_ms || 0) * 100) / 100,
         })),
+
+        // 处理 backend metrics: 将 { backendId: [{time_label, avg_latency_ms}] } 转为统一时间轴
+        ...(() => {
+          const raw: Record<string, { time_label: string; avg_latency_ms: number; request_count: number }[]> = backendMetricsRes.data.data || {};
+          const backendIds = Object.keys(raw);
+          if (backendIds.length === 0) {
+            return { backend_metrics: [] as any[], backend_ids: [] as string[] };
+          }
+          // 收集所有时间点并按顺序排列
+          const timeSet = new Set<string>();
+          backendIds.forEach(id => raw[id]?.forEach(s => timeSet.add(s.time_label)));
+          const timeLabels = Array.from(timeSet).sort();
+          // 构建每个时间点的行数据
+          const chartData = timeLabels.map(t => {
+            const row: any = { time_label: t };
+            backendIds.forEach(id => {
+              const snap = raw[id]?.find(s => s.time_label === t);
+              row[id] = snap ? Math.round(snap.avg_latency_ms * 100) / 100 : null;
+            });
+            return row;
+          });
+          return { backend_metrics: chartData, backend_ids: backendIds };
+        })(),
       });
     } catch (error: any) {
       message.error('获取统计数据失败: ' + (error.response?.data?.error || error.message));
@@ -138,7 +168,7 @@ const DashboardStats: React.FC = () => {
     return <Empty description="无法加载数据" />;
   }
 
-  const { summary, hourly_stats: hourlyStats, top_users: topUsers, metrics_history: metricsHistory } = data;
+  const { summary, hourly_stats: hourlyStats, top_users: topUsers, metrics_history: metricsHistory, backend_metrics: backendMetrics, backend_ids: backendIds } = data;
 
   const uniqueModels = Array.from(
     new Set(hourlyStats.flatMap((stat) => (stat.models ? Object.keys(stat.models) : [])))
@@ -331,6 +361,50 @@ const DashboardStats: React.FC = () => {
           </Card>
         </Col>
       </Row>
+
+      {/* 后端时延对比 */}
+      {backendMetrics.length > 0 && (
+        <Row gutter={16} style={{ marginBottom: 24 }}>
+          <Col xs={24}>
+            <Card title="后端平均时延对比（最近24小时，5分钟粒度）">
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={backendMetrics}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="time_label"
+                    tick={{ fontSize: 11 }}
+                    interval={11}
+                  />
+                  <YAxis
+                    stroke="#666"
+                    label={{ value: '时延(ms)', angle: -90, position: 'insideLeft', offset: 10 }}
+                  />
+                  <Tooltip
+                    formatter={(value: any, name: any) => [
+                      value != null ? `${value} ms` : '-',
+                      name,
+                    ]}
+                    labelFormatter={(label: any) => `时间: ${label}`}
+                  />
+                  <Legend />
+                  {backendIds.map((id, index) => (
+                    <Line
+                      key={id}
+                      type="monotone"
+                      dataKey={id}
+                      stroke={chartColors[index % chartColors.length]}
+                      name={id}
+                      dot={false}
+                      strokeWidth={2}
+                      connectNulls
+                    />
+                  ))}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </Card>
+          </Col>
+        </Row>
+      )}
 
 
     </div>
