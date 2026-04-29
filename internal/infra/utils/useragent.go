@@ -5,161 +5,132 @@ import (
 	"strings"
 )
 
-// ParseClientType 将 User-Agent 字符串解析为简短的客户端类型标识
-func ParseClientType(userAgent string) string {
-	if userAgent == "" {
-		return "Unknown"
-	}
-
-	ua := strings.ToLower(userAgent)
-
-	// IDE / 开发工具（优先匹配，因为它们的 UA 可能包含浏览器关键字）
-	switch {
-	case strings.Contains(ua, "claude-code") || strings.Contains(ua, "claude-cli"):
-		return "Claude Code"
-	case strings.Contains(ua, "opencode"):
-		return "OpenCode"
-	case strings.Contains(ua, "cursor"):
-		return "Cursor"
-	case strings.Contains(ua, "vscode") || strings.Contains(ua, "visual studio code"):
-		return "VS Code"
-	case strings.Contains(ua, "jetbrains") || strings.Contains(ua, "intellij"):
-		return "JetBrains"
-	case strings.Contains(ua, "copilot"):
-		return "Copilot"
-	}
-
-	// 编程语言 HTTP 客户端
-	switch {
-	case strings.Contains(ua, "python-requests") || strings.Contains(ua, "httpx") || strings.Contains(ua, "aiohttp"):
-		return "Python"
-	case strings.Contains(ua, "go-http-client") || strings.Contains(ua, "go-resty"):
-		return "Go"
-	case strings.Contains(ua, "axios") || strings.Contains(ua, "node-fetch") || strings.Contains(ua, "undici"):
-		return "Node.js"
-	case strings.Contains(ua, "curl"):
-		return "curl"
-	case strings.Contains(ua, "wget"):
-		return "wget"
-	case strings.Contains(ua, "postman"):
-		return "Postman"
-	}
-
-	// 浏览器（注意顺序：Edge 的 UA 包含 Chrome，Safari 的 UA 也包含 Safari）
-	switch {
-	case strings.Contains(ua, "edg/"):
-		return "Edge"
-	case strings.Contains(ua, "chrome/") && !strings.Contains(ua, "edg/"):
-		return "Chrome"
-	case strings.Contains(ua, "firefox/"):
-		return "Firefox"
-	case strings.Contains(ua, "safari/") && !strings.Contains(ua, "chrome/"):
-		return "Safari"
-	case strings.Contains(ua, "mozilla/"):
-		return "Browser"
-	}
-
-	return "Unknown"
+// clientRule 客户端匹配规则
+type clientRule struct {
+	keywords []string          // UA 中需要包含的关键字（任一匹配即可）
+	exclude  []string          // UA 中不能包含的关键字
+	name     string            // 规范化名称
+	versionRe *regexp.Regexp   // 版本号提取正则（nil 表示不提取版本）
 }
 
-// FormatUserAgentForDisplay 将原始 UserAgent 和 Referer 解析为前端友好的显示名称
+// clientRules 按优先级排列的客户端识别规则
+// IDE/开发工具优先于浏览器（因为 IDE 的 UA 可能包含浏览器关键字）
+var clientRules = []clientRule{
+	// IDE / 开发工具
+	{keywords: []string{"claude-code", "claude-cli"}, name: "Claude Code",
+		versionRe: regexp.MustCompile(`(?i)(?:claude-code|claude-cli)[/\s]?([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"opencode"}, name: "OpenCode",
+		versionRe: regexp.MustCompile(`(?i)opencode[/\s]?([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"cursor"}, name: "Cursor",
+		versionRe: regexp.MustCompile(`(?i)cursor[/\s]?([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"vscode", "visual studio code"}, name: "VS Code",
+		versionRe: regexp.MustCompile(`(?i)vscode[/\s]?([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"jetbrains", "intellij"}, name: "JetBrains",
+		versionRe: regexp.MustCompile(`(?i)(?:jetbrains|intellij)[/\s]?([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"copilot"}, name: "Copilot"},
+
+	// 编程语言 HTTP 客户端
+	{keywords: []string{"python-requests", "httpx", "aiohttp"}, name: "Python"},
+	{keywords: []string{"go-http-client", "go-resty"}, name: "Go"},
+	{keywords: []string{"axios", "node-fetch", "undici"}, name: "Node.js"},
+
+	// 命令行工具
+	{keywords: []string{"curl"}, name: "curl",
+		versionRe: regexp.MustCompile(`(?i)curl[/\s]?([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"wget"}, name: "wget",
+		versionRe: regexp.MustCompile(`(?i)wget[/\s]?([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"postman"}, name: "Postman",
+		versionRe: regexp.MustCompile(`(?i)postman[/\s]?([0-9a-zA-Z.-]+)`)},
+
+	// 浏览器（注意顺序：Edge 的 UA 包含 Chrome，Safari 的 UA 也包含 Safari）
+	{keywords: []string{"edg/"}, name: "Edge",
+		versionRe: regexp.MustCompile(`(?i)edg/([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"chrome/"}, exclude: []string{"edg/"}, name: "Chrome",
+		versionRe: regexp.MustCompile(`(?i)chrome/([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"firefox/"}, name: "Firefox",
+		versionRe: regexp.MustCompile(`(?i)firefox/([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"safari/"}, exclude: []string{"chrome/"}, name: "Safari",
+		versionRe: regexp.MustCompile(`(?i)version/([0-9a-zA-Z.-]+)`)},
+	{keywords: []string{"mozilla/"}, name: "Browser"},
+}
+
+// parseUA 解析 User-Agent 字符串，返回客户端名称和版本号
+func parseUA(userAgent string) (name, version string) {
+	if userAgent == "" {
+		return "Unknown", ""
+	}
+
+	uaLower := strings.ToLower(userAgent)
+
+	for _, rule := range clientRules {
+		matched := false
+		for _, kw := range rule.keywords {
+			if strings.Contains(uaLower, kw) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+
+		// 检查排除关键字
+		excluded := false
+		for _, ex := range rule.exclude {
+			if strings.Contains(uaLower, ex) {
+				excluded = true
+				break
+			}
+		}
+		if excluded {
+			continue
+		}
+
+		// 提取版本号
+		ver := ""
+		if rule.versionRe != nil {
+			if m := rule.versionRe.FindStringSubmatch(userAgent); len(m) > 1 {
+				ver = m[1]
+			}
+		}
+
+		return rule.name, ver
+	}
+
+	// 未匹配到任何规则
+	return "", ""
+}
+
+// ParseClientType 将 User-Agent 字符串解析为简短的客户端类型标识（不含版本号）
+func ParseClientType(userAgent string) string {
+	name, _ := parseUA(userAgent)
+	if name == "" {
+		return "Unknown"
+	}
+	return name
+}
+
+// FormatUserAgentForDisplay 将原始 UserAgent 和 Referer 解析为前端友好的显示名称（含版本号）
 func FormatUserAgentForDisplay(userAgent string, referer string) string {
 	// 如果来源是网页的 /chat，认为是演练场
 	if referer != "" && strings.Contains(referer, "/chat") {
 		return "演练场"
 	}
 
-	if userAgent == "" {
-		return "Unknown"
-	}
-
-	ua := userAgent
-	uaLower := strings.ToLower(ua)
-
-	// 提取名称和版本号，例如 "Claude Code/2.1.84" 或 "Cursor 0.45.0"
-	re := regexp.MustCompile(`(?i)(claude-code|claude-cli|opencode|cursor|vscode|jetbrains|intellij|copilot|postman|curl|wget)[/\s]?([0-9a-zA-Z.-]+)?`)
-	matches := re.FindStringSubmatch(ua)
-
-	if len(matches) > 1 {
-		name := matches[1]
-		version := ""
-		if len(matches) > 2 {
-			version = matches[2]
+	name, version := parseUA(userAgent)
+	if name == "" {
+		// 未匹配：返回截断的原始 UA
+		if len(userAgent) > 30 {
+			return userAgent[:27] + "..."
 		}
-
-		// 规范化名称
-		switch strings.ToLower(name) {
-		case "claude-code", "claude-cli":
-			name = "Claude Code"
-		case "opencode":
-			name = "OpenCode"
-		case "cursor":
-			name = "Cursor"
-		case "vscode":
-			name = "VS Code"
-		case "jetbrains", "intellij":
-			name = "JetBrains"
-		case "postman":
-			name = "Postman"
-		case "curl":
-			name = "curl"
-		case "wget":
-			name = "wget"
+		if userAgent == "" {
+			return "Unknown"
 		}
-
-		if version != "" {
-			return name + " " + version
-		}
-		return name
+		return userAgent
 	}
 
-	// 编程语言 HTTP 客户端
-	if strings.Contains(uaLower, "python-requests") || strings.Contains(uaLower, "httpx") || strings.Contains(uaLower, "aiohttp") {
-		return "Python"
+	if version != "" {
+		return name + " " + version
 	}
-	if strings.Contains(uaLower, "go-http-client") || strings.Contains(uaLower, "go-resty") {
-		return "Go"
-	}
-	if strings.Contains(uaLower, "axios") || strings.Contains(uaLower, "node-fetch") || strings.Contains(uaLower, "undici") {
-		return "Node.js"
-	}
-
-	// 浏览器
-	if strings.Contains(uaLower, "edg/") {
-		re := regexp.MustCompile(`(?i)edg/([0-9a-zA-Z.-]+)`)
-		if m := re.FindStringSubmatch(ua); len(m) > 1 {
-			return "Edge " + m[1]
-		}
-		return "Edge"
-	}
-	if strings.Contains(uaLower, "chrome/") && !strings.Contains(uaLower, "edg/") {
-		re := regexp.MustCompile(`(?i)chrome/([0-9a-zA-Z.-]+)`)
-		if m := re.FindStringSubmatch(ua); len(m) > 1 {
-			return "Chrome " + m[1]
-		}
-		return "Chrome"
-	}
-	if strings.Contains(uaLower, "firefox/") {
-		re := regexp.MustCompile(`(?i)firefox/([0-9a-zA-Z.-]+)`)
-		if m := re.FindStringSubmatch(ua); len(m) > 1 {
-			return "Firefox " + m[1]
-		}
-		return "Firefox"
-	}
-	if strings.Contains(uaLower, "safari/") && !strings.Contains(uaLower, "chrome/") {
-		re := regexp.MustCompile(`(?i)version/([0-9a-zA-Z.-]+)`)
-		if m := re.FindStringSubmatch(ua); len(m) > 1 {
-			return "Safari " + m[1]
-		}
-		return "Safari"
-	}
-	if strings.Contains(uaLower, "mozilla/") {
-		return "Browser"
-	}
-
-	// 如果没有匹配上，则返回截断的原始 UA 以避免过长
-	if len(ua) > 30 {
-		return ua[:27] + "..."
-	}
-	return ua
+	return name
 }
