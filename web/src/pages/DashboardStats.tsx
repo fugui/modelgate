@@ -123,22 +123,24 @@ const DashboardStats: React.FC = () => {
           avg_latency_ms: Math.round((m.avg_latency_ms || 0) * 100) / 100,
         })),
 
-        // 处理 backend metrics: 将 { backendId: [{time_label, avg_latency_ms}] } 转为统一时间轴
+        // 处理 backend metrics: 将 { backendId: [{timestamp, time_label, avg_latency_ms}] } 转为统一时间轴
         ...(() => {
-          const raw: Record<string, { time_label: string; avg_latency_ms: number; request_count: number }[]> = backendMetricsRes.data.data || {};
+          const raw: Record<string, { timestamp: number; time_label: string; avg_latency_ms: number; request_count: number }[]> = backendMetricsRes.data.data || {};
           const backendIds = Object.keys(raw);
           if (backendIds.length === 0) {
             return { backend_metrics: [] as any[], backend_ids: [] as string[] };
           }
-          // 收集所有时间点并按顺序排列
-          const timeSet = new Set<string>();
-          backendIds.forEach(id => raw[id]?.forEach(s => timeSet.add(s.time_label)));
-          const timeLabels = Array.from(timeSet).sort();
+          // 收集所有时间戳并按时间排序（解决跨天排序问题）
+          const timeMap = new Map<number, string>(); // timestamp -> time_label
+          backendIds.forEach(id => raw[id]?.forEach(s => {
+            if (!timeMap.has(s.timestamp)) timeMap.set(s.timestamp, s.time_label);
+          }));
+          const timestamps = Array.from(timeMap.keys()).sort((a, b) => a - b);
           // 构建每个时间点的行数据
-          const chartData = timeLabels.map(t => {
-            const row: any = { time_label: t };
+          const chartData = timestamps.map(ts => {
+            const row: any = { time_label: timeMap.get(ts) };
             backendIds.forEach(id => {
-              const snap = raw[id]?.find(s => s.time_label === t);
+              const snap = raw[id]?.find(s => s.timestamp === ts);
               row[`${id}_latency`] = snap ? Math.round(snap.avg_latency_ms * 100) / 100 : null;
               row[`${id}_requests`] = snap ? snap.request_count : 0;
             });

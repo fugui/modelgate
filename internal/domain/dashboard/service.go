@@ -221,6 +221,7 @@ func (mc *MetricsCollector) GetHistory() []MetricsSnapshot {
 
 // BackendMetricsSnapshot 单个后端的指标快照
 type BackendMetricsSnapshot struct {
+	Timestamp    int64   `json:"timestamp"`     // Unix 秒级时间戳，用于前端排序
 	TimeLabel    string  `json:"time_label"`
 	AvgLatencyMs float64 `json:"avg_latency_ms"`
 	RequestCount int     `json:"request_count"`
@@ -294,6 +295,7 @@ func (bmc *BackendMetricsCollector) GetHistory() map[string][]BackendMetricsSnap
 				avgLatency = float64(slot.totalDuration) / float64(slot.requestCount)
 			}
 			snapshots = append(snapshots, BackendMetricsSnapshot{
+				Timestamp:    slot.timestamp.Unix(),
 				TimeLabel:    slot.timestamp.Format("15:04"),
 				AvgLatencyMs: avgLatency,
 				RequestCount: slot.requestCount,
