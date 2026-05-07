@@ -34,7 +34,8 @@ interface BackendFormValues {
 }
 
 const BackendManage: React.FC = () => {
-  const { modelId } = useParams<{ modelId: string }>();
+  const { modelId: rawModelId } = useParams<{ modelId: string }>();
+  const modelId = rawModelId!;
   const navigate = useNavigate();
   const [backends, setBackends] = useState<Backend[]>([]);
   const [model, setModel] = useState<Model | null>(null);
@@ -69,7 +70,7 @@ const BackendManage: React.FC = () => {
     if (!modelId) return;
     setLoading(true);
     try {
-      const res = await api.get(`/api/v1/admin/models/${modelId}/backends`);
+      const res = await api.get(`/api/v1/admin/models/${encodeURIComponent(modelId)}/backends`);
       setBackends(res.data.data || []);
     } catch {
       messageApi.error('获取后端列表失败');
@@ -115,7 +116,7 @@ const BackendManage: React.FC = () => {
 
   const handleDeleteBackend = async (backend: Backend) => {
     try {
-      await api.delete(`/api/v1/admin/models/${modelId}/backends/${backend.id}`);
+      await api.delete(`/api/v1/admin/models/${encodeURIComponent(modelId)}/backends/${encodeURIComponent(backend.id)}`);
       messageApi.success('删除成功');
       fetchBackends();
     } catch {
@@ -126,10 +127,10 @@ const BackendManage: React.FC = () => {
   const handleBackendSubmit = async (values: BackendFormValues) => {
     try {
       if (editingBackend) {
-        await api.put(`/api/v1/admin/models/${modelId}/backends/${values.id}`, values);
+        await api.put(`/api/v1/admin/models/${encodeURIComponent(modelId)}/backends/${encodeURIComponent(values.id)}`, values);
         messageApi.success('更新成功');
       } else {
-        await api.post(`/api/v1/admin/models/${modelId}/backends`, values);
+        await api.post(`/api/v1/admin/models/${encodeURIComponent(modelId)}/backends`, values);
         messageApi.success('创建成功');
       }
       setBackendModalVisible(false);
@@ -142,7 +143,7 @@ const BackendManage: React.FC = () => {
 
   const handleToggleBackendEnabled = async (backend: Backend) => {
     try {
-      await api.put(`/api/v1/admin/models/${modelId}/backends/${backend.id}`, {
+      await api.put(`/api/v1/admin/models/${encodeURIComponent(modelId)}/backends/${encodeURIComponent(backend.id)}`, {
         ...backend,
         enabled: !backend.enabled,
       });

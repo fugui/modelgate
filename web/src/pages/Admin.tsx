@@ -241,7 +241,7 @@ const Admin: React.FC = () => {
       const modelsWithBackendCount = await Promise.all(
         modelsData.map(async (model: Model) => {
           try {
-            const backendsRes = await api.get(`/api/v1/admin/models/${model.id}/backends`);
+            const backendsRes = await api.get(`/api/v1/admin/models/${encodeURIComponent(model.id)}/backends`);
             const backendsList = backendsRes.data.data || [];
             return { ...model, backend_count: backendsList.length };
           } catch {
@@ -271,7 +271,7 @@ const Admin: React.FC = () => {
       const allBackends: Backend[] = [];
       for (const model of models) {
         try {
-          const res = await api.get(`/api/v1/admin/models/${model.id}/backends`);
+          const res = await api.get(`/api/v1/admin/models/${encodeURIComponent(model.id)}/backends`);
           const modelBackends = (res.data.data || []).map((b: Backend) => ({
             ...b,
             model_id: model.id,
@@ -358,7 +358,7 @@ const Admin: React.FC = () => {
 
   const handleDeleteModel = async (model: Model) => {
     try {
-      await api.delete(`/api/v1/admin/models/${model.id}`);
+      await api.delete(`/api/v1/admin/models/${encodeURIComponent(model.id)}`);
       messageApi.success('模型删除成功');
       fetchData();
     } catch (err: unknown) {
@@ -369,7 +369,7 @@ const Admin: React.FC = () => {
 
   const handleToggleModelEnabled = async (model: Model) => {
     try {
-      await api.put(`/api/v1/admin/models/${model.id}`, {
+      await api.put(`/api/v1/admin/models/${encodeURIComponent(model.id)}`, {
         name: model.name,
         description: model.description,
         enabled: !model.enabled,
@@ -392,7 +392,7 @@ const Admin: React.FC = () => {
   const fetchModelBackends = async (modelId: string) => {
     setBackendsLoading(true);
     try {
-      const res = await api.get(`/api/v1/admin/models/${modelId}/backends`);
+      const res = await api.get(`/api/v1/admin/models/${encodeURIComponent(modelId)}/backends`);
       setModelBackends(res.data.data || []);
     } catch {
       messageApi.error('获取后端列表失败');
@@ -423,7 +423,7 @@ const Admin: React.FC = () => {
 
       if (editingModel) {
         // Update existing model
-        await api.put(`/api/v1/admin/models/${editingModel.id}`, {
+        await api.put(`/api/v1/admin/models/${encodeURIComponent(editingModel.id)}`, {
           name: values.name,
           description: values.description,
           enabled: values.enabled,
@@ -446,7 +446,7 @@ const Admin: React.FC = () => {
         // If base_url is provided, also create a backend
         if (values.base_url) {
           try {
-            await api.post(`/api/v1/admin/models/${values.id}/backends`, {
+            await api.post(`/api/v1/admin/models/${encodeURIComponent(values.id)}/backends`, {
               id: `${values.id}-1`,
               base_url: values.base_url,
               api_key: values.api_key || '',
@@ -503,7 +503,7 @@ const Admin: React.FC = () => {
   const handleDeleteBackend = async (backend: Backend) => {
     if (!selectedModelId) return;
     try {
-      await api.delete(`/api/v1/admin/models/${selectedModelId}/backends/${backend.id}`);
+      await api.delete(`/api/v1/admin/models/${encodeURIComponent(selectedModelId)}/backends/${encodeURIComponent(backend.id)}`);
       messageApi.success('删除成功');
       fetchModelBackends(selectedModelId);
       fetchData(); // Refresh model list to update backend count
@@ -516,10 +516,10 @@ const Admin: React.FC = () => {
     if (!selectedModelId) return;
     try {
       if (editingBackend) {
-        await api.put(`/api/v1/admin/models/${selectedModelId}/backends/${values.id}`, values);
+        await api.put(`/api/v1/admin/models/${encodeURIComponent(selectedModelId)}/backends/${encodeURIComponent(values.id)}`, values);
         messageApi.success('更新成功');
       } else {
-        await api.post(`/api/v1/admin/models/${selectedModelId}/backends`, values);
+        await api.post(`/api/v1/admin/models/${encodeURIComponent(selectedModelId)}/backends`, values);
         messageApi.success('创建成功');
       }
       setBackendModalVisible(false);
@@ -534,7 +534,7 @@ const Admin: React.FC = () => {
   const handleToggleBackendEnabled = async (backend: Backend) => {
     if (!selectedModelId) return;
     try {
-      await api.put(`/api/v1/admin/models/${selectedModelId}/backends/${backend.id}`, {
+      await api.put(`/api/v1/admin/models/${encodeURIComponent(selectedModelId)}/backends/${encodeURIComponent(backend.id)}`, {
         ...backend,
         region: backend.region,
         enabled: !backend.enabled,

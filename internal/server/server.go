@@ -164,6 +164,8 @@ func (s *Server) initServices() {
 
 func (s *Server) setupRoutes() {
 	r := gin.New()
+	r.UseRawPath = true
+	r.UnescapePathValues = true
 	r.Use(gin.Recovery())
 	r.Use(gin.Logger())
 	r.Use(static.Serve())
