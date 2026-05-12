@@ -224,9 +224,11 @@ func (p *Proxy) prepareAndSendRequest(pctx *ProxyContext, backend *Backend) *htt
 		adjustMaxTokens(pctx.Payload, modelConfig.ContextWindow, pctx.InputTokens)
 	}
 
-	// 替换 model 名称
+	// 替换 model 名称：优先使用后端配置的模型名，否则使用负载均衡解析后的模型 ID
 	if backend.ModelName != "" {
 		pctx.Payload["model"] = backend.ModelName
+	} else {
+		pctx.Payload["model"] = req.ModelID
 	}
 
 	// 序列化请求体（整个流程只序列化这一次）
@@ -235,6 +237,9 @@ func (p *Proxy) prepareAndSendRequest(pctx *ProxyContext, backend *Backend) *htt
 		pctx.SendError(http.StatusInternalServerError, "api_error", "failed to marshal request body")
 		return nil
 	}
+
+	// Dump 阶段 2（实际发送给后端的请求体，包含 model 替换、参数注入、max_tokens 裁剪）
+	pctx.DumpTraffic(logger.Stage2ConvertedRequest, requestBody, false)
 
 	// 构造目标 URL
 	baseURL := strings.TrimSuffix(backend.URL, "/")

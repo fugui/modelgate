@@ -63,10 +63,9 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, extract Extra
 		c.Request.Header.Set("X-Request-ID", traceID)
 	}
 
-	// Dump 阶段 1 和 2
+	// Dump 阶段 1（客户端原始请求）
 	if p.trafficDumper != nil && p.trafficDumper.IsEnabled() {
 		p.trafficDumper.Dump(traceID, logger.Stage1ClientRequest, bodyBytes, false)
-		p.trafficDumper.Dump(traceID, logger.Stage2ConvertedRequest, openaiBody, false)
 	}
 
 	// 构造 BackendRequest
