@@ -380,6 +380,14 @@ const ModelTab: React.FC = () => {
       render: (weight: number) => <Tag color="blue">{weight}</Tag>,
     },
     {
+      title: '最大并发',
+      dataIndex: 'max_concurrency',
+      key: 'max_concurrency',
+      width: 100,
+      align: 'center' as const,
+      render: (max: number) => max > 0 ? <Tag color="orange">{max}</Tag> : <Tag color="default">无限制</Tag>,
+    },
+    {
       title: '健康状态',
       dataIndex: 'healthy',
       key: 'healthy',
