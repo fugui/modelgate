@@ -90,14 +90,14 @@ const SystemTab: React.FC = () => {
     try {
       const payload = {
         server: {
-          read_timeout: values.server.read_timeout,
-          write_timeout: values.server.write_timeout,
-          idle_timeout: values.server.idle_timeout,
+          read_timeout: values?.server?.read_timeout,
+          write_timeout: values?.server?.write_timeout,
+          idle_timeout: values?.server?.idle_timeout,
         },
         frontend: {
-          feedback_url: values.frontend.feedback_url || '',
-          dev_manual_url: values.frontend.dev_manual_url || '',
-          registration_enabled: values.frontend.registration_enabled || false,
+          feedback_url: values?.frontend?.feedback_url || '',
+          dev_manual_url: values?.frontend?.dev_manual_url || '',
+          registration_enabled: values?.frontend?.registration_enabled || false,
         }
       };
 
@@ -139,6 +139,7 @@ const SystemTab: React.FC = () => {
   const tabItems = [
     {
       key: 'frontend',
+      forceRender: true,
       label: (
         <span>
           <SettingOutlined /> 前端与基础配置
@@ -188,6 +189,7 @@ const SystemTab: React.FC = () => {
     },
     {
       key: 'timeouts',
+      forceRender: true,
       label: (
         <span>
           <HourglassOutlined /> 服务核心超时配置
