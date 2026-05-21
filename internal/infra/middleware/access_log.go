@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"modelgate/internal/infra/constants"
 )
 
 const (
@@ -181,15 +180,7 @@ func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 			}
 
 			// 异步记录访问日志，避免影响响应时间
-			// 截断超大请求体，避免内存泄漏或日志过大
-			var requestBodyStr string
-			if len(requestBody) > constants.MaxLogRequestBodySize {
-				requestBodyStr = string(requestBody[:constants.MaxLogRequestBodySize]) + "\n[truncated...]"
-			} else {
-				requestBodyStr = string(requestBody)
-			}
-			responseBodyCopy := responseBody // string 是不可变的，无需深拷贝
-
+			// 注意：requestBody 和 responseBody 的截断统一由 RecordAccessDetailed 内部处理
 			var inputTokens, outputTokens int
 			if inTokens, exists := c.Get("input_tokens"); exists {
 				inputTokens, _ = inTokens.(int)
@@ -214,9 +205,9 @@ func AccessLogMiddleware(usageService UsageRecorder) gin.HandlerFunc {
 				requestBytes,
 				responseBytes,
 				requestHeaders,
-				requestBodyStr,
+				string(requestBody),
 				responseHeaders,
-				responseBodyCopy,
+				responseBody,
 				inputTokens,
 				outputTokens,
 				durationMs,
@@ -270,87 +261,154 @@ func isStreamResponse(contentType string) bool {
 // parseStreamResponse 解析 SSE 流式响应，提取有效内容
 // 支持 OpenAI 格式 (choices[0].delta.content) 和 Claude 格式 (delta.text)
 func parseStreamResponse(body []byte) string {
+	type openaiStreamToolFunction struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	}
+
+	type openaiStreamToolCall struct {
+		Index    *int                     `json:"index"`
+		ID       string                   `json:"id"`
+		Type     string                   `json:"type"`
+		Function openaiStreamToolFunction `json:"function"`
+	}
+
+	type openaiStreamDelta struct {
+		Content          *string                `json:"content"`
+		ReasoningContent *string                `json:"reasoning_content"`
+		ToolCalls        []openaiStreamToolCall `json:"tool_calls"`
+	}
+
+	type openaiStreamChoice struct {
+		Index        int               `json:"index"`
+		Delta        openaiStreamDelta `json:"delta"`
+		FinishReason *string           `json:"finish_reason"`
+	}
+
+	type openaiStreamEvent struct {
+		Choices []openaiStreamChoice `json:"choices"`
+	}
+
+	type anthropicContentBlock struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+
+	type anthropicStreamDelta struct {
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		Thinking    string `json:"thinking"`
+		PartialJSON string `json:"partial_json"`
+	}
+
+	type anthropicStreamEvent struct {
+		Type         string                 `json:"type"`
+		Index        *int                   `json:"index"`
+		Delta        *anthropicStreamDelta  `json:"delta"`
+		ContentBlock *anthropicContentBlock `json:"content_block"`
+	}
+
 	var contents []string
 	var toolCalls []string
+	var inToolCall bool
 
-	lines := strings.Split(string(body), "\n")
+	bodyStr := strings.ReplaceAll(string(body), "\r\n", "\n")
+	lines := strings.Split(bodyStr, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data: ") {
+		var data string
+		if strings.HasPrefix(line, "data: ") {
+			data = strings.TrimPrefix(line, "data: ")
+		} else if strings.HasPrefix(line, "data:") {
+			data = strings.TrimPrefix(line, "data:")
+		} else {
 			continue
 		}
+		data = strings.TrimSpace(data)
 
-		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
 			break
 		}
 
-		// 解析 JSON
-		var event map[string]interface{}
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			continue
-		}
+		// 1. 尝试解析为 OpenAI 格式
+		var oe openaiStreamEvent
+		if err := json.Unmarshal([]byte(data), &oe); err == nil && len(oe.Choices) > 0 {
+			choice := oe.Choices[0]
+			delta := choice.Delta
 
-		// 尝试 OpenAI 格式: choices[0].delta.content
-		if choices, ok := event["choices"].([]interface{}); ok && len(choices) > 0 {
-			choice, ok := choices[0].(map[string]interface{})
-			if !ok {
-				continue
+			// 提取普通文本内容
+			if delta.Content != nil && *delta.Content != "" {
+				contents = append(contents, *delta.Content)
 			}
-			if delta, ok := choice["delta"].(map[string]interface{}); ok {
-				// 提取 content
-				if content, ok := delta["content"].(string); ok && content != "" {
-					contents = append(contents, content)
-				}
-				// 提取 tool_calls
-				if tcObjs, ok := delta["tool_calls"].([]interface{}); ok {
-					for _, tcObj := range tcObjs {
-						if tcMap, ok := tcObj.(map[string]interface{}); ok {
-							if fnMap, ok := tcMap["function"].(map[string]interface{}); ok {
-								if name, _ := fnMap["name"].(string); name != "" {
-									toolCalls = append(toolCalls, fmt.Sprintf("\n[Tool Call]: %s(", name))
-								}
-								if args, _ := fnMap["arguments"].(string); args != "" {
-									toolCalls = append(toolCalls, args)
-								}
-							}
+			// 提取思考/推理内容
+			if delta.ReasoningContent != nil && *delta.ReasoningContent != "" {
+				contents = append(contents, *delta.ReasoningContent)
+			}
+
+			// 提取 Tool Calls
+			if len(delta.ToolCalls) > 0 {
+				for _, tc := range delta.ToolCalls {
+					if tc.Function.Name != "" {
+						if inToolCall {
+							toolCalls = append(toolCalls, ")")
 						}
+						toolCalls = append(toolCalls, fmt.Sprintf("\n[Tool Call]: %s(", tc.Function.Name))
+						inToolCall = true
+					}
+					if tc.Function.Arguments != "" {
+						toolCalls = append(toolCalls, tc.Function.Arguments)
 					}
 				}
 			}
-		}
 
-		// 尝试 Claude 格式: delta.text, delta.partial_json
-		if delta, ok := event["delta"].(map[string]interface{}); ok {
-			// Claude 使用 delta.text 而不是 delta.content
-			if text, ok := delta["text"].(string); ok && text != "" {
-				contents = append(contents, text)
-			}
-			// Claude 思考块
-			if thinking, ok := delta["thinking"].(string); ok && thinking != "" {
-				contents = append(contents, "[Thinking]: "+thinking)
-			}
-			// Claude Tool Arguments
-			if partialJSON, ok := delta["partial_json"].(string); ok && partialJSON != "" {
-				toolCalls = append(toolCalls, partialJSON)
-			}
-		}
-
-		// 尝试 Claude Tool Use Start
-		if cb, ok := event["content_block"].(map[string]interface{}); ok {
-			if cbType, _ := cb["type"].(string); cbType == "tool_use" {
-				if name, _ := cb["name"].(string); name != "" {
-					toolCalls = append(toolCalls, fmt.Sprintf("\n[Tool Call]: %s(", name))
+			if choice.FinishReason != nil && *choice.FinishReason == "tool_calls" {
+				if inToolCall {
+					toolCalls = append(toolCalls, ")")
+					inToolCall = false
 				}
 			}
+			continue
 		}
+
+		// 2. 尝试解析为 Anthropic 格式
+		var ae anthropicStreamEvent
+		if err := json.Unmarshal([]byte(data), &ae); err == nil {
+			if ae.Type == "content_block_start" && ae.ContentBlock != nil {
+				if ae.ContentBlock.Type == "tool_use" && ae.ContentBlock.Name != "" {
+					if inToolCall {
+						toolCalls = append(toolCalls, ")")
+					}
+					toolCalls = append(toolCalls, fmt.Sprintf("\n[Tool Call]: %s(", ae.ContentBlock.Name))
+					inToolCall = true
+				}
+			} else if ae.Type == "content_block_delta" && ae.Delta != nil {
+				if ae.Delta.Type == "text_delta" && ae.Delta.Text != "" {
+					contents = append(contents, ae.Delta.Text)
+				}
+				if ae.Delta.Type == "thinking_delta" && ae.Delta.Thinking != "" {
+					contents = append(contents, "[Thinking]: "+ae.Delta.Thinking)
+				}
+				if ae.Delta.Type == "input_json_delta" && ae.Delta.PartialJSON != "" {
+					toolCalls = append(toolCalls, ae.Delta.PartialJSON)
+				}
+			} else if ae.Type == "content_block_stop" {
+				if inToolCall {
+					toolCalls = append(toolCalls, ")")
+					inToolCall = false
+				}
+			}
+			continue
+		}
+	}
+
+	if inToolCall {
+		toolCalls = append(toolCalls, ")")
 	}
 
 	result := strings.Join(contents, "")
 	if len(toolCalls) > 0 {
-		// Replace linebreaks inside arguments if needed, or close the parentheses (approximation as stream splits)
 		combinedTools := strings.Join(toolCalls, "")
-		// We can just append the collected raw chunks
 		result += "\n\n" + strings.TrimSpace(combinedTools)
 	}
 

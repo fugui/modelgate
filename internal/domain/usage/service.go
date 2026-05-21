@@ -239,10 +239,11 @@ func (s *Service) GetRecentAccess(userID uuid.UUID, limit int) []AccessLog {
 		}
 	})
 
-	// 按时间倒序排序（最新的在前）
-	for i, j := 0, len(logs)-1; i < j; i, j = i+1, j-1 {
-		logs[i], logs[j] = logs[j], logs[i]
-	}
+	// 按时间倒序排序（最新的在前），与 GetAllRecentAccess 保持一致
+	// 注意：不能用简单 reverse，因为 go 异步写入可能导致 ring buffer 中顺序不严格按时间排列
+	sort.SliceStable(logs, func(i, j int) bool {
+		return logs[i].Timestamp.After(logs[j].Timestamp)
+	})
 
 	// 限制返回条数
 	if len(logs) > limit {
