@@ -6,37 +6,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
-)
 
-// thoughtSignatureCache 缓存 Gemini 返回的 thought_signature（按 tool_call_id 索引）
-var thoughtSignatureCache sync.Map
+	"modelgate/internal/gateway/proxy"
+)
 
 // CacheThoughtSignature 存储 tool_call 的 thought_signature
 func CacheThoughtSignature(toolCallID string, extraContent interface{}) {
-	if toolCallID != "" && extraContent != nil {
-		thoughtSignatureCache.Store(toolCallID, extraContent)
-	}
+	proxy.CacheThoughtSignature(toolCallID, extraContent)
 }
 
 // GetThoughtSignature 获取缓存的 thought_signature
 func GetThoughtSignature(toolCallID string) (interface{}, bool) {
-	if val, ok := thoughtSignatureCache.Load(toolCallID); ok {
-		return val, true
-	}
-	// 尝试去掉 toolu_ 前缀（如果存在）
-	if strings.HasPrefix(toolCallID, "toolu_") {
-		if val, ok := thoughtSignatureCache.Load(strings.TrimPrefix(toolCallID, "toolu_")); ok {
-			return val, true
-		}
-	}
-	// 尝试加上 toolu_ 前缀（如果不存在）
-	if !strings.HasPrefix(toolCallID, "toolu_") {
-		if val, ok := thoughtSignatureCache.Load("toolu_" + toolCallID); ok {
-			return val, true
-		}
-	}
-	return nil, false
+	return proxy.GetThoughtSignature(toolCallID)
+}
+
+// ClearThoughtSignatureCache 清空签名缓存（用于测试）
+func ClearThoughtSignatureCache() {
+	proxy.ClearThoughtSignatureCache()
+}
+
+// RangeThoughtSignatureCache 遍历签名缓存（用于测试）
+func RangeThoughtSignatureCache(f func(key, value interface{}) bool) {
+	proxy.RangeThoughtSignatureCache(f)
 }
 
 // ToolUse 表示 Anthropic 的 tool_use 块
@@ -85,6 +76,17 @@ func ConvertToOpenAI(req *MessagesRequest) ([]byte, error) {
 		openaiReq["tools"] = convertToolsToOpenAI(req.Tools)
 	}
 
+	// 转换 thinking (静默优雅对齐)
+	if req.Thinking != nil {
+		if thinkingMap, ok := req.Thinking.(map[string]interface{}); ok {
+			if tType, _ := thinkingMap["type"].(string); tType == "enabled" {
+				if budget, ok := thinkingMap["budget_tokens"].(float64); ok && budget > 0 {
+					openaiReq["max_completion_tokens"] = int(budget)
+				}
+			}
+		}
+	}
+
 	return json.Marshal(openaiReq)
 }
 
@@ -127,6 +129,8 @@ func convertMessagesToOpenAI(req *MessagesRequest) []map[string]interface{} {
 func convertToolsToOpenAI(tools []Tool) []map[string]interface{} {
 	var openaiTools []map[string]interface{}
 	for _, tool := range tools {
+		cleanJSONSchema(tool.InputSchema)
+
 		openaiTools = append(openaiTools, map[string]interface{}{
 			"type": "function",
 			"function": map[string]interface{}{
@@ -137,6 +141,30 @@ func convertToolsToOpenAI(tools []Tool) []map[string]interface{} {
 		})
 	}
 	return openaiTools
+}
+
+func cleanJSONSchema(schema map[string]interface{}) {
+	if schema == nil {
+		return
+	}
+	delete(schema, "$schema")
+	delete(schema, "propertyNames")
+
+	if properties, ok := schema["properties"].(map[string]interface{}); ok {
+		for _, prop := range properties {
+			if propMap, ok := prop.(map[string]interface{}); ok {
+				cleanJSONSchema(propMap)
+			}
+		}
+	}
+
+	if addProps, ok := schema["additionalProperties"].(map[string]interface{}); ok {
+		cleanJSONSchema(addProps)
+	}
+
+	if items, ok := schema["items"].(map[string]interface{}); ok {
+		cleanJSONSchema(items)
+	}
 }
 
 func parseSystemMessage(system interface{}) []map[string]interface{} {
@@ -277,15 +305,48 @@ func buildOpenAIMessages(role string, parsed parsedAnthropicContent) []map[strin
 				}
 				// 注入缓存的 Gemini thought_signature
 				if extra, ok := GetThoughtSignature(toolUse.ID); ok {
+					// 1. 注入到 extra_content 根级别
 					tc["extra_content"] = extra
-					// 同时也注入到 function 内部，增加对某些 Gemini 适配层的兼容性
-					if extraMap, ok := extra.(map[string]interface{}); ok {
+
+					// 提取签名字符串
+					var sig string
+					if extraStr, ok := extra.(string); ok {
+						sig = extraStr
+					} else if extraMap, ok := extra.(map[string]interface{}); ok {
 						if google, ok := extraMap["google"].(map[string]interface{}); ok {
-							if sig, ok := google["thought_signature"].(string); ok {
-								if fnMap, ok := tc["function"].(map[string]interface{}); ok {
-									fnMap["thought_signature"] = sig
-								}
+							if s, ok := google["thought_signature"].(string); ok {
+								sig = s
+							} else if s, ok := google["thoughtSignature"].(string); ok {
+								sig = s
 							}
+						}
+						if sig == "" {
+							if s, ok := extraMap["thought_signature"].(string); ok {
+								sig = s
+							} else if s, ok := extraMap["thoughtSignature"].(string); ok {
+								sig = s
+							}
+						}
+					}
+
+					// 如果成功提取到有效签名，注入到所有可能的字段格式中，确保对各类网关/适配层的 100% 兼容性
+					if sig != "" {
+						// 2. 注入到 function 内部 (snake_case)
+						if fnMap, ok := tc["function"].(map[string]interface{}); ok {
+							fnMap["thought_signature"] = sig
+						}
+						// 3. 注入到 function 内部 (camelCase)
+						if fnMap, ok := tc["function"].(map[string]interface{}); ok {
+							fnMap["thoughtSignature"] = sig
+						}
+						// 4. 注入到 tool_call 根节点 (snake_case)
+						tc["thought_signature"] = sig
+						// 5. 注入到 tool_call 根节点 (camelCase)
+						tc["thoughtSignature"] = sig
+						// 6. 注入到 provider_specific_fields (LiteLLM 兼容)
+						tc["provider_specific_fields"] = map[string]interface{}{
+							"thought_signature": sig,
+							"thoughtSignature":  sig,
 						}
 					}
 				}
@@ -398,8 +459,18 @@ func ConvertFromOpenAI(body []byte, originalReq *MessagesRequest) ([]byte, error
 	content, _ := message["content"].(string)
 	reasoning, _ := message["reasoning_content"].(string)
 
+	// Extract global extra_content from choices[0].message, choices[0], or root
+	var globalExtraContent interface{}
+	if ec, ok := message["extra_content"]; ok {
+		globalExtraContent = ec
+	} else if ec, ok := choice["extra_content"]; ok {
+		globalExtraContent = ec
+	} else if ec, ok := openaiResp["extra_content"]; ok {
+		globalExtraContent = ec
+	}
+
 	// 构建 content blocks
-	contentBlocks := buildAnthropicContentBlocks(content, reasoning, message)
+	contentBlocks := buildAnthropicContentBlocks(content, reasoning, message, globalExtraContent)
 
 	anthropicResp := MessagesResponse{
 		ID:      extractOpenAIResponseID(openaiResp),
@@ -449,7 +520,7 @@ func extractStopReason(choice map[string]interface{}, message map[string]interfa
 	return nil
 }
 
-func buildAnthropicContentBlocks(content, reasoning string, message map[string]interface{}) []Block {
+func buildAnthropicContentBlocks(content, reasoning string, message map[string]interface{}, globalExtraContent interface{}) []Block {
 	var blocks []Block
 
 	if reasoning != "" {
@@ -461,7 +532,7 @@ func buildAnthropicContentBlocks(content, reasoning string, message map[string]i
 	}
 
 	if toolCalls, ok := message["tool_calls"].([]interface{}); ok && len(toolCalls) > 0 {
-		blocks = append(blocks, convertToolCallsToBlocks(toolCalls)...)
+		blocks = append(blocks, convertToolCallsToBlocks(toolCalls, globalExtraContent)...)
 	}
 
 	if len(blocks) == 0 {
@@ -470,7 +541,7 @@ func buildAnthropicContentBlocks(content, reasoning string, message map[string]i
 	return blocks
 }
 
-func convertToolCallsToBlocks(toolCalls []interface{}) []Block {
+func convertToolCallsToBlocks(toolCalls []interface{}, globalExtraContent interface{}) []Block {
 	var blocks []Block
 	for _, tc := range toolCalls {
 		if toolCall, ok := tc.(map[string]interface{}); ok {
@@ -482,6 +553,8 @@ func convertToolCallsToBlocks(toolCalls []interface{}) []Block {
 
 			if extraContent, ok := toolCall["extra_content"]; ok {
 				CacheThoughtSignature(cacheID, extraContent)
+			} else if globalExtraContent != nil {
+				CacheThoughtSignature(cacheID, globalExtraContent)
 			}
 
 			if function, ok := toolCall["function"].(map[string]interface{}); ok {
@@ -558,6 +631,7 @@ func (p *StreamParser) ParseLine(line string) (string, error) {
 
 func (p *StreamParser) handleExtraContent(delta map[string]interface{}) {
 	if extraContent, ok := delta["extra_content"]; ok {
+		p.state["pending_extra_content"] = extraContent
 		if lastID, ok := p.state["last_tool_id"].(string); ok && lastID != "" {
 			CacheThoughtSignature(lastID, extraContent)
 		}
@@ -587,6 +661,24 @@ func (p *StreamParser) getToolBlockIndex(openaiIdx int) int {
 	toolMap[openaiIdx] = nextIdx
 	p.state["next_block_index"] = nextIdx + 1
 	return nextIdx
+}
+
+func (p *StreamParser) getToolID(openaiIdx int) string {
+	idMap, ok := p.state["tool_id_map"].(map[int]string)
+	if !ok {
+		idMap = make(map[int]string)
+		p.state["tool_id_map"] = idMap
+	}
+	return idMap[openaiIdx]
+}
+
+func (p *StreamParser) setToolID(openaiIdx int, toolID string) {
+	idMap, ok := p.state["tool_id_map"].(map[int]string)
+	if !ok {
+		idMap = make(map[int]string)
+		p.state["tool_id_map"] = idMap
+	}
+	idMap[openaiIdx] = toolID
 }
 
 func (p *StreamParser) emitEvent(eventType string, data interface{}) {
@@ -703,18 +795,40 @@ func (p *StreamParser) handleToolCalls(delta map[string]interface{}) {
 					p.stopActiveBlock()
 				}
 
+				// 获取并记录/继承 toolID
+				toolID, _ := tcMap["id"].(string)
+				existingID := p.getToolID(openaiIdx)
+				if existingID != "" {
+					// 极其重要：如果已经为该 index 协商并分配了 ID（例如 name 字段在之前的 chunk 中先到且生成了随机 ID）
+					// 我们必须坚持并锁定使用该 ID，以与已经发送给客户端的 ID 一致，从而确保下一轮的 thought_signature 能被匹配到。
+					toolID = existingID
+					p.state["last_tool_id"] = toolID
+				} else if toolID != "" {
+					if !strings.HasPrefix(toolID, "toolu_") {
+						toolID = "toolu_" + toolID
+					}
+					p.setToolID(openaiIdx, toolID)
+					p.state["last_tool_id"] = toolID
+				} else {
+					toolID = p.getToolID(openaiIdx)
+				}
+
+				// 缓存 Gemini 的 extra_content（含 thought_signature），即使没有 function 对象也需要保存
+				if extraContent, ok := tcMap["extra_content"]; ok && toolID != "" {
+					CacheThoughtSignature(toolID, extraContent)
+				} else if pending, ok := p.state["pending_extra_content"]; ok && toolID != "" {
+					CacheThoughtSignature(toolID, pending)
+				}
+
 				if function, ok := tcMap["function"].(map[string]interface{}); ok {
 					if name, ok := function["name"].(string); ok && name != "" {
-						toolID, _ := tcMap["id"].(string)
 						if toolID == "" {
 							toolID = "toolu_" + generateID()
-						} else if !strings.HasPrefix(toolID, "toolu_") {
-							toolID = "toolu_" + toolID
-						}
-						p.state["last_tool_id"] = toolID
-						// 缓存 Gemini 的 extra_content（含 thought_signature）
-						if extraContent, ok := tcMap["extra_content"]; ok {
-							CacheThoughtSignature(toolID, extraContent)
+							p.setToolID(openaiIdx, toolID)
+							p.state["last_tool_id"] = toolID
+							if pending, ok := p.state["pending_extra_content"]; ok {
+								CacheThoughtSignature(toolID, pending)
+							}
 						}
 						p.state["active_block_index"] = anthropicIdx
 						p.emitEvent("content_block_start", map[string]interface{}{

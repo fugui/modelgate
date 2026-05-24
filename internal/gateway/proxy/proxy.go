@@ -92,6 +92,176 @@ type StreamChoice struct {
 	FinishReason *string                `json:"finish_reason"`
 }
 
+// OpenAIRequestHeader 优化后的轻量级请求解析器，避免对 messages 进行全量 unmarshal
+type OpenAIRequestHeader struct {
+	Model               string
+	Stream              bool
+	MaxTokens           *int
+	MaxCompletionTokens *int
+	Messages            []ChatMessage
+	Tools               []json.RawMessage
+	RawFields           map[string]json.RawMessage
+}
+
+type ChatMessage struct {
+	Role             string                   `json:"role"`
+	Content          json.RawMessage          `json:"content"`
+	Name             *string                  `json:"name,omitempty"`
+	ToolCallID       *string                  `json:"tool_call_id,omitempty"`
+	ToolCalls        []map[string]interface{} `json:"tool_calls,omitempty"`
+	ReasoningContent *string                  `json:"reasoning_content,omitempty"`
+}
+
+func (r *OpenAIRequestHeader) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, &r.RawFields); err != nil {
+		return err
+	}
+
+	if modelRaw, exists := r.RawFields["model"]; exists {
+		_ = json.Unmarshal(modelRaw, &r.Model)
+	}
+	if streamRaw, exists := r.RawFields["stream"]; exists {
+		_ = json.Unmarshal(streamRaw, &r.Stream)
+	}
+	if maxTokensRaw, exists := r.RawFields["max_tokens"]; exists {
+		_ = json.Unmarshal(maxTokensRaw, &r.MaxTokens)
+	}
+	if maxCompletionTokensRaw, exists := r.RawFields["max_completion_tokens"]; exists {
+		_ = json.Unmarshal(maxCompletionTokensRaw, &r.MaxCompletionTokens)
+	}
+	if messagesRaw, exists := r.RawFields["messages"]; exists {
+		_ = json.Unmarshal(messagesRaw, &r.Messages)
+	}
+	if toolsRaw, exists := r.RawFields["tools"]; exists {
+		_ = json.Unmarshal(toolsRaw, &r.Tools)
+	}
+	return nil
+}
+
+func (r *OpenAIRequestHeader) MarshalJSON() ([]byte, error) {
+	if r.RawFields == nil {
+		r.RawFields = make(map[string]json.RawMessage)
+	}
+
+	if r.Model != "" {
+		b, _ := json.Marshal(r.Model)
+		r.RawFields["model"] = b
+	} else {
+		delete(r.RawFields, "model")
+	}
+
+	bStream, _ := json.Marshal(r.Stream)
+	r.RawFields["stream"] = bStream
+
+	if r.MaxTokens != nil {
+		b, _ := json.Marshal(r.MaxTokens)
+		r.RawFields["max_tokens"] = b
+	} else {
+		delete(r.RawFields, "max_tokens")
+	}
+
+	if r.MaxCompletionTokens != nil {
+		b, _ := json.Marshal(r.MaxCompletionTokens)
+		r.RawFields["max_completion_tokens"] = b
+	} else {
+		delete(r.RawFields, "max_completion_tokens")
+	}
+
+	if len(r.Messages) > 0 {
+		b, _ := json.Marshal(r.Messages)
+		r.RawFields["messages"] = b
+	} else {
+		delete(r.RawFields, "messages")
+	}
+
+	if len(r.Tools) > 0 {
+		b, _ := json.Marshal(r.Tools)
+		r.RawFields["tools"] = b
+	} else {
+		delete(r.RawFields, "tools")
+	}
+
+	return json.Marshal(r.RawFields)
+}
+
+func (r *OpenAIRequestHeader) ToMap() map[string]interface{} {
+	b, _ := json.Marshal(r)
+	var m map[string]interface{}
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+func (r *OpenAIRequestHeader) EstimateTokens() int {
+	var contentBuilder strings.Builder
+
+	for _, msg := range r.Messages {
+		if len(msg.Content) > 0 {
+			var strContent string
+			if err := json.Unmarshal(msg.Content, &strContent); err == nil {
+				contentBuilder.WriteString(strContent)
+			} else {
+				var arrayContent []map[string]interface{}
+				if err := json.Unmarshal(msg.Content, &arrayContent); err == nil {
+					for _, block := range arrayContent {
+						if bType, _ := block["type"].(string); bType == "text" {
+							if bText, _ := block["text"].(string); bText != "" {
+								contentBuilder.WriteString(bText)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for _, toolObj := range r.Tools {
+		contentBuilder.Write(toolObj)
+	}
+
+	return utils.EstimateTokens(contentBuilder.String())
+}
+
+func (r *OpenAIRequestHeader) InjectParams(params map[string]interface{}) {
+	if len(params) == 0 {
+		return
+	}
+	if r.RawFields == nil {
+		r.RawFields = make(map[string]json.RawMessage)
+	}
+	for k, v := range params {
+		switch k {
+		case "model":
+			if r.Model == "" {
+				if strVal, ok := v.(string); ok {
+					r.Model = strVal
+				}
+			}
+		case "stream":
+			// skip stream injection
+		case "max_tokens":
+			if r.MaxTokens == nil && r.MaxCompletionTokens == nil {
+				if floatVal, ok := v.(float64); ok {
+					intVal := int(floatVal)
+					r.MaxTokens = &intVal
+				}
+			}
+		case "max_completion_tokens":
+			if r.MaxTokens == nil && r.MaxCompletionTokens == nil {
+				if floatVal, ok := v.(float64); ok {
+					intVal := int(floatVal)
+					r.MaxCompletionTokens = &intVal
+				}
+			}
+		default:
+			if _, exists := r.RawFields[k]; !exists {
+				if b, err := json.Marshal(v); err == nil {
+					r.RawFields[k] = b
+				}
+			}
+		}
+	}
+}
+
 // BackendRequest 后端请求参数（纯输入，由协议 Handler 构造）
 type BackendRequest struct {
 	ModelID     string
@@ -220,21 +390,24 @@ func (p *Proxy) prepareAndSendRequest(pctx *ProxyContext, backend *Backend) *htt
 	modelConfig, _ := p.modelStore.GetByID(req.ModelID)
 
 	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
-		injectModelParams(pctx.Payload, modelConfig.ModelParams)
+		pctx.Payload.InjectParams(modelConfig.ModelParams)
 	}
 
 	// 计算请求的 InputTokens（只计算一次，复用于 adjustMaxTokens 和日志记录）
-	pctx.InputTokens = utils.EstimateTokensFromPayload(pctx.Payload)
+	pctx.InputTokens = pctx.Payload.EstimateTokens()
 
 	if modelConfig != nil && modelConfig.ContextWindow > 0 {
 		adjustMaxTokens(pctx.Payload, modelConfig.ContextWindow, pctx.InputTokens)
 	}
 
+	// 自动为 OpenAI 兼容请求注入缓存的 Gemini thought_signature
+	injectOpenAIThoughtSignatures(pctx.Payload)
+
 	// 替换 model 名称：优先使用后端配置的模型名，否则使用负载均衡解析后的模型 ID
 	if backend.ModelName != "" {
-		pctx.Payload["model"] = backend.ModelName
+		pctx.Payload.Model = backend.ModelName
 	} else {
-		pctx.Payload["model"] = req.ModelID
+		pctx.Payload.Model = req.ModelID
 	}
 
 	// 序列化请求体（整个流程只序列化这一次）
@@ -414,6 +587,11 @@ func (p *Proxy) handleNormalResponse(pctx *ProxyContext, resp *http.Response) {
 		convertedRespBody = respBody
 	}
 
+	// 针对 OpenAI 兼容接口（不管是直接代理还是使用 Protocol 的兼容接口，如 /v1/chat/completions），在此提取并缓存 thought_signature
+	if pctx.Proto == nil || strings.Contains(pctx.GinCtx.Request.URL.Path, "/chat/completions") {
+		cacheThoughtSignaturesFromResponse(respBody)
+	}
+
 	pctx.DumpTraffic(fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode), respBody, false)
 	pctx.DumpTraffic(fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode), convertedRespBody, false)
 
@@ -567,6 +745,11 @@ func (p *Proxy) handleStreamResponse(pctx *ProxyContext, resp *http.Response) {
 				preciseOutputTokens = outToks
 			}
 
+			// 解析并缓存 OpenAI 兼容接口流中的 thought_signature
+			if strings.Contains(pctx.GinCtx.Request.URL.Path, "/chat/completions") {
+				cacheThoughtSignaturesFromStreamLine(line, streamState)
+			}
+
 			// Dump Stage 3 & 4
 			pctx.DumpTraffic(dumpFilename3, []byte(line), true)
 			if err == nil {
@@ -590,6 +773,9 @@ func (p *Proxy) handleStreamResponse(pctx *ProxyContext, resp *http.Response) {
 			// Dump Stage 3 & 4 for direct proxy
 			pctx.DumpTraffic(dumpFilename3, []byte(line), true)
 			pctx.DumpTraffic(dumpFilename4, []byte(line), true)
+
+			// 解析并缓存直通代理流中的 thought_signature
+			cacheThoughtSignaturesFromStreamLine(line, streamState)
 
 			writeMu.Lock()
 			_, _ = c.Writer.WriteString(line)
@@ -737,22 +923,21 @@ func convertHeaderName(key string) string {
 }
 
 // adjustMaxTokens 检查并裁剪 max_tokens 或 max_completion_tokens
-// 直接操作已解析的 payload map，inputTokens 由调用方预先计算并传入
-func adjustMaxTokens(payload map[string]interface{}, contextWindow int, inputTokens int) {
-	// 获取客户端请求的最大 Token 数
+// 直接操作已解析的 payload struct，inputTokens 由调用方预先计算并传入
+func adjustMaxTokens(reqHeader *OpenAIRequestHeader, contextWindow int, inputTokens int) {
+	if reqHeader == nil {
+		return
+	}
+
 	var maxTokens int
 	var tokenKey string
-	if mt, ok := payload["max_tokens"]; ok {
-		if val, ok := mt.(float64); ok {
-			maxTokens = int(val)
-			tokenKey = "max_tokens"
-		}
-	} else if mct, ok := payload["max_completion_tokens"]; ok {
-		// qwen or new openai format
-		if val, ok := mct.(float64); ok {
-			maxTokens = int(val)
-			tokenKey = "max_completion_tokens"
-		}
+
+	if reqHeader.MaxTokens != nil {
+		maxTokens = *reqHeader.MaxTokens
+		tokenKey = "max_tokens"
+	} else if reqHeader.MaxCompletionTokens != nil {
+		maxTokens = *reqHeader.MaxCompletionTokens
+		tokenKey = "max_completion_tokens"
 	}
 
 	if tokenKey == "" {
@@ -760,12 +945,21 @@ func adjustMaxTokens(payload map[string]interface{}, contextWindow int, inputTok
 	}
 
 	if inputTokens >= contextWindow {
-		payload[tokenKey] = 100
+		newVal := 100
+		if tokenKey == "max_tokens" {
+			reqHeader.MaxTokens = &newVal
+		} else {
+			reqHeader.MaxCompletionTokens = &newVal
+		}
 	} else if maxTokens <= 0 || inputTokens+maxTokens > contextWindow {
 		newMax := contextWindow - inputTokens
 		if newMax < 100 {
 			newMax = 100
 		}
-		payload[tokenKey] = newMax
+		if tokenKey == "max_tokens" {
+			reqHeader.MaxTokens = &newMax
+		} else {
+			reqHeader.MaxCompletionTokens = &newMax
+		}
 	}
 }

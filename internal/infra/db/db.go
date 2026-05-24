@@ -21,13 +21,19 @@ func New(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// SQLite optimizations
-	db.SetMaxOpenConns(1) // SQLite only supports one writer at a time
-	db.SetMaxIdleConns(1)
+	// SQLite optimizations with WAL mode enabled
+	db.SetMaxOpenConns(10) // Allow concurrent readers in WAL mode
+	db.SetMaxIdleConns(5)
 
-	// Enable foreign keys
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+	// Enable foreign keys, WAL mode, and busy timeout
+	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
+		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
 	}
 
 	return &DB{db}, nil
@@ -118,3 +124,4 @@ CREATE INDEX IF NOT EXISTS idx_quota_usage_date ON quota_usage_daily(date);
 
 	return nil
 }
+

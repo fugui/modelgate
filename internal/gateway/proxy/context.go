@@ -23,8 +23,8 @@ type ProxyContext struct {
 	// --- 协议转换器 ---
 	Proto Protocol
 
-	// --- 解析后的请求体（只解析一次，所有修改在 map 上完成）---
-	Payload map[string]interface{}
+	// --- 解析后的请求体（只解析一次，优化后的结构体）---
+	Payload *OpenAIRequestHeader
 
 	// --- 工作流中派生的状态 ---
 	StartTime    time.Time
@@ -72,7 +72,7 @@ func (pctx *ProxyContext) buildUsageRecord(statusCode, inputTokens, outputTokens
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
 		TraceID:         pctx.TraceID,
-		RequestPayload:  pctx.Payload,
+		RequestPayload:  pctx.Payload.ToMap(),
 		ResponsePayload: responsePayload,
 		TTFTMs:          ttftMs,
 	}
@@ -113,7 +113,7 @@ func (pctx *ProxyContext) RecordErrorUsage(statusCode int, errorMsg string) {
 		Error:          errorMsg,
 		InputTokens:    pctx.InputTokens,
 		TraceID:        pctx.TraceID,
-		RequestPayload: pctx.Payload,
+		RequestPayload: pctx.Payload.ToMap(),
 	})
 }
 
@@ -149,9 +149,9 @@ func (p *Proxy) NewProxyContext(c *gin.Context, req *BackendRequest, proto Proto
 	}
 
 	// 解析请求体（只解析一次）
-	var payload map[string]interface{}
+	var payload OpenAIRequestHeader
 	_ = json.Unmarshal(req.RequestBody, &payload)
-	pctx.Payload = payload
+	pctx.Payload = &payload
 
 	return pctx
 }

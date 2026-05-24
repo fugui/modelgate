@@ -167,6 +167,7 @@ type MessagesRequest struct {
 	TopK          int         `json:"top_k,omitempty"`
 	StopSequences []string    `json:"stop_sequences,omitempty"`
 	Tools         []Tool      `json:"tools,omitempty"` // 工具定义
+	Thinking      interface{} `json:"thinking,omitempty"` // 新增 Anthropic Claude 3.7 思考配置
 }
 
 // Message Anthropic 消息
