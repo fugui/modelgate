@@ -210,12 +210,13 @@ const ModelTab: React.FC = () => {
   };
 
   const generateBackendId = () => {
+    const safeModelId = selectedModelId ? selectedModelId.replace(/\./g, '_') : '';
     const existingIds = new Set(modelBackends.map(b => b.id));
     let seq = 1;
-    while (existingIds.has(`${selectedModelId}-${seq}`)) {
+    while (existingIds.has(`${safeModelId}-${seq}`)) {
       seq++;
     }
-    return `${selectedModelId}-${seq}`;
+    return `${safeModelId}-${seq}`;
   };
 
   const handleCreateBackend = () => {
