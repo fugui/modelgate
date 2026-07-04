@@ -363,14 +363,21 @@ func (cm *ConfigManager) GetPolicyByName(name string) *PolicyConfig {
 }
 
 
-func (cm *ConfigManager) UpdateTimeoutsAndFrontend(readTimeout, writeTimeout, idleTimeout time.Duration, frontend FrontendConfig) error {
+func (cm *ConfigManager) UpdateSystemSettings(readTimeout, writeTimeout, idleTimeout time.Duration, frontend FrontendConfig, clientFilter ClientFilterConfig) error {
 	return cm.updateAndNotify("all", nil, func(c *Config) error {
 		c.Server.ReadTimeout = readTimeout
 		c.Server.WriteTimeout = writeTimeout
 		c.Server.IdleTimeout = idleTimeout
 		c.Frontend = frontend
+		c.ClientFilter = clientFilter
 		return nil
 	})
+}
+
+// UpdateTimeoutsAndFrontend 已废弃，保留向后兼容
+func (cm *ConfigManager) UpdateTimeoutsAndFrontend(readTimeout, writeTimeout, idleTimeout time.Duration, frontend FrontendConfig) error {
+	cfg := cm.GetConfig()
+	return cm.UpdateSystemSettings(readTimeout, writeTimeout, idleTimeout, frontend, cfg.ClientFilter)
 }
 
 func (cm *ConfigManager) UpdateModels(models []ModelConfig) error {
@@ -419,13 +426,14 @@ func (cm *ConfigManager) deepCopyConfig(cfg *Config) *Config {
 		return nil
 	}
 	cp := &Config{
-		Server:      cfg.Server,
-		Database:    cfg.Database,
-		JWT:         cfg.JWT,
-		Admin:       cfg.Admin,
-		Logs:        cfg.Logs,
-		Frontend:    cfg.Frontend,
-		SSO:         cfg.SSO,
+		Server:       cfg.Server,
+		Database:     cfg.Database,
+		JWT:          cfg.JWT,
+		Admin:        cfg.Admin,
+		Logs:         cfg.Logs,
+		Frontend:     cfg.Frontend,
+		SSO:          cfg.SSO,
+		ClientFilter: cm.deepCopyClientFilter(cfg.ClientFilter),
 	}
 	if cfg.Models != nil {
 		cp.Models = make([]ModelConfig, len(cfg.Models))
@@ -457,6 +465,15 @@ func (cm *ConfigManager) deepCopyModel(m ModelConfig) ModelConfig {
 	if m.Backends != nil {
 		res.Backends = make([]BackendConfig, len(m.Backends))
 		copy(res.Backends, m.Backends)
+	}
+	return res
+}
+
+func (cm *ConfigManager) deepCopyClientFilter(cf ClientFilterConfig) ClientFilterConfig {
+	res := ClientFilterConfig{}
+	if cf.Rules != nil {
+		res.Rules = make([]ClientFilterRule, len(cf.Rules))
+		copy(res.Rules, cf.Rules)
 	}
 	return res
 }

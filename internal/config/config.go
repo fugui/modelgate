@@ -12,15 +12,28 @@ import (
 var validate = validator.New()
 
 type Config struct {
-	Server      ServerConfig      `yaml:"server" validate:"required"`
-	Database    DatabaseConfig    `yaml:"database" validate:"required"`
-	JWT         JWTConfig         `yaml:"jwt" validate:"required"`
-	Models      []ModelConfig     `yaml:"models" validate:"dive"`
-	Policies    []PolicyConfig    `yaml:"quota_policies" validate:"dive"`
-	Admin       AdminConfig       `yaml:"admin"`
-	Logs        LogConfig         `yaml:"logs"`
-	Frontend    FrontendConfig    `yaml:"frontend"`
-	SSO         SSOConfig         `yaml:"sso"`
+	Server       ServerConfig       `yaml:"server" validate:"required"`
+	Database     DatabaseConfig     `yaml:"database" validate:"required"`
+	JWT          JWTConfig          `yaml:"jwt" validate:"required"`
+	Models       []ModelConfig      `yaml:"models" validate:"dive"`
+	Policies     []PolicyConfig     `yaml:"quota_policies" validate:"dive"`
+	Admin        AdminConfig        `yaml:"admin"`
+	Logs         LogConfig          `yaml:"logs"`
+	Frontend     FrontendConfig     `yaml:"frontend"`
+	SSO          SSOConfig          `yaml:"sso"`
+	ClientFilter ClientFilterConfig `yaml:"client_filter"`
+}
+
+// ClientFilterRule 客户端封禁规则
+type ClientFilterRule struct {
+	Name    string `yaml:"name" json:"name"`       // 规则显示名称
+	Pattern string `yaml:"pattern" json:"pattern"` // User-Agent 子串匹配（不区分大小写）
+	Enabled bool   `yaml:"enabled" json:"enabled"` // true = 封禁此类客户端
+}
+
+// ClientFilterConfig 客户端过滤配置
+type ClientFilterConfig struct {
+	Rules []ClientFilterRule `yaml:"rules" json:"rules"`
 }
 
 type ServerConfig struct {
@@ -206,5 +219,15 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.SSO.Enabled && cfg.SSO.EmailClaim == "" {
 		cfg.SSO.EmailClaim = "email"
+	}
+	// 默认客户端封禁规则：Claude Code 默认封禁
+	if cfg.ClientFilter.Rules == nil {
+		cfg.ClientFilter.Rules = []ClientFilterRule{
+			{
+				Name:    "Claude Code",
+				Pattern: "claude-code",
+				Enabled: true,
+			},
+		}
 	}
 }

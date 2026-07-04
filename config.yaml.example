@@ -132,3 +132,15 @@ sso:
   client_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
   issuer_url: "https://login.microsoftonline.com/{tenant}/v2.0"
   email_claim: "email"      # 从 JWT Token 中提取邮箱的字段
+
+# 客户端访问控制（基于 User-Agent 封禁特定客户端类型）
+client_filter:
+  rules:
+    # Claude Code 默认被封禁（enabled: true 表示封禁）
+    - name: "Claude Code"
+      pattern: "claude-code"  # 不区分大小写的 User-Agent 子串匹配
+      enabled: true
+    # 示例：封禁其他客户端（enabled: false 表示不封禁，仅供参考）
+    # - name: "Custom Bot"
+    #   pattern: "my-bot"
+    #   enabled: false

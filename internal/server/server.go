@@ -213,12 +213,12 @@ func (s *Server) setupRoutes() {
 	// OpenAI 兼容代理接口
 	openaiAuth := middleware.ProxyAuthMiddleware(s.apiKeyService, s.jwtManager, s.userStore)
 	openaiHandler := openai.NewHandler(s.proxyInstance, s.usageService)
-	openaiHandler.RegisterRoutes(r, openaiAuth, s.limiter)
+	openaiHandler.RegisterRoutes(r, openaiAuth, s.limiter, middleware.ClientFilterMiddleware(s.cfgManager))
 
 	// Anthropic 兼容代理接口
 	anthropicAuth := middleware.ProxyAuthMiddleware(s.apiKeyService, s.jwtManager, s.userStore)
 	anthropicHandler := anthropic.NewHandler(s.proxyInstance, s.usageService)
-	anthropicHandler.RegisterRoutes(r, anthropicAuth, s.limiter)
+	anthropicHandler.RegisterRoutes(r, anthropicAuth, s.limiter, middleware.ClientFilterMiddleware(s.cfgManager))
 
 	s.engine = r
 }

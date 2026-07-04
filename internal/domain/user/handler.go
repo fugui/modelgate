@@ -34,8 +34,9 @@ type RefinedServerConfigJSON struct {
 }
 
 type RefinedSystemConfigJSON struct {
-	Server   RefinedServerConfigJSON `json:"server" binding:"required"`
-	Frontend config.FrontendConfig   `json:"frontend" binding:"required"`
+	Server       RefinedServerConfigJSON    `json:"server" binding:"required"`
+	Frontend     config.FrontendConfig      `json:"frontend" binding:"required"`
+	ClientFilter config.ClientFilterConfig  `json:"client_filter"`
 }
 
 type QuotaService interface {
@@ -760,7 +761,8 @@ func (h *Handler) GetSystemConfig(c *gin.Context) {
 				WriteTimeout: cfg.Server.WriteTimeout.String(),
 				IdleTimeout:  cfg.Server.IdleTimeout.String(),
 			},
-			Frontend: cfg.Frontend,
+			Frontend:     cfg.Frontend,
+			ClientFilter: cfg.ClientFilter,
 		},
 	})
 }
@@ -790,7 +792,7 @@ func (h *Handler) UpdateSystemConfig(c *gin.Context) {
 		return
 	}
 
-	if err := h.cm.UpdateTimeoutsAndFrontend(readTimeout, writeTimeout, idleTimeout, req.Frontend); err != nil {
+	if err := h.cm.UpdateSystemSettings(readTimeout, writeTimeout, idleTimeout, req.Frontend, req.ClientFilter); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save configuration: " + err.Error()})
 		return
 	}
