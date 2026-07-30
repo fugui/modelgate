@@ -18,8 +18,8 @@ import (
 )
 
 // validIDPattern defines the allowed characters for resource IDs (model ID, backend ID, etc.).
-// Only alphanumeric characters, hyphens, and underscores are permitted.
-var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+// Only alphanumeric characters, dots, hyphens, and underscores are permitted.
+var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // validateResourceID checks whether the given ID is safe to use in URL path segments.
 func validateResourceID(id, label string) error {
@@ -30,7 +30,7 @@ func validateResourceID(id, label string) error {
 		return fmt.Errorf("%s 长度不能超过 128 个字符", label)
 	}
 	if !validIDPattern.MatchString(id) {
-		return fmt.Errorf("%s 仅允许使用字母、数字、连字符(-)和下划线(_)，且必须以字母或数字开头", label)
+		return fmt.Errorf("%s 仅允许使用字母、数字、点(.)、连字符(-)和下划线(_)，且必须以字母或数字开头", label)
 	}
 	return nil
 }

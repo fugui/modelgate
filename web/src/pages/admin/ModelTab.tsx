@@ -210,7 +210,7 @@ const ModelTab: React.FC = () => {
   };
 
   const generateBackendId = () => {
-    const safeModelId = selectedModelId ? selectedModelId.replace(/\./g, '_') : '';
+    const safeModelId = selectedModelId || '';
     const existingIds = new Set(modelBackends.map(b => b.id));
     let seq = 1;
     while (existingIds.has(`${safeModelId}-${seq}`)) {
@@ -556,8 +556,8 @@ const ModelTab: React.FC = () => {
               { required: true, message: '请输入后端ID' },
               { max: 128, message: '后端ID长度不能超过128个字符' },
               {
-                pattern: /^[a-zA-Z0-9][a-zA-Z0-9_\-]*$/,
-                message: '仅允许字母、数字、连字符(-)和下划线(_)，且必须以字母或数字开头',
+                pattern: /^[a-zA-Z0-9][a-zA-Z0-9._\-]*$/,
+                message: '仅允许字母、数字、点(.)、连字符(-)和下划线(_)，且必须以字母或数字开头',
               },
             ]}
             extra="唯一标识，如：backend-1, aws-us-east-1"
@@ -644,8 +644,8 @@ const ModelTab: React.FC = () => {
               { required: true, message: '请输入模型ID' },
               { max: 128, message: '模型ID长度不能超过128个字符' },
               {
-                pattern: /^[a-zA-Z0-9][a-zA-Z0-9_\-]*$/,
-                message: '仅允许字母、数字、连字符(-)和下划线(_)，且必须以字母或数字开头',
+                pattern: /^[a-zA-Z0-9][a-zA-Z0-9._\-]*$/,
+                message: '仅允许字母、数字、点(.)、连字符(-)和下划线(_)，且必须以字母或数字开头',
               },
             ]}
             extra="唯一标识，如：gpt-4, claude-3-opus"
