@@ -412,10 +412,7 @@ func (h *ModelHandler) ImportFromGateway(c *gin.Context) {
 		}
 
 		// Sanitize model ID: Remove 'models/' prefix if present, then replace slashes with dashes
-		sanitizedModelID := modelID
-		if strings.HasPrefix(sanitizedModelID, "models/") {
-			sanitizedModelID = strings.TrimPrefix(sanitizedModelID, "models/")
-		}
+		sanitizedModelID := strings.TrimPrefix(modelID, "models/")
 		sanitizedModelID = strings.ReplaceAll(sanitizedModelID, "/", "-")
 
 		// Check if model exists
