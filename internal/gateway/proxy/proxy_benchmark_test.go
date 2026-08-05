@@ -31,8 +31,7 @@ func createMockPayload(numMessages int) []byte {
 
 func BenchmarkOldMapApproach(b *testing.B) {
 	data := createMockPayload(100)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var payload map[string]interface{}
 		_ = json.Unmarshal(data, &payload)
 
@@ -51,8 +50,7 @@ func BenchmarkOldMapApproach(b *testing.B) {
 
 func BenchmarkNewOptimizedApproach(b *testing.B) {
 	data := createMockPayload(100)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var payload OpenAIRequestHeader
 		_ = json.Unmarshal(data, &payload)
 

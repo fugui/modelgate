@@ -905,9 +905,7 @@ func convertHeaderName(key string) string {
 	name = strings.TrimSuffix(name, "__")
 
 	// 如果是 "header_xxx" 格式，提取后半部分
-	if strings.HasPrefix(name, "header_") {
-		name = strings.TrimPrefix(name, "header_")
-	}
+	name = strings.TrimPrefix(name, "header_")
 
 	// 将下划线分割的单词转换为首字母大写，然后用连字符连接
 	// user_agent -> User-Agent
