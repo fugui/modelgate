@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -34,12 +35,11 @@ type BackendHealth struct {
 	ActiveConcurrency int32     `json:"active_concurrency"` // 当前活跃并发数（atomic）
 }
 
-// RoundRobinBalancer 轮询负载均衡器
+// RoundRobinBalancer 加权最少连接负载均衡器（Weighted Least-Connections）
 type RoundRobinBalancer struct {
-	mu         sync.RWMutex
-	backends   map[string][]Backend      // modelID -> backends
-	counters   map[string]*uint32        // modelID -> counter
-	health     map[string]*BackendHealth // backend -> health status
+	mu       sync.RWMutex
+	backends map[string][]Backend      // modelID -> backends
+	health   map[string]*BackendHealth // backend -> health status
 	httpClient *http.Client
 }
 
@@ -56,7 +56,6 @@ type Backend struct {
 func NewRoundRobinBalancer() *RoundRobinBalancer {
 	return &RoundRobinBalancer{
 		backends:   make(map[string][]Backend),
-		counters:   make(map[string]*uint32),
 		health:     make(map[string]*BackendHealth),
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
@@ -79,11 +78,6 @@ func (lb *RoundRobinBalancer) AddBackend(modelID string, backend Backend) {
 			MaxConcurrency: backend.MaxConcurrency,
 		}
 	}
-
-	if lb.counters[modelID] == nil {
-		var counter uint32
-		lb.counters[modelID] = &counter
-	}
 }
 
 func (lb *RoundRobinBalancer) Next(modelID string, defaultModel string) (*Backend, string, bool) {
@@ -104,42 +98,91 @@ func (lb *RoundRobinBalancer) Next(modelID string, defaultModel string) (*Backen
 	return lb.tryGetBackend(modelID, modelID)
 }
 
-// tryGetBackend 尝试获取指定 model 的 backend
-// requestedModel 是原始请求的 model（用于日志）
-// lookupModel 是要查找 backend 的 model
+// tryGetBackend 使用加权最少连接策略（Weighted Least-Connections）选择后端并原子性地获取并发许可
+// 加权负载率 = ActiveConcurrency / Weight，优先选择加权负载率最低的健康后端
+// 使用随机起始索引打破平局，防止低并发时流量偏斜到固定后端
+// 返回的后端已完成并发计数递增，调用方无需再次调用 AcquireBackend
 func (lb *RoundRobinBalancer) tryGetBackend(lookupModel string, requestedModel string) (*Backend, string, bool) {
 	backends := lb.backends[lookupModel]
 	if len(backends) == 0 {
 		return nil, requestedModel, false
 	}
 
-	counter := lb.counters[lookupModel]
-	attempts := len(backends)
+	// 加权最少连接策略（Weighted Least-Connections）：
+	// 选择 ActiveConcurrency/Weight 最小的健康后端
+	// 使用随机起始索引打破平局，防止并发数相同时总是选择同一个后端
+	// 重试最多 3 次以应对 CAS 竞争
+	for attempt := 0; attempt < 3; attempt++ {
+		var bestBackend *Backend
+		var bestHealth *BackendHealth
+		var bestConcurrency int32
+		var bestWeight int
+		found := false
 
-	// 尝试找到健康且未满载的后端
-	for i := 0; i < attempts; i++ {
-		idx := atomic.AddUint32(counter, 1) % uint32(len(backends))
-		backend := backends[idx]
+		startIdx := rand.Intn(len(backends))
+		for j := 0; j < len(backends); j++ {
+			i := (startIdx + j) % len(backends)
 
-		health, ok := lb.health[backend.ID]
-		if !ok || !health.Healthy {
-			continue
-		}
-
-		// 检查 per-backend 并发限制
-		if health.MaxConcurrency > 0 {
-			current := atomic.LoadInt32(&health.ActiveConcurrency)
-			if current >= int32(health.MaxConcurrency) {
-				logger.Infof("tryGetBackend: backend %s is at capacity (%d/%d), skipping", backend.ID, current, health.MaxConcurrency)
+			health, ok := lb.health[backends[i].ID]
+			if !ok || !health.Healthy {
 				continue
+			}
+
+			current := atomic.LoadInt32(&health.ActiveConcurrency)
+
+			// 跳过已满载的后端
+			if health.MaxConcurrency > 0 && current >= int32(health.MaxConcurrency) {
+				logger.Infof("tryGetBackend: backend %s is at capacity (%d/%d), skipping", backends[i].ID, current, health.MaxConcurrency)
+				continue
+			}
+
+			weight := backends[i].Weight
+			if weight <= 0 {
+				weight = 1
+			}
+
+			if !found {
+				bestConcurrency = current
+				bestWeight = weight
+				bestBackend = &backends[i]
+				bestHealth = health
+				found = true
+				continue
+			}
+
+			// 加权比较: current/weight vs bestConcurrency/bestWeight
+			// 交叉乘法避免浮点: current * bestWeight < bestConcurrency * weight
+			if int64(current)*int64(bestWeight) < int64(bestConcurrency)*int64(weight) {
+				bestConcurrency = current
+				bestWeight = weight
+				bestBackend = &backends[i]
+				bestHealth = health
 			}
 		}
 
-		// 原剀引用就是 OK 的，可以使用
-		if lookupModel != requestedModel {
-			logger.Infof("tryGetBackend: using fallback model %s for request model %s (backend: %s)", lookupModel, requestedModel, backend.ID)
+		if !found {
+			break // 没有健康且未满载的后端
 		}
-		return &backend, lookupModel, true
+
+		// 原子性地获取并发许可
+		if bestHealth.MaxConcurrency > 0 {
+			// 使用 CAS 确保不超过并发上限
+			if atomic.CompareAndSwapInt32(&bestHealth.ActiveConcurrency, bestConcurrency, bestConcurrency+1) {
+				if lookupModel != requestedModel {
+					logger.Infof("tryGetBackend: using fallback model %s for request model %s (backend: %s)", lookupModel, requestedModel, bestBackend.ID)
+				}
+				return bestBackend, lookupModel, true
+			}
+			// CAS 失败（其他 goroutine 先获取了），重新扫描
+			continue
+		}
+
+		// 无并发限制，直接递增计数
+		atomic.AddInt32(&bestHealth.ActiveConcurrency, 1)
+		if lookupModel != requestedModel {
+			logger.Infof("tryGetBackend: using fallback model %s for request model %s (backend: %s)", lookupModel, requestedModel, bestBackend.ID)
+		}
+		return bestBackend, lookupModel, true
 	}
 
 	// 所有后端都不健康或满载
@@ -170,7 +213,10 @@ func (lb *RoundRobinBalancer) tryGetBackend(lookupModel string, requestedModel s
 		return nil, requestedModel, false
 	}
 
-	// 所有后端都不健康，降级使用第一个
+	// 所有后端都不健康，降级使用第一个（仍获取并发许可以保持计数准确）
+	if health, exists := lb.health[backends[0].ID]; exists {
+		atomic.AddInt32(&health.ActiveConcurrency, 1)
+	}
 	if lookupModel != requestedModel {
 		logger.Infof("tryGetBackend: all %d backends for fallback model %s are unhealthy, using first backend", len(backends), lookupModel)
 	} else {
@@ -184,8 +230,11 @@ func (lb *RoundRobinBalancer) MarkFailed(backendID string) {
 	defer lb.mu.Unlock()
 
 	if health, exists := lb.health[backendID]; exists {
-		health.Healthy = false
 		health.FailCount++
+		// 连续失败 3 次才标记为不健康（与健康检查阈值一致）
+		if health.FailCount >= 3 {
+			health.Healthy = false
+		}
 	}
 }
 
@@ -432,7 +481,6 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 
 	// 1. 构建新的后端映射
 	newBackends := make(map[string][]Backend)
-	newCounters := make(map[string]*uint32)
 
 	// 2. 遍历所有模型配置
 	for _, modelConfig := range models {
@@ -491,13 +539,6 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 		if len(modelBackends) > 0 {
 			newBackends[modelID] = modelBackends
 
-			// 6. 保留现有的计数器或创建新的
-			if existingCounter, exists := lb.counters[modelID]; exists {
-				newCounters[modelID] = existingCounter
-			} else {
-				var counter uint32
-				newCounters[modelID] = &counter
-			}
 			logger.Infof("ReloadConfig: model %s registered with %d backends", modelID, len(modelBackends))
 		} else {
 			logger.Infof("ReloadConfig: WARNING - model %s has no enabled backends!", modelID)
@@ -520,7 +561,6 @@ func (lb *RoundRobinBalancer) ReloadConfig(models []config.ModelConfig) {
 
 	// 8. 更新后端映射
 	lb.backends = newBackends
-	lb.counters = newCounters
 
 	logger.Infof("LoadBalancer config reloaded: %d models configured with backends", len(newBackends))
 	for modelID, backends := range newBackends {

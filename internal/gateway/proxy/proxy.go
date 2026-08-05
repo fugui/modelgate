@@ -359,6 +359,7 @@ func (p *Proxy) authenticateAndCheckQuota(pctx *ProxyContext) bool {
 }
 
 // selectBackend 通过负载均衡选择后端，并更新 pctx 上的 BackendID 和 ModelID
+// Next() 内部使用最少连接策略，选择并发数最低的后端，并原子性地获取并发许可
 // 返回 nil 表示无可用后端（错误已发送给客户端）
 func (p *Proxy) selectBackend(pctx *ProxyContext) *Backend {
 	req := pctx.Request
@@ -369,9 +370,6 @@ func (p *Proxy) selectBackend(pctx *ProxyContext) *Backend {
 		pctx.SendError(http.StatusTooManyRequests, "rate_limit_error", "all backends for model "+req.ModelID+" are at concurrency capacity, please retry later")
 		return nil
 	}
-
-	// 原子递增后端并发计数（Next() 已检查容量，这里确保计数准确）
-	p.lb.AcquireBackend(backend.ID)
 
 	req.ModelID = actualModelID
 	pctx.GinCtx.Set("model_id", actualModelID)
