@@ -17,6 +17,8 @@ type clientRule struct {
 // IDE/开发工具优先于浏览器（因为 IDE 的 UA 可能包含浏览器关键字）
 var clientRules = []clientRule{
 	// IDE / 开发工具
+	{keywords: []string{"codex", "codex-cli", "openai-codex"}, name: "Codex CLI",
+		versionRe: regexp.MustCompile(`(?i)(?:codex|codex-cli|openai-codex)[/\s]?([0-9a-zA-Z.-]+)`)},
 	{keywords: []string{"claude-code", "claude-cli"}, name: "Claude Code",
 		versionRe: regexp.MustCompile(`(?i)(?:claude-code|claude-cli)[/\s]?([0-9a-zA-Z.-]+)`)},
 	{keywords: []string{"opencode"}, name: "OpenCode",

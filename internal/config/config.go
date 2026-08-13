@@ -62,6 +62,21 @@ type LogConfig struct {
 	RawDumps      string `yaml:"raw_dumps" validate:"oneof=none error full"`
 }
 
+type FIMConfig struct {
+	Enabled        bool   `yaml:"enabled" json:"enabled"`
+	Mode           string `yaml:"mode" json:"mode"` // auto | native | prompt | disabled
+	Prefix         string `yaml:"prefix" json:"prefix"`
+	Suffix         string `yaml:"suffix" json:"suffix"`
+	Middle         string `yaml:"middle" json:"middle"`
+	SystemPrompt   string `yaml:"system_prompt" json:"system_prompt"`
+	TrimWhitespace bool   `yaml:"trim_whitespace" json:"trim_whitespace"`
+}
+
+type ResponsesConfig struct {
+	MaxOutputTokensField string `yaml:"max_output_tokens_field" json:"max_output_tokens_field"` // max_tokens | max_completion_tokens
+	ReasoningEvent       string `yaml:"reasoning_event" json:"reasoning_event"`                 // summary | text
+}
+
 type ModelConfig struct {
 	ID            string                 `yaml:"id" validate:"required"`
 	Name          string                 `yaml:"name" validate:"required"`
@@ -69,6 +84,8 @@ type ModelConfig struct {
 	Enabled       bool                   `yaml:"enabled"`
 	ContextWindow int                    `yaml:"context_window" validate:"min=0"`
 	ModelParams   map[string]interface{} `yaml:"model_params"`
+	FIM           FIMConfig              `yaml:"fim"`
+	Responses     ResponsesConfig        `yaml:"responses"`
 	Backends      []BackendConfig        `yaml:"backends" validate:"dive"`
 }
 

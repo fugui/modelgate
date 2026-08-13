@@ -455,6 +455,8 @@ func (cm *ConfigManager) deepCopyModel(m ModelConfig) ModelConfig {
 		Description:   m.Description,
 		Enabled:       m.Enabled,
 		ContextWindow: m.ContextWindow,
+		FIM:           m.FIM,
+		Responses:     m.Responses,
 	}
 	if m.ModelParams != nil {
 		res.ModelParams = make(map[string]interface{})

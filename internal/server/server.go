@@ -20,8 +20,10 @@ import (
 	"modelgate/internal/domain/usage"
 	"modelgate/internal/domain/user"
 	"modelgate/internal/gateway/anthropic"
+	"modelgate/internal/gateway/codex"
 	"modelgate/internal/gateway/openai"
 	"modelgate/internal/gateway/proxy"
+	"modelgate/internal/gateway/responses"
 	"modelgate/internal/infra/auth"
 	"modelgate/internal/infra/cache"
 	"modelgate/internal/infra/concurrency"
@@ -219,6 +221,16 @@ func (s *Server) setupRoutes() {
 	anthropicAuth := middleware.ProxyAuthMiddleware(s.apiKeyService, s.jwtManager, s.userStore)
 	anthropicHandler := anthropic.NewHandler(s.proxyInstance, s.usageService)
 	anthropicHandler.RegisterRoutes(r, anthropicAuth, s.limiter, middleware.ClientFilterMiddleware(s.cfgManager))
+
+	// Codex Text Completions 兼容代理接口
+	codexAuth := middleware.ProxyAuthMiddleware(s.apiKeyService, s.jwtManager, s.userStore)
+	codexHandler := codex.NewHandler(s.proxyInstance, s.usageService, s.cfgManager)
+	codexHandler.RegisterRoutes(r, codexAuth, s.limiter, middleware.ClientFilterMiddleware(s.cfgManager))
+
+	// OpenAI Responses API 兼容代理接口 (Codex CLI / OpenCode)
+	responsesAuth := middleware.ProxyAuthMiddleware(s.apiKeyService, s.jwtManager, s.userStore)
+	responsesHandler := responses.NewHandler(s.proxyInstance, s.usageService, s.cfgManager)
+	responsesHandler.RegisterRoutes(r, responsesAuth, s.limiter, middleware.ClientFilterMiddleware(s.cfgManager))
 
 	s.engine = r
 }

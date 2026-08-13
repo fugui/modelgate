@@ -281,12 +281,22 @@ func parseStreamResponse(body []byte) string {
 
 	type openaiStreamChoice struct {
 		Index        int               `json:"index"`
+		Text         *string           `json:"text"`
 		Delta        openaiStreamDelta `json:"delta"`
 		FinishReason *string           `json:"finish_reason"`
 	}
 
 	type openaiStreamEvent struct {
 		Choices []openaiStreamChoice `json:"choices"`
+	}
+
+	type responsesStreamEvent struct {
+		Type  string  `json:"type"`
+		Delta *string `json:"delta"`
+		Item  *struct {
+			Type string `json:"type"`
+			Name string `json:"name"`
+		} `json:"item"`
 	}
 
 	type anthropicContentBlock struct {
@@ -331,12 +341,15 @@ func parseStreamResponse(body []byte) string {
 			break
 		}
 
-		// 1. 尝试解析为 OpenAI 格式
+		// 1. 尝试解析为 OpenAI (Chat / Text Completions) 格式
 		var oe openaiStreamEvent
 		if err := json.Unmarshal([]byte(data), &oe); err == nil && len(oe.Choices) > 0 {
 			choice := oe.Choices[0]
 			delta := choice.Delta
 
+			if choice.Text != nil && *choice.Text != "" {
+				contents = append(contents, *choice.Text)
+			}
 			// 提取普通文本内容
 			if delta.Content != nil && *delta.Content != "" {
 				contents = append(contents, *delta.Content)
@@ -367,6 +380,28 @@ func parseStreamResponse(body []byte) string {
 					toolCalls = append(toolCalls, ")")
 					inToolCall = false
 				}
+			}
+			continue
+		}
+
+		// 2. 尝试解析为 Responses 格式
+		var re responsesStreamEvent
+		if err := json.Unmarshal([]byte(data), &re); err == nil && strings.HasPrefix(re.Type, "response.") {
+			if re.Type == "response.output_item.added" && re.Item != nil && re.Item.Type == "function_call" {
+				if inToolCall {
+					toolCalls = append(toolCalls, ")")
+				}
+				toolCalls = append(toolCalls, fmt.Sprintf("\n[Tool Call]: %s(", re.Item.Name))
+				inToolCall = true
+			} else if re.Type == "response.function_call_arguments.delta" && re.Delta != nil {
+				toolCalls = append(toolCalls, *re.Delta)
+			} else if re.Type == "response.function_call_arguments.done" {
+				if inToolCall {
+					toolCalls = append(toolCalls, ")")
+					inToolCall = false
+				}
+			} else if re.Delta != nil && *re.Delta != "" {
+				contents = append(contents, *re.Delta)
 			}
 			continue
 		}
