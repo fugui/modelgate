@@ -61,33 +61,79 @@ func ConvertToOpenAI(req *ResponsesRequest, modelCfg *config.ModelConfig) ([]byt
 	if len(req.Tools) > 0 {
 		var openaiTools []map[string]interface{}
 		for _, toolObj := range req.Tools {
-			if toolMap, ok := toolObj.(map[string]interface{}); ok {
-				if _, hasFunction := toolMap["function"]; hasFunction {
-					openaiTools = append(openaiTools, toolMap)
-				} else {
+			toolMap, ok := toolObj.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// 格式 1: 已包装的 OpenAI 标准格式 {"type": "function", "function": {"name": ...}}
+			if fn, hasFunction := toolMap["function"].(map[string]interface{}); hasFunction {
+				if name, ok := fn["name"].(string); ok && name != "" {
+					fnCopy := make(map[string]interface{})
+					for k, v := range fn {
+						fnCopy[k] = v
+					}
+					if params, ok := fnCopy["parameters"].(map[string]interface{}); ok {
+						cleanJSONSchema(params)
+					}
 					openaiTools = append(openaiTools, map[string]interface{}{
 						"type":     "function",
-						"function": toolMap,
+						"function": fnCopy,
 					})
 				}
+				continue
 			}
+
+			// 格式 2: Responses 扁平结构 {"type": "function", "name": "...", "description": "...", "parameters": ...}
+			// 或未声明 type 但包含 name
+			toolType, _ := toolMap["type"].(string)
+			if toolType == "function" || toolType == "" {
+				name, _ := toolMap["name"].(string)
+				if name != "" {
+					fn := make(map[string]interface{})
+					for k, v := range toolMap {
+						if k != "type" {
+							fn[k] = v
+						}
+					}
+					if params, ok := fn["parameters"].(map[string]interface{}); ok {
+						cleanJSONSchema(params)
+					}
+					openaiTools = append(openaiTools, map[string]interface{}{
+						"type":     "function",
+						"function": fn,
+					})
+				}
+				continue
+			}
+
+			// 格式 3: 内置工具（web_search, file_search, computer, local_shell 等）
+			// 后端 ChatCompletions 仅支持 type: "function"，不支持内置工具的直接执行，安全忽略过滤
 		}
-		openaiReq["tools"] = openaiTools
+
+		if len(openaiTools) > 0 {
+			openaiReq["tools"] = openaiTools
+		}
 	}
 
 	if req.ToolChoice != nil {
 		if tcStr, ok := req.ToolChoice.(string); ok {
 			openaiReq["tool_choice"] = tcStr
 		} else if tcMap, ok := req.ToolChoice.(map[string]interface{}); ok {
-			if _, hasFn := tcMap["function"]; hasFn {
-				openaiReq["tool_choice"] = tcMap
-			} else if name, ok := tcMap["name"].(string); ok {
+			if fn, hasFn := tcMap["function"].(map[string]interface{}); hasFn {
+				openaiReq["tool_choice"] = map[string]interface{}{
+					"type":     "function",
+					"function": fn,
+				}
+			} else if name, ok := tcMap["name"].(string); ok && name != "" {
 				openaiReq["tool_choice"] = map[string]interface{}{
 					"type": "function",
 					"function": map[string]interface{}{
 						"name": name,
 					},
 				}
+			} else if tcType, ok := tcMap["type"].(string); ok && tcType == "function" {
+				openaiReq["tool_choice"] = tcMap
 			}
 		}
 	}
@@ -115,6 +161,30 @@ func ConvertToOpenAI(req *ResponsesRequest, modelCfg *config.ModelConfig) ([]byt
 	}
 
 	return json.Marshal(openaiReq)
+}
+
+func cleanJSONSchema(schema map[string]interface{}) {
+	if schema == nil {
+		return
+	}
+	delete(schema, "$schema")
+	delete(schema, "propertyNames")
+
+	if properties, ok := schema["properties"].(map[string]interface{}); ok {
+		for _, prop := range properties {
+			if propMap, ok := prop.(map[string]interface{}); ok {
+				cleanJSONSchema(propMap)
+			}
+		}
+	}
+
+	if addProps, ok := schema["additionalProperties"].(map[string]interface{}); ok {
+		cleanJSONSchema(addProps)
+	}
+
+	if items, ok := schema["items"].(map[string]interface{}); ok {
+		cleanJSONSchema(items)
+	}
 }
 
 func parseInputToMessages(input interface{}) ([]map[string]interface{}, error) {
@@ -159,27 +229,54 @@ func parseInputToMessages(input interface{}) ([]map[string]interface{}, error) {
 					callID = "call_" + uuid.New().String()[:8]
 				}
 
+				tc := map[string]interface{}{
+					"id":   callID,
+					"type": "function",
+					"function": map[string]interface{}{
+						"name":      name,
+						"arguments": args,
+					},
+				}
+
+				// 合并连续的 parallel tool calls 到同一个 assistant 消息
+				if len(messages) > 0 && messages[len(messages)-1]["role"] == "assistant" {
+					if existingCalls, ok := messages[len(messages)-1]["tool_calls"].([]map[string]interface{}); ok {
+						messages[len(messages)-1]["tool_calls"] = append(existingCalls, tc)
+						continue
+					}
+				}
+
 				messages = append(messages, map[string]interface{}{
 					"role": "assistant",
 					"tool_calls": []map[string]interface{}{
-						{
-							"id":   callID,
-							"type": "function",
-							"function": map[string]interface{}{
-								"name":      name,
-								"arguments": args,
-							},
-						},
+						tc,
 					},
 				})
 			case "function_call_output":
 				callID, _ := itemMap["call_id"].(string)
-				outputStr, _ := itemMap["output"].(string)
+				if callID == "" {
+					callID, _ = itemMap["id"].(string)
+				}
+				if callID == "" {
+					callID, _ = itemMap["tool_call_id"].(string)
+				}
+
+				var outputStr string
+				if s, ok := itemMap["output"].(string); ok {
+					outputStr = s
+				} else if itemMap["output"] != nil {
+					b, _ := json.Marshal(itemMap["output"])
+					outputStr = string(b)
+				}
+
 				messages = append(messages, map[string]interface{}{
 					"role":         "tool",
 					"tool_call_id": callID,
 					"content":      outputStr,
 				})
+			case "reasoning":
+				// reasoning 条目忽略，不参与后端输入
+				continue
 			case "input_file", "computer_call", "web_search_call", "local_shell_call":
 				return nil, fmt.Errorf("unsupported input item type: %s", itemType)
 			default:
@@ -226,11 +323,33 @@ func parseContentVal(content interface{}) (interface{}, error) {
 								"url": imageURL,
 							},
 						})
+					} else if imgObj, ok := partMap["image_url"].(map[string]interface{}); ok {
+						parts = append(parts, map[string]interface{}{
+							"type":      "image_url",
+							"image_url": imgObj,
+						})
+					}
+				case "image_url":
+					if imgObj, ok := partMap["image_url"].(map[string]interface{}); ok {
+						parts = append(parts, map[string]interface{}{
+							"type":      "image_url",
+							"image_url": imgObj,
+						})
+					} else if imgStr, ok := partMap["image_url"].(string); ok {
+						parts = append(parts, map[string]interface{}{
+							"type": "image_url",
+							"image_url": map[string]interface{}{
+								"url": imgStr,
+							},
+						})
 					}
 				case "input_file":
 					return nil, fmt.Errorf("unsupported content part type: input_file")
 				}
 			}
+		}
+		if len(parts) == 1 && parts[0]["type"] == "text" {
+			return parts[0]["text"], nil
 		}
 		if len(parts) > 0 {
 			return parts, nil
