@@ -17,8 +17,8 @@
 - **SSO 支持**：支持 Azure AD 等企业身份提供商
 - **本地缓存**：API Key 和用户信息本地缓存，减少数据库查询
 - **审计日志**：完整的请求日志（7天自动清理）
-- **OpenAI 兼容**：提供与 OpenAI API 兼容的接口
-- **多客户端协议**：同时支持 OpenAI 和 Anthropic 客户端，自动转换为后端 LLM 支持的协议
+- **OpenAI 兼容**：提供与 OpenAI Chat Completions API 兼容的接口
+- **Responses 直通代理**：提供与 OpenAI Responses API（OpenCode 等）原生直通代理
 - **单文件部署**：前端资源嵌入二进制，仅需一个可执行文件
 - **默认模型 Fallback**：当请求的模型无可用后端时，自动 fallback 到默认模型
 

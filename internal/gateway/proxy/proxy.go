@@ -15,10 +15,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/tidwall/sjson"
 	"modelgate/internal/domain/quota"
 	"modelgate/internal/domain/usage"
 	"modelgate/internal/infra/logger"
-	"modelgate/internal/infra/utils"
 	"modelgate/internal/repository"
 )
 
@@ -51,48 +51,8 @@ func (p *Proxy) SetTrafficDumper(dumper *logger.TrafficDumper) {
 	p.trafficDumper = dumper
 }
 
-// OpenAIRequest OpenAI 兼容的请求格式
-type OpenAIRequest struct {
-	Model    string                   `json:"model"`
-	Messages []map[string]interface{} `json:"messages"`
-	Stream   bool                     `json:"stream,omitempty"`
-}
-
-// OpenAIResponse OpenAI 兼容的响应格式
-type OpenAIResponse struct {
-	ID      string                   `json:"id"`
-	Object  string                   `json:"object"`
-	Created int64                    `json:"created"`
-	Model   string                   `json:"model"`
-	Choices []map[string]interface{} `json:"choices"`
-	Usage   *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage,omitempty"`
-}
-
-// StreamResponse 流式响应格式
-type StreamResponse struct {
-	ID      string         `json:"id"`
-	Object  string         `json:"object"`
-	Created int64          `json:"created"`
-	Model   string         `json:"model"`
-	Choices []StreamChoice `json:"choices"`
-	Usage   *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage,omitempty"`
-}
-
-type StreamChoice struct {
-	Index        int                    `json:"index"`
-	Delta        map[string]interface{} `json:"delta"`
-	FinishReason *string                `json:"finish_reason"`
-}
-
-// OpenAIRequestHeader 优化后的轻量级请求解析器，避免对 messages 进行全量 unmarshal
+// OpenAIRequestHeader 优化后的轻量级请求解析器，用于 OpenAI Chat Completions
+// 避免对 messages 进行全量 unmarshal，仅解析需要操作的顶层字段
 type OpenAIRequestHeader struct {
 	Model               string
 	Stream              bool
@@ -184,42 +144,6 @@ func (r *OpenAIRequestHeader) MarshalJSON() ([]byte, error) {
 	return json.Marshal(r.RawFields)
 }
 
-func (r *OpenAIRequestHeader) ToMap() map[string]interface{} {
-	b, _ := json.Marshal(r)
-	var m map[string]interface{}
-	_ = json.Unmarshal(b, &m)
-	return m
-}
-
-func (r *OpenAIRequestHeader) EstimateTokens() int {
-	var contentBuilder strings.Builder
-
-	for _, msg := range r.Messages {
-		if len(msg.Content) > 0 {
-			var strContent string
-			if err := json.Unmarshal(msg.Content, &strContent); err == nil {
-				contentBuilder.WriteString(strContent)
-			} else {
-				var arrayContent []map[string]interface{}
-				if err := json.Unmarshal(msg.Content, &arrayContent); err == nil {
-					for _, block := range arrayContent {
-						if bType, _ := block["type"].(string); bType == "text" {
-							if bText, _ := block["text"].(string); bText != "" {
-								contentBuilder.WriteString(bText)
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	for _, toolObj := range r.Tools {
-		contentBuilder.Write(toolObj)
-	}
-
-	return utils.EstimateTokens(contentBuilder.String())
-}
 
 func (r *OpenAIRequestHeader) InjectParams(params map[string]interface{}) {
 	if len(params) == 0 {
@@ -262,6 +186,13 @@ func (r *OpenAIRequestHeader) InjectParams(params map[string]interface{}) {
 	}
 }
 
+// OpenAIRequest OpenAI 兼容的请求格式（仅用于基础解析）
+type OpenAIRequest struct {
+	Model    string                   `json:"model"`
+	Messages []map[string]interface{} `json:"messages"`
+	Stream   bool                     `json:"stream,omitempty"`
+}
+
 // BackendRequest 后端请求参数（纯输入，由协议 Handler 构造）
 type BackendRequest struct {
 	ModelID     string
@@ -271,6 +202,7 @@ type BackendRequest struct {
 	IsStream    bool
 	ClientIP    string
 	UserAgent   string
+	Passthrough bool // true = 不解析请求体，直通代理模式
 }
 
 // BackendResponse 后端响应
@@ -280,14 +212,9 @@ type BackendResponse struct {
 	BackendID  string
 }
 
-// ExecuteCoreWorkflow 执行核心代理工作流（复用逻辑）
-// 支持请求/响应转换，用于实现多协议支持
-func (p *Proxy) ExecuteCoreWorkflow(
-	c *gin.Context,
-	req *BackendRequest,
-	proto Protocol,
-) {
-	pctx := p.NewProxyContext(c, req, proto)
+// ExecuteCoreWorkflow 执行核心代理工作流
+func (p *Proxy) ExecuteCoreWorkflow(c *gin.Context, req *BackendRequest, proto Protocol) {
+	pctx := p.NewProxyContext(c, req, proto, req.Passthrough)
 
 	// 1. 认证用户并检查配额
 	if !p.authenticateAndCheckQuota(pctx) {
@@ -300,7 +227,7 @@ func (p *Proxy) ExecuteCoreWorkflow(
 		return
 	}
 
-	// 3. 确保请求完成后释放并发许可（包括 streaming 完成、错误、客户端断开等任何情况）
+	// 3. 确保请求完成后释放并发许可
 	defer p.lb.ReleaseBackend(pctx.BackendID)
 
 	// 4. 准备并发送请求
@@ -314,7 +241,6 @@ func (p *Proxy) ExecuteCoreWorkflow(
 }
 
 // authenticateAndCheckQuota 获取用户信息并检查配额
-// 返回 false 表示请求已被终止（错误已发送给客户端）
 func (p *Proxy) authenticateAndCheckQuota(pctx *ProxyContext) bool {
 	req := pctx.Request
 
@@ -352,15 +278,12 @@ func (p *Proxy) authenticateAndCheckQuota(pctx *ProxyContext) bool {
 		return false
 	}
 
-	// CheckQuota 只是校验限额，这里需要真实累加内存中的 rate limit 计数器
 	_ = p.quotaService.IncrementRate(req.UserID, quotaResult.RateLimitWindow)
 	pctx.DefaultModel = quotaResult.DefaultModel
 	return true
 }
 
-// selectBackend 通过负载均衡选择后端，并更新 pctx 上的 BackendID 和 ModelID
-// Next() 内部使用最少连接策略，选择并发数最低的后端，并原子性地获取并发许可
-// 返回 nil 表示无可用后端（错误已发送给客户端）
+// selectBackend 通过负载均衡选择后端
 func (p *Proxy) selectBackend(pctx *ProxyContext) *Backend {
 	req := pctx.Request
 
@@ -379,62 +302,74 @@ func (p *Proxy) selectBackend(pctx *ProxyContext) *Backend {
 }
 
 // prepareAndSendRequest 准备请求体、构造 HTTP 请求并发送到后端
-// 返回 nil 表示请求失败（错误已发送给客户端）
 func (p *Proxy) prepareAndSendRequest(pctx *ProxyContext, backend *Backend) *http.Response {
 	req := pctx.Request
-	c := pctx.GinCtx
 
-	// 获取模型配置并处理请求体（所有修改在 map 上完成，只序列化一次）
-	modelConfig, _ := p.modelStore.GetByID(req.ModelID)
-
-	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
-		pctx.Payload.InjectParams(modelConfig.ModelParams)
-	}
-
-	// 计算请求的 InputTokens（只计算一次，复用于 adjustMaxTokens 和日志记录）
-	pctx.InputTokens = pctx.Payload.EstimateTokens()
-
-	if modelConfig != nil && modelConfig.ContextWindow > 0 {
-		adjustMaxTokens(pctx.Payload, modelConfig.ContextWindow, pctx.InputTokens)
-	}
-
-	// 自动为 OpenAI 兼容请求注入缓存的 Gemini thought_signature
-	injectOpenAIThoughtSignatures(pctx.Payload)
-
-	// 替换 model 名称：优先使用后端配置的模型名，否则使用负载均衡解析后的模型 ID
+	// 确定后端使用的模型名称
+	backendModelName := req.ModelID
 	if backend.ModelName != "" {
-		pctx.Payload.Model = backend.ModelName
+		backendModelName = backend.ModelName
+	}
+
+	var requestBody []byte
+	var err error
+
+	if pctx.Payload != nil {
+		// OpenAI Chat 模式：解析后的请求体，可注入参数
+		modelConfig, _ := p.modelStore.GetByID(req.ModelID)
+		if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
+			pctx.Payload.InjectParams(modelConfig.ModelParams)
+		}
+
+		pctx.Payload.Model = backendModelName
+		requestBody, err = pctx.MarshalRequestBody()
+		if err != nil {
+			pctx.SendError(http.StatusInternalServerError, "api_error", "failed to marshal request body")
+			return nil
+		}
 	} else {
-		pctx.Payload.Model = req.ModelID
+		// Passthrough 模式：仅替换 model 字段
+		requestBody, err = replaceModelInJSON(req.RequestBody, backendModelName)
+		if err != nil {
+			pctx.SendError(http.StatusInternalServerError, "api_error", "failed to prepare request body")
+			return nil
+		}
 	}
 
-	// 序列化请求体（整个流程只序列化这一次）
-	requestBody, err := pctx.MarshalRequestBody()
-	if err != nil {
-		pctx.SendError(http.StatusInternalServerError, "api_error", "failed to marshal request body")
-		return nil
-	}
-
-	// Dump 阶段 2（实际发送给后端的请求体，包含 model 替换、参数注入、max_tokens 裁剪）
+	// Dump 阶段 2（实际发送给后端的请求体）
 	pctx.DumpTraffic(logger.Stage2ConvertedRequest, requestBody, false)
+
+	// 发送 HTTP 请求到后端
+	return p.sendHTTPRequest(pctx, backend, requestBody)
+}
+
+// sendHTTPRequest 发送 HTTP 请求到后端并返回响应
+func (p *Proxy) sendHTTPRequest(pctx *ProxyContext, backend *Backend, requestBody []byte) *http.Response {
+	c := pctx.GinCtx
 
 	// 构造目标 URL
 	baseURL := strings.TrimSuffix(backend.URL, "/")
+	backendPath := pctx.Proto.BackendPath()
 	var url string
 	if strings.HasSuffix(baseURL, "/openai") {
-		url = baseURL + "/chat/completions"
+		url = baseURL + strings.TrimPrefix(backendPath, "/v1")
 	} else {
-		url = baseURL + "/v1/chat/completions"
+		url = baseURL + backendPath
 	}
+
 	proxyReq, err := http.NewRequest(c.Request.Method, url, bytes.NewReader(requestBody))
 	if err != nil {
 		pctx.SendError(http.StatusInternalServerError, "api_error", "failed to create proxy request")
 		return nil
 	}
 
-	// 复制请求头（排除 Accept-Encoding，避免后端返回 gzip 压缩响应）
+	// 复制请求头（排除特定的请求头，避免冲突）
 	for key, values := range c.Request.Header {
-		if strings.ToLower(key) == "accept-encoding" {
+		lowerKey := strings.ToLower(key)
+		// 排除 Accept-Encoding 避免后端返回 gzip 导致无法精准统计 token
+		// 排除 Content-Length 因为修改了 requestBody 长度变了
+		// 排除 Host 让 http.Client 自己推导正确的后端 host
+		if lowerKey == "accept-encoding" || lowerKey == "content-length" || lowerKey == "host" {
 			continue
 		}
 		for _, value := range values {
@@ -447,7 +382,8 @@ func (p *Proxy) prepareAndSendRequest(pctx *ProxyContext, backend *Backend) *htt
 		proxyReq.Header.Set("Authorization", "Bearer "+backend.APIKey)
 	}
 
-	// 注入自定义 header
+	// 注入自定义 header（从模型参数中提取 __xxx__ 格式的 header）
+	modelConfig, _ := p.modelStore.GetByID(pctx.Request.ModelID)
 	if modelConfig != nil && len(modelConfig.ModelParams) > 0 {
 		for key, value := range modelConfig.ModelParams {
 			if strings.HasPrefix(key, "__") && strings.HasSuffix(key, "__") {
@@ -490,7 +426,6 @@ func (p *Proxy) dispatchResponse(pctx *ProxyContext, resp *http.Response) {
 	contentType := resp.Header.Get("Content-Type")
 	isStreamResponse := pctx.Request.IsStream && (strings.Contains(contentType, "text/event-stream") || strings.Contains(contentType, "application/x-ndjson"))
 
-	// 根据是否流式响应选择处理方式
 	if isStreamResponse {
 		p.handleStreamResponse(pctx, resp)
 	} else {
@@ -502,50 +437,23 @@ func (p *Proxy) dispatchResponse(pctx *ProxyContext, resp *http.Response) {
 // handleErrorResponse 处理后端返回的非 200 状态码
 func (p *Proxy) handleErrorResponse(pctx *ProxyContext, resp *http.Response) {
 	respBody, _ := io.ReadAll(resp.Body)
-
-	outputTokens := utils.EstimateTokens(string(respBody))
 	latency := pctx.Latency()
 
-	// 错误场景只记录日志，不扣除 Token 配额
-	pctx.GinCtx.Set("input_tokens", pctx.InputTokens)
-	pctx.GinCtx.Set("output_tokens", outputTokens)
-	p.usageService.RecordUsageDetailed(pctx.buildUsageRecord(resp.StatusCode, pctx.InputTokens, outputTokens, latency, string(respBody), latency))
+	// 错误场景记录日志，Token 记为 0（不计费）
+	pctx.GinCtx.Set("input_tokens", 0)
+	pctx.GinCtx.Set("output_tokens", 0)
+	p.usageService.RecordUsageDetailed(pctx.buildUsageRecord(resp.StatusCode, 0, 0, latency, string(respBody), latency))
 
-	// 尝试从后端返回的 OpenAI 错误中提取真正的错误信息
-	errType := "api_error"
-	errMsg := string(respBody)
-	var backendErr struct {
-		Error struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(respBody, &backendErr); err == nil && backendErr.Error.Message != "" {
-		errType = backendErr.Error.Type
-		if errType == "" {
-			errType = "api_error"
-		}
-		errMsg = backendErr.Error.Message
-	}
-
-	var finalRespBody []byte
-	if pctx.Proto != nil {
-		finalRespBody = pctx.Proto.BuildErrorResponse(errType, errMsg)
-		pctx.GinCtx.Data(resp.StatusCode, "application/json", finalRespBody)
-	} else {
-		finalRespBody = respBody
-		pctx.GinCtx.Data(resp.StatusCode, resp.Header.Get("Content-Type"), finalRespBody)
-	}
-
-	// 在发生 HTTP 错误时，也必须记录阶段 3 和 4 的 Dump
+	// Dump 阶段 3 & 4
 	pctx.DumpTraffic(fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode), respBody, false)
-	pctx.DumpTraffic(fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode), finalRespBody, false)
+	pctx.DumpTraffic(fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode), respBody, false)
+
+	// 直接透传后端错误响应
+	pctx.GinCtx.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 }
 
-// handleNormalResponse 处理非流式响应（带转换）
+// handleNormalResponse 处理非流式响应（直通 + Usage 提取）
 func (p *Proxy) handleNormalResponse(pctx *ProxyContext, resp *http.Response) {
-	inputTokens := pctx.InputTokens
-
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		pctx.RecordErrorUsage(http.StatusBadGateway, "failed to read backend response")
@@ -554,106 +462,63 @@ func (p *Proxy) handleNormalResponse(pctx *ProxyContext, resp *http.Response) {
 	}
 
 	// 检查是否需要解压 gzip 响应
-	decompressed := false
 	if resp.Header.Get("Content-Encoding") == "gzip" {
-		gzipReader, err := gzip.NewReader(bytes.NewReader(respBody))
-		if err != nil {
-			logger.Warnw("failed to create gzip reader", "error", err)
-		} else {
+		if gzipReader, err := gzip.NewReader(bytes.NewReader(respBody)); err == nil {
 			defer gzipReader.Close()
-			decompressedBody, err := io.ReadAll(gzipReader)
-			if err != nil {
-				logger.Warnw("failed to decompress gzip response", "error", err)
-			} else {
+			if decompressedBody, err := io.ReadAll(gzipReader); err == nil {
 				respBody = decompressedBody
-				decompressed = true
+				resp.Header.Del("Content-Encoding")
 			}
 		}
 	}
 
-	// 使用协议接口转换响应并获取精准 Token
-	var preciseInput, preciseOutput int
-	var convertedRespBody []byte
-	if pctx.Proto != nil {
-		var err error
-		convertedRespBody, preciseInput, preciseOutput, err = pctx.Proto.FormatResponse(respBody)
-		if err != nil {
-			pctx.GinCtx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert response: " + err.Error()})
-			return
-		}
-	} else {
-		convertedRespBody = respBody
-	}
-
-	// 针对 OpenAI 兼容接口（不管是直接代理还是使用 Protocol 的兼容接口，如 /v1/chat/completions），在此提取并缓存 thought_signature
-	if pctx.Proto == nil || strings.Contains(pctx.GinCtx.Request.URL.Path, "/chat/completions") {
-		cacheThoughtSignaturesFromResponse(respBody)
-	}
-
+	// Dump 阶段 3 & 4（直通模式下两者相同）
 	pctx.DumpTraffic(fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode), respBody, false)
-	pctx.DumpTraffic(fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode), convertedRespBody, false)
+	pctx.DumpTraffic(fmt.Sprintf("4_%d_converted_response.txt", resp.StatusCode), respBody, false)
 
-	// 计算最终 Token（优先使用精确 Token）
-	if preciseInput > 0 {
-		inputTokens = preciseInput
-	}
-	outputTokens := preciseOutput
-	if outputTokens == 0 {
-		outputTokens = utils.EstimateTokens(string(convertedRespBody))
-	}
+	// 通过 Protocol 从响应体中提取精确 Token（完全依赖后端返回的 usage）
+	inputTokens, outputTokens := pctx.Proto.ExtractUsage(respBody)
 
 	latency := pctx.Latency()
-	pctx.RecordUsage(resp.StatusCode, inputTokens, outputTokens, latency, string(convertedRespBody), latency)
+	pctx.RecordUsage(resp.StatusCode, inputTokens, outputTokens, latency, string(respBody), latency)
 
-	// 只有在成功解压后才删除 Content-Encoding header
-	if decompressed {
-		resp.Header.Del("Content-Encoding")
-	}
-
-	// 设置 Content-Type（确保中间件能正确捕获）
+	// 设置 Content-Type 并返回响应（直通，不做任何转换）
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
-		contentType = "application/json" // 默认 Content-Type
+		contentType = "application/json"
 	}
 	pctx.GinCtx.Header("Content-Type", contentType)
-
-	// 返回响应
-	pctx.GinCtx.Data(resp.StatusCode, contentType, convertedRespBody)
+	pctx.GinCtx.Data(resp.StatusCode, contentType, respBody)
 }
 
-// handleStreamResponse 处理流式响应（带转换）
+// handleStreamResponse 处理流式响应（直通 + Usage 提取）
 func (p *Proxy) handleStreamResponse(pctx *ProxyContext, resp *http.Response) {
 	c := pctx.GinCtx
-	inputTokens := pctx.InputTokens
 
 	defer resp.Body.Close()
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no") // 告知 Nginx 不要缓存响应
+	c.Header("X-Accel-Buffering", "no")
 	c.Status(resp.StatusCode)
 
-	pingMessage := ": ping\n\n"
-	if pctx.Proto != nil && pctx.Proto.PingMessage() != "" {
-		pingMessage = pctx.Proto.PingMessage()
+	pingMessage := pctx.Proto.PingMessage()
+	if pingMessage == "" {
+		pingMessage = ": ping\n\n"
 	}
 
-	// 立即发送一个 SSE 注释并 Flush，确保客户端收到 Header，防止首字节超时
+	// 发送首字节，防止客户端超时
 	c.Writer.WriteString(pingMessage)
 	c.Writer.Flush()
 
-	// 使用带 timeout 的 context 处理流式响应，设置为 1 小时以支持超长生成
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 1*time.Hour)
 	defer cancel()
 
-	// 使用 mutex 保护并发写入 c.Writer (主循环和心跳协程)
 	var writeMu sync.Mutex
 
-	// 设置心跳计时器，每 30 秒发送一个 SSE 注释，防止中间代理因闲置断开连接
+	// 心跳协程
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-
-	// 启动心跳协程
 	go func() {
 		for {
 			select {
@@ -661,11 +526,7 @@ func (p *Proxy) handleStreamResponse(pctx *ProxyContext, resp *http.Response) {
 				return
 			case <-ticker.C:
 				writeMu.Lock()
-				if pingMessage != "" {
-					_, _ = c.Writer.WriteString(pingMessage)
-				} else {
-					_, _ = c.Writer.WriteString(": keep-alive\n\n")
-				}
+				_, _ = c.Writer.WriteString(pingMessage)
 				c.Writer.Flush()
 				writeMu.Unlock()
 			}
@@ -686,27 +547,15 @@ func (p *Proxy) handleStreamResponse(pctx *ProxyContext, resp *http.Response) {
 		reader = bufio.NewReader(resp.Body)
 	}
 
-	// 创建该流的状态跟踪器
-	streamState := make(map[string]interface{})
-	var fullCollectedText strings.Builder
+	// 流式状态：累积 Usage
 	var preciseInputTokens, preciseOutputTokens int
 	var firstTokenOnce sync.Once
 	var ttftMs int64
 
-	// 使用 defer 确保无论流式循环如何退出（正常 EOF、错误、ctx 取消），都记录 Token
+	// defer 确保无论流式循环如何退出，都记录 Token
 	defer func() {
-		outputTokens := preciseOutputTokens
-		if outputTokens == 0 {
-			outputTokens = utils.EstimateTokens(fullCollectedText.String())
-		}
-
-		finalInputTokens := inputTokens
-		if preciseInputTokens > 0 {
-			finalInputTokens = preciseInputTokens
-		}
-
 		latency := pctx.Latency()
-		pctx.RecordUsage(resp.StatusCode, finalInputTokens, outputTokens, latency, fullCollectedText.String(), ttftMs)
+		pctx.RecordUsage(resp.StatusCode, preciseInputTokens, preciseOutputTokens, latency, "", ttftMs)
 	}()
 
 	dumpFilename3 := fmt.Sprintf("3_%d_backend_response.txt", resp.StatusCode)
@@ -716,7 +565,7 @@ func (p *Proxy) handleStreamResponse(pctx *ProxyContext, resp *http.Response) {
 		select {
 		case <-ctx.Done():
 			logger.Warn("Stream processing timeout or cancelled")
-			return // defer 会确保记录 Token
+			return
 		default:
 		}
 
@@ -733,130 +582,30 @@ func (p *Proxy) handleStreamResponse(pctx *ProxyContext, resp *http.Response) {
 			break
 		}
 
-		// 转换每一行
-		if pctx.Proto != nil {
-			converted, inToks, outToks, contentDelta, err := pctx.Proto.FormatStreamLine(line, streamState)
-			if inToks > 0 {
-				preciseInputTokens = inToks
-			}
-			if outToks > 0 {
-				preciseOutputTokens = outToks
-			}
-
-			// 解析并缓存 OpenAI 兼容接口流中的 thought_signature
-			if strings.Contains(pctx.GinCtx.Request.URL.Path, "/chat/completions") {
-				cacheThoughtSignaturesFromStreamLine(line, streamState)
-			}
-
-			// Dump Stage 3 & 4
-			pctx.DumpTraffic(dumpFilename3, []byte(line), true)
-			if err == nil {
-				pctx.DumpTraffic(dumpFilename4, []byte(converted), true)
-			} else {
-				pctx.DumpTraffic(dumpFilename4, []byte(line), true)
-			}
-
-			writeMu.Lock()
-			if err != nil {
-				_, _ = c.Writer.WriteString(line)
-				content, _, _ := ParseOpenAISSE(line)
-				fullCollectedText.WriteString(content)
-			} else {
-				_, _ = c.Writer.WriteString(converted)
-				fullCollectedText.WriteString(contentDelta)
-			}
-			c.Writer.Flush()
-			writeMu.Unlock()
-		} else {
-			// Dump Stage 3 & 4 for direct proxy
-			pctx.DumpTraffic(dumpFilename3, []byte(line), true)
-			pctx.DumpTraffic(dumpFilename4, []byte(line), true)
-
-			// 解析并缓存直通代理流中的 thought_signature
-			cacheThoughtSignaturesFromStreamLine(line, streamState)
-
-			writeMu.Lock()
-			_, _ = c.Writer.WriteString(line)
-			c.Writer.Flush()
-			writeMu.Unlock()
-			contentDelta, inToks, outToks := ParseOpenAISSE(line)
-			if inToks > 0 {
-				preciseInputTokens = inToks
-			}
-			if outToks > 0 {
-				preciseOutputTokens = outToks
-			}
-			fullCollectedText.WriteString(contentDelta)
+		// 从 SSE 行中提取 Usage（Protocol 负责解析不同格式）
+		inToks, outToks := pctx.Proto.ExtractStreamUsage(line)
+		if inToks > 0 {
+			preciseInputTokens = inToks
 		}
+		if outToks > 0 {
+			preciseOutputTokens = outToks
+		}
+
+		// Dump 阶段 3 & 4（直通模式下相同）
+		pctx.DumpTraffic(dumpFilename3, []byte(line), true)
+		pctx.DumpTraffic(dumpFilename4, []byte(line), true)
+
+		// 直通：原样转发给客户端
+		writeMu.Lock()
+		_, _ = c.Writer.WriteString(line)
+		c.Writer.Flush()
+		writeMu.Unlock()
 	}
 }
 
-// ParseOpenAISSE 解析 OpenAI SSE 格式的行
-// 返回:
-// - contentText: 提取的文本内容（用于估算Token）
-// - preciseInputTokens: 如果包含 Usage，提取精确 Input Tokens
-// - preciseOutputTokens: 如果包含 Usage，提取精确 Output Tokens
-func ParseOpenAISSE(line string) (string, int, int) {
-	var result strings.Builder
-	var preciseInput, preciseOutput int
-
-	// 处理可能包含多个 SSE 事件的字符串
-	for _, segment := range strings.Split(line, "\n") {
-		segment = strings.TrimSpace(segment)
-
-		// 兼容 "data: {...}" 和 "data:{...}" 两种格式
-		var jsonStr string
-		if strings.HasPrefix(segment, "data: ") {
-			jsonStr = strings.TrimPrefix(segment, "data: ")
-		} else if strings.HasPrefix(segment, "data:") {
-			jsonStr = strings.TrimPrefix(segment, "data:")
-		} else {
-			continue
-		}
-
-		jsonStr = strings.TrimSpace(jsonStr)
-		if jsonStr == "[DONE]" || jsonStr == "" {
-			continue
-		}
-
-		// 尝试 OpenAI 格式
-		var streamResp StreamResponse
-		if err := json.Unmarshal([]byte(jsonStr), &streamResp); err == nil {
-			// 提取 Usage
-			if streamResp.Usage != nil {
-				if streamResp.Usage.PromptTokens > 0 {
-					preciseInput = streamResp.Usage.PromptTokens
-				}
-				if streamResp.Usage.CompletionTokens > 0 {
-					preciseOutput = streamResp.Usage.CompletionTokens
-				}
-			}
-
-			// 提取 Content
-			if len(streamResp.Choices) > 0 {
-				if content, ok := streamResp.Choices[0].Delta["content"].(string); ok {
-					result.WriteString(content)
-				}
-				// 提取 reasoning_content（思考模型如 Kimi、DeepSeek R1 等使用）
-				if reasoning, ok := streamResp.Choices[0].Delta["reasoning_content"].(string); ok {
-					result.WriteString(reasoning)
-				}
-				// 提取 tool_calls arguments
-				if toolCalls, ok := streamResp.Choices[0].Delta["tool_calls"].([]interface{}); ok {
-					for _, tc := range toolCalls {
-						if tcMap, ok := tc.(map[string]interface{}); ok {
-							if fn, ok := tcMap["function"].(map[string]interface{}); ok {
-								if args, ok := fn["arguments"].(string); ok {
-									result.WriteString(args)
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	return result.String(), preciseInput, preciseOutput
+// replaceModelInJSON 在 JSON 中替换 model 字段（用于 passthrough 模式）
+func replaceModelInJSON(body []byte, newModel string) ([]byte, error) {
+	return sjson.SetBytes(body, "model", newModel)
 }
 
 func (p *Proxy) HandleListModels(c *gin.Context) {
@@ -887,28 +636,12 @@ func (p *Proxy) HandleListModels(c *gin.Context) {
 	})
 }
 
-// injectModelParams 将模型参数注入已解析的请求 payload
-// 注意：不覆盖用户已经传入的参数
-func injectModelParams(payload map[string]interface{}, params map[string]interface{}) {
-	for key, value := range params {
-		if _, exists := payload[key]; !exists {
-			payload[key] = value
-		}
-	}
-}
-
 // convertHeaderName 将 __user_agent__ 转换为 User-Agent
-// 规则：去掉前后的 __，将下划线替换为连字符，每个单词首字母大写
 func convertHeaderName(key string) string {
-	// 去掉前后的 __
 	name := strings.TrimPrefix(key, "__")
 	name = strings.TrimSuffix(name, "__")
-
-	// 如果是 "header_xxx" 格式，提取后半部分
 	name = strings.TrimPrefix(name, "header_")
 
-	// 将下划线分割的单词转换为首字母大写，然后用连字符连接
-	// user_agent -> User-Agent
 	parts := strings.Split(name, "_")
 	for i, p := range parts {
 		if len(p) > 0 {
@@ -916,46 +649,4 @@ func convertHeaderName(key string) string {
 		}
 	}
 	return strings.Join(parts, "-")
-}
-
-// adjustMaxTokens 检查并裁剪 max_tokens 或 max_completion_tokens
-// 直接操作已解析的 payload struct，inputTokens 由调用方预先计算并传入
-func adjustMaxTokens(reqHeader *OpenAIRequestHeader, contextWindow int, inputTokens int) {
-	if reqHeader == nil {
-		return
-	}
-
-	var maxTokens int
-	var tokenKey string
-
-	if reqHeader.MaxTokens != nil {
-		maxTokens = *reqHeader.MaxTokens
-		tokenKey = "max_tokens"
-	} else if reqHeader.MaxCompletionTokens != nil {
-		maxTokens = *reqHeader.MaxCompletionTokens
-		tokenKey = "max_completion_tokens"
-	}
-
-	if tokenKey == "" {
-		return
-	}
-
-	if inputTokens >= contextWindow {
-		newVal := 100
-		if tokenKey == "max_tokens" {
-			reqHeader.MaxTokens = &newVal
-		} else {
-			reqHeader.MaxCompletionTokens = &newVal
-		}
-	} else if maxTokens <= 0 || inputTokens+maxTokens > contextWindow {
-		newMax := contextWindow - inputTokens
-		if newMax < 100 {
-			newMax = 100
-		}
-		if tokenKey == "max_tokens" {
-			reqHeader.MaxTokens = &newMax
-		} else {
-			reqHeader.MaxCompletionTokens = &newMax
-		}
-	}
 }

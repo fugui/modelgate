@@ -19,8 +19,6 @@ import (
 	"modelgate/internal/domain/quota"
 	"modelgate/internal/domain/usage"
 	"modelgate/internal/domain/user"
-	"modelgate/internal/gateway/anthropic"
-	"modelgate/internal/gateway/codex"
 	"modelgate/internal/gateway/openai"
 	"modelgate/internal/gateway/proxy"
 	"modelgate/internal/gateway/responses"
@@ -212,24 +210,14 @@ func (s *Server) setupRoutes() {
 		})
 	}
 
-	// OpenAI 兼容代理接口
+	// OpenAI Chat Completions 代理接口
 	openaiAuth := middleware.ProxyAuthMiddleware(s.apiKeyService, s.jwtManager, s.userStore)
 	openaiHandler := openai.NewHandler(s.proxyInstance, s.usageService)
 	openaiHandler.RegisterRoutes(r, openaiAuth, s.limiter, middleware.ClientFilterMiddleware(s.cfgManager))
 
-	// Anthropic 兼容代理接口
-	anthropicAuth := middleware.ProxyAuthMiddleware(s.apiKeyService, s.jwtManager, s.userStore)
-	anthropicHandler := anthropic.NewHandler(s.proxyInstance, s.usageService)
-	anthropicHandler.RegisterRoutes(r, anthropicAuth, s.limiter, middleware.ClientFilterMiddleware(s.cfgManager))
-
-	// Codex Text Completions 兼容代理接口
-	codexAuth := middleware.ProxyAuthMiddleware(s.apiKeyService, s.jwtManager, s.userStore)
-	codexHandler := codex.NewHandler(s.proxyInstance, s.usageService, s.cfgManager)
-	codexHandler.RegisterRoutes(r, codexAuth, s.limiter, middleware.ClientFilterMiddleware(s.cfgManager))
-
-	// OpenAI Responses API 兼容代理接口 (Codex CLI / OpenCode)
+	// Responses API 直通代理接口 (OpenCode)
 	responsesAuth := middleware.ProxyAuthMiddleware(s.apiKeyService, s.jwtManager, s.userStore)
-	responsesHandler := responses.NewHandler(s.proxyInstance, s.usageService, s.cfgManager)
+	responsesHandler := responses.NewHandler(s.proxyInstance, s.usageService)
 	responsesHandler.RegisterRoutes(r, responsesAuth, s.limiter, middleware.ClientFilterMiddleware(s.cfgManager))
 
 	s.engine = r

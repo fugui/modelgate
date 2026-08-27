@@ -80,22 +80,10 @@ models:
         weight: 10
         enabled: true
 
-  # Codex 协议族配置示例（可选；fim.enabled 缺省 false，仅显式开启后 suffix 才进入 FIM 模式）
   - id: "qwen3.5-coder"
     name: "Qwen 3.5 Coder"
     enabled: true
     context_window: 32000
-    fim:                                # Text Completions / FIM 行为（可选）
-      enabled: true                     # 缺省 false
-      mode: "auto"                      # auto | native | prompt | disabled
-      prefix: "<|fim_prefix|>"          # 覆盖默认 FIM 占位符（可选）
-      suffix: "<|fim_suffix|>"
-      middle: "<|fim_middle|>"
-      system_prompt: ""                 # 覆盖模式 B 的默认 System Prompt（可选）
-      trim_whitespace: false            # 是否裁剪输出首尾空白（可选）
-    responses:                          # Responses API 行为（可选）
-      max_output_tokens_field: "max_tokens"   # max_tokens | max_completion_tokens
-      reasoning_event: "summary"        # summary | text（推理增量事件族）
     backends:
       - id: "qwen3.5-coder-prod"
         base_url: "http://qwen-coder.internal:8000"

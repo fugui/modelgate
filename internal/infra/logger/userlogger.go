@@ -23,9 +23,9 @@ type UsageLogEntry struct {
 	BackendID       string                 `json:"backend_id,omitempty"`
 	InputTokens     int                    `json:"input_tokens,omitempty"`
 	OutputTokens    int                    `json:"output_tokens,omitempty"`
-	TraceID         string                 `json:"trace_id,omitempty"`
-	RequestPayload  map[string]interface{} `json:"request_payload,omitempty"`
-	ResponsePayload string                 `json:"response_payload,omitempty"`
+	TraceID         string          `json:"trace_id,omitempty"`
+	RequestPayload  json.RawMessage `json:"request_payload,omitempty"`
+	ResponsePayload string          `json:"response_payload,omitempty"`
 	OriginalTTFTMs  int64                  `json:"original_ttft_ms,omitempty"`
 }
 

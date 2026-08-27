@@ -20,16 +20,15 @@ type ProxyContext struct {
 	// --- 原始请求信息（纯输入）---
 	Request *BackendRequest
 
-	// --- 协议转换器 ---
+	// --- 协议处理器 ---
 	Proto Protocol
 
-	// --- 解析后的请求体（只解析一次，优化后的结构体）---
+	// --- 解析后的请求体（仅 OpenAI Chat 模式使用，passthrough 模式为 nil）---
 	Payload *OpenAIRequestHeader
 
 	// --- 工作流中派生的状态 ---
 	StartTime    time.Time
 	BackendID    string
-	InputTokens  int
 	User         *entity.User
 	TraceID      string
 	DefaultModel string // 配额策略中的默认模型（用于 LB fallback）
@@ -40,20 +39,28 @@ type ProxyContext struct {
 
 // SendError 发送协议感知的错误响应，并记录第四阶段 Dump
 func (pctx *ProxyContext) SendError(statusCode int, errType, message string) {
-	var respBody []byte
-	if pctx.Proto != nil {
-		respBody = pctx.Proto.BuildErrorResponse(errType, message)
-		pctx.GinCtx.Data(statusCode, "application/json", respBody)
-	} else {
-		respBody, _ = json.Marshal(gin.H{"error": message})
-		pctx.GinCtx.Data(statusCode, "application/json", respBody)
-	}
+	respBody := pctx.Proto.BuildErrorResponse(errType, message)
+	pctx.GinCtx.Data(statusCode, "application/json", respBody)
 	pctx.DumpTraffic(fmt.Sprintf("4_%d_converted_response.txt", statusCode), respBody, false)
 }
 
-// MarshalRequestBody 将修改后的 Payload 序列化为 []byte
+// MarshalRequestBody 将修改后的请求体序列化为 []byte
+// passthrough 模式直接返回原始请求体，OpenAI Chat 模式序列化 Payload
 func (pctx *ProxyContext) MarshalRequestBody() ([]byte, error) {
-	return json.Marshal(pctx.Payload)
+	if pctx.Payload != nil {
+		return json.Marshal(pctx.Payload)
+	}
+	return pctx.Request.RequestBody, nil
+}
+
+// RequestPayloadForLog 返回用于日志记录的请求体
+func (pctx *ProxyContext) RequestPayloadForLog() json.RawMessage {
+	if pctx.Payload != nil {
+		b, _ := json.Marshal(pctx.Payload)
+		return b
+	}
+	// passthrough 模式：直接返回原始 JSON 字节
+	return pctx.Request.RequestBody
 }
 
 // buildUsageRecord 构建 usage.Record（集中所有字段的组装）
@@ -72,7 +79,7 @@ func (pctx *ProxyContext) buildUsageRecord(statusCode, inputTokens, outputTokens
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
 		TraceID:         pctx.TraceID,
-		RequestPayload:  pctx.Payload.ToMap(),
+		RequestPayload:  pctx.RequestPayloadForLog(),
 		ResponsePayload: responsePayload,
 		TTFTMs:          ttftMs,
 	}
@@ -111,9 +118,8 @@ func (pctx *ProxyContext) RecordErrorUsage(statusCode int, errorMsg string) {
 		BackendID:      pctx.BackendID,
 		StatusCode:     statusCode,
 		Error:          errorMsg,
-		InputTokens:    pctx.InputTokens,
 		TraceID:        pctx.TraceID,
-		RequestPayload: pctx.Payload.ToMap(),
+		RequestPayload: pctx.RequestPayloadForLog(),
 	})
 }
 
@@ -130,7 +136,8 @@ func (pctx *ProxyContext) Latency() int64 {
 }
 
 // NewProxyContext 创建 ProxyContext
-func (p *Proxy) NewProxyContext(c *gin.Context, req *BackendRequest, proto Protocol) *ProxyContext {
+// passthrough=true 时不解析请求体为 OpenAIRequestHeader
+func (p *Proxy) NewProxyContext(c *gin.Context, req *BackendRequest, proto Protocol, passthrough bool) *ProxyContext {
 	pctx := &ProxyContext{
 		GinCtx:    c,
 		Request:   req,
@@ -148,10 +155,12 @@ func (p *Proxy) NewProxyContext(c *gin.Context, req *BackendRequest, proto Proto
 		pctx.TraceID = "req-" + uuid.New().String()
 	}
 
-	// 解析请求体（只解析一次）
-	var payload OpenAIRequestHeader
-	_ = json.Unmarshal(req.RequestBody, &payload)
-	pctx.Payload = &payload
+	// 仅非 passthrough 模式解析请求体
+	if !passthrough {
+		var payload OpenAIRequestHeader
+		_ = json.Unmarshal(req.RequestBody, &payload)
+		pctx.Payload = &payload
+	}
 
 	return pctx
 }

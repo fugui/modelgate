@@ -2,6 +2,7 @@ package usage
 
 import (
 	"container/ring"
+	"encoding/json"
 	"sort"
 	"sync"
 	"time"
@@ -91,7 +92,7 @@ type Record struct {
 	InputTokens     int
 	OutputTokens    int
 	TraceID         string
-	RequestPayload  map[string]interface{}
+	RequestPayload  json.RawMessage
 	ResponsePayload string
 	TTFTMs          int64
 }

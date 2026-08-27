@@ -150,9 +150,9 @@ func (lb *RoundRobinBalancer) tryGetBackend(lookupModel string, requestedModel s
 				continue
 			}
 
-			// 加权比较: current/weight vs bestConcurrency/bestWeight
-			// 交叉乘法避免浮点: current * bestWeight < bestConcurrency * weight
-			if int64(current)*int64(bestWeight) < int64(bestConcurrency)*int64(weight) {
+			// 加权比较: (current+1)/weight vs (bestConcurrency+1)/bestWeight
+			// 交叉乘法避免浮点: (current+1) * bestWeight < (bestConcurrency+1) * weight
+			if int64(current+1)*int64(bestWeight) < int64(bestConcurrency+1)*int64(weight) {
 				bestConcurrency = current
 				bestWeight = weight
 				bestBackend = &backends[i]
