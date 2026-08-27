@@ -69,6 +69,25 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, passthrough b
 
 	// 提取显式会话特征 Key (仅显式指定会话时用于 KV Cache 亲和性粘性路由)
 	sessionKey := ExtractSessionKey(c, bodyBytes)
+	if sessionKey == "" {
+		logger.Infow("[No-Session] Request has no explicit session identifier, using least-connections load balancing",
+			"trace_id", traceID,
+			"path", c.Request.URL.Path,
+			"model", modelID,
+			"user_id", uid.String(),
+			"client_ip", c.ClientIP(),
+			"user_agent", c.Request.UserAgent(),
+		)
+	} else {
+		logger.Infow("[Sticky-Session] Request has explicit session identifier",
+			"trace_id", traceID,
+			"path", c.Request.URL.Path,
+			"model", modelID,
+			"session_key", sessionKey,
+			"user_id", uid.String(),
+			"client_ip", c.ClientIP(),
+		)
+	}
 
 	// 构造 BackendRequest
 	backendReq := &BackendRequest{
