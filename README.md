@@ -90,8 +90,7 @@ make dev
 ```
 modelgate/
 ├── cmd/
-│   ├── server/              # 主程序入口
-│   └── import_users/        # 批量导入用户工具
+│   └── server/              # 主程序入口
 ├── internal/                # 内部包
 │   ├── apikey/             # API Key 管理
 │   ├── auth/               # JWT 认证
@@ -141,19 +140,6 @@ make dev        # 开发模式（前后端同时运行）
 make release    # 构建多平台发布包
 make clean      # 清理构建产物
 make test       # 运行测试
-```
-
-## 批量导入用户 (CSV)
-
-系统附带了 `import_users` 工具，可通过 CSV 文件快速导入大批用户。
-
-CSV 文件必须包含表头，格式要求如下：
-- **必填项**：`email`, `password`, `name`, `role` (可选: `admin`, `manager`, `user`)
-- **选填项**：`department`, `quota_policy` (默认为 `default`)
-
-执行示例：
-```bash
-./import_users -csv docs/import_users_template.csv -config config.yaml
 ```
 
 ## 测试

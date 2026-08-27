@@ -2,7 +2,6 @@
 
 # 变量
 BINARY_NAME=modelgate
-IMPORTER_NAME=import_users
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_TIME=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -12,13 +11,11 @@ LDFLAGS=-ldflags "-s -w -X modelgate/internal/version.Version=$(VERSION) -X mode
 # 默认构建（包含前端嵌入）
 build: web-build embed
 	go build $(LDFLAGS) -o $(BINARY_NAME) ./cmd/server
-	go build $(LDFLAGS) -o $(IMPORTER_NAME) ./cmd/import_users
-	@echo "构建完成: $(BINARY_NAME), $(IMPORTER_NAME)"
+	@echo "构建完成: $(BINARY_NAME)"
 
 # 仅构建 Go（不构建前端，用于开发）
 build-go:
 	go build $(LDFLAGS) -o $(BINARY_NAME) ./cmd/server
-	go build $(LDFLAGS) -o $(IMPORTER_NAME) ./cmd/import_users
 
 # 构建前端
 web-build:
@@ -56,7 +53,7 @@ test:
 
 # 清理
 clean:
-	rm -f $(BINARY_NAME) $(IMPORTER_NAME)
+	rm -f $(BINARY_NAME)
 	rm -rf internal/infra/static/dist
 	go clean
 
@@ -82,31 +79,25 @@ release: clean web-build embed
 
 	# Linux AMD64
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o releases/$(BINARY_NAME)-linux-amd64 ./cmd/server
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o releases/$(IMPORTER_NAME)-linux-amd64 ./cmd/import_users
 	cp config.yaml.example releases/config.yaml.example
-	cp docs/import_users_template.csv releases/
 	cp README.md releases/
-	cd releases && tar -czf $(BINARY_NAME)-$(VERSION)-linux-amd64.tar.gz $(BINARY_NAME)-linux-amd64 $(IMPORTER_NAME)-linux-amd64 config.yaml.example import_users_template.csv README.md
+	cd releases && tar -czf $(BINARY_NAME)-$(VERSION)-linux-amd64.tar.gz $(BINARY_NAME)-linux-amd64 config.yaml.example README.md
 
 	# Linux ARM64
 	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o releases/$(BINARY_NAME)-linux-arm64 ./cmd/server
-	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o releases/$(IMPORTER_NAME)-linux-arm64 ./cmd/import_users
-	cd releases && tar -czf $(BINARY_NAME)-$(VERSION)-linux-arm64.tar.gz $(BINARY_NAME)-linux-arm64 $(IMPORTER_NAME)-linux-arm64 config.yaml.example import_users_template.csv README.md
+	cd releases && tar -czf $(BINARY_NAME)-$(VERSION)-linux-arm64.tar.gz $(BINARY_NAME)-linux-arm64 config.yaml.example README.md
 
 	# Darwin AMD64
 	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o releases/$(BINARY_NAME)-darwin-amd64 ./cmd/server
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o releases/$(IMPORTER_NAME)-darwin-amd64 ./cmd/import_users
-	cd releases && tar -czf $(BINARY_NAME)-$(VERSION)-darwin-amd64.tar.gz $(BINARY_NAME)-darwin-amd64 $(IMPORTER_NAME)-darwin-amd64 config.yaml.example import_users_template.csv README.md
+	cd releases && tar -czf $(BINARY_NAME)-$(VERSION)-darwin-amd64.tar.gz $(BINARY_NAME)-darwin-amd64 config.yaml.example README.md
 
 	# Darwin ARM64 (M1/M2)
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o releases/$(BINARY_NAME)-darwin-arm64 ./cmd/server
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o releases/$(IMPORTER_NAME)-darwin-arm64 ./cmd/import_users
-	cd releases && tar -czf $(BINARY_NAME)-$(VERSION)-darwin-arm64.tar.gz $(BINARY_NAME)-darwin-arm64 $(IMPORTER_NAME)-darwin-arm64 config.yaml.example import_users_template.csv README.md
+	cd releases && tar -czf $(BINARY_NAME)-$(VERSION)-darwin-arm64.tar.gz $(BINARY_NAME)-darwin-arm64 config.yaml.example README.md
 
 	# Windows AMD64
 	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o releases/$(BINARY_NAME)-windows-amd64.exe ./cmd/server
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o releases/$(IMPORTER_NAME)-windows-amd64.exe ./cmd/import_users
-	cd releases && zip -r $(BINARY_NAME)-$(VERSION)-windows-amd64.zip $(BINARY_NAME)-windows-amd64.exe $(IMPORTER_NAME)-windows-amd64.exe config.yaml.example import_users_template.csv README.md
+	cd releases && zip -r $(BINARY_NAME)-$(VERSION)-windows-amd64.zip $(BINARY_NAME)-windows-amd64.exe config.yaml.example README.md
 
 	@echo ""
 	@echo "发布包已创建:"

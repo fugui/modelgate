@@ -1,4 +1,0 @@
-email,password,name,role,department,quota_policy
-test.user1@company.com,Password123,Test User 1,user,Engineering,default
-test.admin@company.com,AdminPass123,IT Admin,admin,IT,vip
-test.manager@company.com,ManagerPass123,Sales Manager,manager,Sales,default
