@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -352,3 +353,126 @@ func TestRoundRobinBalancer_MarkFailedResetOnSuccess(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "backend-1", b.ID, "should still be healthy - MarkSuccess reset the counter")
 }
+
+// TestRoundRobinBalancer_StickySession_DeterministicHit 验证相同 sessionKey 稳定命中同一后端（KV Cache 亲和性）
+func TestRoundRobinBalancer_StickySession_DeterministicHit(t *testing.T) {
+	lb := NewRoundRobinBalancer()
+	lb.AddBackend("gpt-4", Backend{ID: "node-1", URL: "http://10.0.0.1:8000", Weight: 1})
+	lb.AddBackend("gpt-4", Backend{ID: "node-2", URL: "http://10.0.0.2:8000", Weight: 1})
+	lb.AddBackend("gpt-4", Backend{ID: "node-3", URL: "http://10.0.0.3:8000", Weight: 1})
+
+	sessionKey := "hdr:conv-opencode-98765"
+
+	// 第一次获取确定目标后端
+	firstBackend, _, ok := lb.Next("gpt-4", "", sessionKey)
+	require.True(t, ok)
+	lb.ReleaseBackend(firstBackend.ID)
+
+	// 连续发起 50 次请求，每次释放后再次请求，必须 100% 命中同一个后端
+	for i := 0; i < 50; i++ {
+		b, _, ok := lb.Next("gpt-4", "", sessionKey)
+		require.True(t, ok)
+		assert.Equal(t, firstBackend.ID, b.ID, "Same sessionKey must strictly hit the exact same backend")
+		lb.ReleaseBackend(b.ID)
+	}
+}
+
+// TestRoundRobinBalancer_StickySession_Distribution 验证不同 sessionKey 能够相对均匀地分布在多个节点上
+func TestRoundRobinBalancer_StickySession_Distribution(t *testing.T) {
+	lb := NewRoundRobinBalancer()
+	lb.AddBackend("gpt-4", Backend{ID: "node-1", URL: "http://10.0.0.1:8000", Weight: 1})
+	lb.AddBackend("gpt-4", Backend{ID: "node-2", URL: "http://10.0.0.2:8000", Weight: 1})
+	lb.AddBackend("gpt-4", Backend{ID: "node-3", URL: "http://10.0.0.3:8000", Weight: 1})
+
+	hits := make(map[string]int)
+	for i := 0; i < 300; i++ {
+		sessionKey := fmt.Sprintf("ip:192.168.1.%d", i)
+		b, _, ok := lb.Next("gpt-4", "", sessionKey)
+		require.True(t, ok)
+		hits[b.ID]++
+		lb.ReleaseBackend(b.ID)
+	}
+
+	// 确保每个后端都分摊到了合理的流量
+	assert.Equal(t, 3, len(hits))
+	for nodeID, count := range hits {
+		assert.True(t, count > 50, fmt.Sprintf("Node %s received %d hits, expected > 50", nodeID, count))
+	}
+}
+
+// TestRoundRobinBalancer_StickySession_OverloadSpillover 验证首选后端满载时自动溢出保护到其他空闲后端
+func TestRoundRobinBalancer_StickySession_OverloadSpillover(t *testing.T) {
+	lb := NewRoundRobinBalancer()
+	lb.AddBackend("gpt-4", Backend{ID: "node-1", URL: "http://10.0.0.1:8000", MaxConcurrency: 2, Weight: 1})
+	lb.AddBackend("gpt-4", Backend{ID: "node-2", URL: "http://10.0.0.2:8000", MaxConcurrency: 2, Weight: 1})
+
+	// 找到命中 node-1 的 sessionKey
+	var sessionKeyNode1 string
+	for i := 0; i < 100; i++ {
+		testKey := fmt.Sprintf("session-%d", i)
+		b, _, ok := lb.Next("gpt-4", "", testKey)
+		require.True(t, ok)
+		lb.ReleaseBackend(b.ID)
+		if b.ID == "node-1" {
+			sessionKeyNode1 = testKey
+			break
+		}
+	}
+	require.NotEmpty(t, sessionKeyNode1)
+
+	// 请求 1：命中 node-1（不释放，模拟并发占用 1/2）
+	b1, _, ok := lb.Next("gpt-4", "", sessionKeyNode1)
+	require.True(t, ok)
+	assert.Equal(t, "node-1", b1.ID)
+
+	// 请求 2：命中 node-1（不释放，模拟并发占用 2/2，此时 node-1 已满载）
+	b2, _, ok := lb.Next("gpt-4", "", sessionKeyNode1)
+	require.True(t, ok)
+	assert.Equal(t, "node-1", b2.ID)
+
+	// 请求 3：node-1 已达到 MaxConcurrency=2 满载，此时再次发请求，不能报错，必须自动溢出到 node-2！
+	b3, _, ok := lb.Next("gpt-4", "", sessionKeyNode1)
+	require.True(t, ok)
+	assert.Equal(t, "node-2", b3.ID, "When target node-1 is at capacity, sticky session must spill over to node-2")
+
+	// 释放 node-1 的一个并发
+	lb.ReleaseBackend(b1.ID)
+
+	// 请求 4：node-1 恢复有空闲容量，新的请求重新回归命中首选 node-1
+	b4, _, ok := lb.Next("gpt-4", "", sessionKeyNode1)
+	require.True(t, ok)
+	assert.Equal(t, "node-1", b4.ID, "When target node-1 recovers capacity, sticky session should hit node-1 again")
+
+	lb.ReleaseBackend(b2.ID)
+	lb.ReleaseBackend(b3.ID)
+	lb.ReleaseBackend(b4.ID)
+}
+
+// TestRoundRobinBalancer_StickySession_UnhealthyFailover 验证首选后端故障时自动切换到健康节点
+func TestRoundRobinBalancer_StickySession_UnhealthyFailover(t *testing.T) {
+	lb := NewRoundRobinBalancer()
+	lb.AddBackend("gpt-4", Backend{ID: "node-1", URL: "http://10.0.0.1:8000", Weight: 1})
+	lb.AddBackend("gpt-4", Backend{ID: "node-2", URL: "http://10.0.0.2:8000", Weight: 1})
+
+	sessionKey := "session-failover-test"
+	preferred, _, ok := lb.Next("gpt-4", "", sessionKey)
+	require.True(t, ok)
+	lb.ReleaseBackend(preferred.ID)
+
+	otherNodeID := "node-2"
+	if preferred.ID == "node-2" {
+		otherNodeID = "node-1"
+	}
+
+	// 模拟首选节点连续 3 次失败变为不健康
+	lb.MarkFailed(preferred.ID)
+	lb.MarkFailed(preferred.ID)
+	lb.MarkFailed(preferred.ID)
+
+	// 此时带有相同 sessionKey 的请求应自动切换到另一个健康的节点
+	b, _, ok := lb.Next("gpt-4", "", sessionKey)
+	require.True(t, ok)
+	assert.Equal(t, otherNodeID, b.ID, "When preferred node is unhealthy, traffic must failover to healthy node")
+	lb.ReleaseBackend(b.ID)
+}
+

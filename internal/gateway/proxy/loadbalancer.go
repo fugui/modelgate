@@ -3,8 +3,11 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
+	"math"
 	"math/rand"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +19,7 @@ import (
 
 // LoadBalancer 负载均衡器接口
 type LoadBalancer interface {
-	Next(modelID string) (string, bool)
+	Next(modelID string, defaultModel string, sessionKey ...string) (*Backend, string, bool)
 	MarkFailed(backend string)
 	MarkSuccess(backend string)
 	GetHealthStatus() map[string]BackendHealth
@@ -35,11 +38,11 @@ type BackendHealth struct {
 	ActiveConcurrency int32     `json:"active_concurrency"` // 当前活跃并发数（atomic）
 }
 
-// RoundRobinBalancer 加权最少连接负载均衡器（Weighted Least-Connections）
+// RoundRobinBalancer 支持会话粘性与加权最少连接的负载均衡器（Sticky + Weighted Least-Connections）
 type RoundRobinBalancer struct {
-	mu       sync.RWMutex
-	backends map[string][]Backend      // modelID -> backends
-	health   map[string]*BackendHealth // backend -> health status
+	mu         sync.RWMutex
+	backends   map[string][]Backend      // modelID -> backends
+	health     map[string]*BackendHealth // backend -> health status
 	httpClient *http.Client
 }
 
@@ -80,34 +83,152 @@ func (lb *RoundRobinBalancer) AddBackend(modelID string, backend Backend) {
 	}
 }
 
-func (lb *RoundRobinBalancer) Next(modelID string, defaultModel string) (*Backend, string, bool) {
+// Next 选择下一个后端并原子获取并发许可
+// 可选传入 sessionKey 实现会话亲和性粘性路由
+func (lb *RoundRobinBalancer) Next(modelID string, defaultModel string, sessionKey ...string) (*Backend, string, bool) {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
+
+	var sk string
+	if len(sessionKey) > 0 {
+		sk = sessionKey[0]
+	}
 
 	backends, exists := lb.backends[modelID]
 	if !exists || len(backends) == 0 {
 		// 如果没有找到对应 model 的 backend，尝试使用 default model
 		if defaultModel != "" && defaultModel != modelID {
 			logger.Infof("Next: no backends found for model %s, trying default model %s", modelID, defaultModel)
-			return lb.tryGetBackend(defaultModel, modelID)
+			return lb.tryGetBackend(defaultModel, modelID, sk)
 		}
 		logger.Infof("Next: no backends found for model %s (not in map)", modelID)
 		return nil, modelID, false
 	}
 
-	return lb.tryGetBackend(modelID, modelID)
+	return lb.tryGetBackend(modelID, modelID, sk)
 }
 
-// tryGetBackend 使用加权最少连接策略（Weighted Least-Connections）选择后端并原子性地获取并发许可
-// 加权负载率 = ActiveConcurrency / Weight，优先选择加权负载率最低的健康后端
-// 使用随机起始索引打破平局，防止低并发时流量偏斜到固定后端
-// 返回的后端已完成并发计数递增，调用方无需再次调用 AcquireBackend
-func (lb *RoundRobinBalancer) tryGetBackend(lookupModel string, requestedModel string) (*Backend, string, bool) {
+// tryGetBackend 支持会话粘性路由与加权最少连接（Weighted Least-Connections）
+// 1. 若提供 sessionKey，优先尝试粘性路由到计算出的首选后端；
+// 2. 若首选后端满载（达到 MaxConcurrency）或故障，自动触发过载溢出保护，降级到加权最少连接；
+// 3. 若未提供 sessionKey，直接走加权最少连接。
+func (lb *RoundRobinBalancer) tryGetBackend(lookupModel string, requestedModel string, sessionKey string) (*Backend, string, bool) {
 	backends := lb.backends[lookupModel]
 	if len(backends) == 0 {
 		return nil, requestedModel, false
 	}
 
+	// 1. 如果有 sessionKey，尝试会话粘性路由 (Sticky Session)
+	if sessionKey != "" {
+		if backend, ok := lb.tryGetStickyBackend(backends, sessionKey); ok {
+			if lookupModel != requestedModel {
+				logger.Infof("tryGetBackend: sticky routed to fallback model %s for request model %s (backend: %s)", lookupModel, requestedModel, backend.ID)
+			}
+			return backend, lookupModel, true
+		}
+		// 粘性后端不可用或满载，触发溢出保护
+		logger.Infof("tryGetBackend: sticky backend for session %s is busy or unhealthy, spilling over to least-connections", sessionKey)
+	}
+
+	// 2. 执行加权最少连接（Weighted Least-Connections）
+	return lb.tryGetLeastLoadedBackend(backends, lookupModel, requestedModel)
+}
+
+// tryGetStickyBackend 基于加权最高随机权重哈希 (Highest Random Weight / Rendezvous Hashing)
+// 选取最优后端并尝试原子获取并发许可。若首选后端满载，按序尝试次优候选；全部满载则返回 false 触发溢出
+func (lb *RoundRobinBalancer) tryGetStickyBackend(backends []Backend, sessionKey string) (*Backend, bool) {
+	if len(backends) == 0 {
+		return nil, false
+	}
+
+	type candidate struct {
+		backend *Backend
+		health  *BackendHealth
+		score   float64
+	}
+
+	candidates := make([]candidate, 0, len(backends))
+	for i := range backends {
+		b := &backends[i]
+		health, ok := lb.health[b.ID]
+		if !ok || !health.Healthy {
+			continue
+		}
+		score := calculateHRWScore(sessionKey, b.ID, b.Weight)
+		candidates = append(candidates, candidate{
+			backend: b,
+			health:  health,
+			score:   score,
+		})
+	}
+
+	if len(candidates) == 0 {
+		return nil, false
+	}
+
+	// 按 HRW 分数从高到低排序
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
+
+	// 按偏好顺序尝试获取并发许可
+	for _, cand := range candidates {
+		health := cand.health
+		current := atomic.LoadInt32(&health.ActiveConcurrency)
+
+		// 检查并发上限 (过载溢出保护)
+		if health.MaxConcurrency > 0 && current >= int32(health.MaxConcurrency) {
+			continue // 该候选已满载，尝试下一个候选
+		}
+
+		// 原子获取并发许可，使用 for 循环解决 CAS 竞争
+		if health.MaxConcurrency > 0 {
+			for {
+				current = atomic.LoadInt32(&health.ActiveConcurrency)
+				if current >= int32(health.MaxConcurrency) {
+					break // 真正满载时跳出当前候选，尝试下一个候选
+				}
+				if atomic.CompareAndSwapInt32(&health.ActiveConcurrency, current, current+1) {
+					return cand.backend, true
+				}
+			}
+			continue
+		}
+
+		// 无并发限制，直接递增
+		atomic.AddInt32(&health.ActiveConcurrency, 1)
+		return cand.backend, true
+	}
+
+	return nil, false
+}
+
+// calculateHRWScore 计算加权最高随机权重哈希 (Highest Random Weight / Rendezvous Hashing)
+func calculateHRWScore(sessionKey, backendID string, weight int) float64 {
+	if weight <= 0 {
+		weight = 1
+	}
+	h := fnv.New64a()
+	h.Write([]byte(sessionKey))
+	h.Write([]byte(":"))
+	h.Write([]byte(backendID))
+	hashVal := h.Sum64()
+
+	// 归一化到 (0, 1) 区间，避免 hashVal+1 发生 MaxUint64 溢出
+	u := float64(hashVal) / 18446744073709551615.0 // 2^64-1
+	if u >= 1.0 {
+		u = 0.9999999999999999
+	}
+	if u <= 0.0 {
+		u = 1e-18
+	}
+
+	// 加权得分公式: -weight / ln(u)
+	return -float64(weight) / math.Log(u)
+}
+
+// tryGetLeastLoadedBackend 使用加权最少连接策略（Weighted Least-Connections）选择后端并原子性地获取并发许可
+func (lb *RoundRobinBalancer) tryGetLeastLoadedBackend(backends []Backend, lookupModel string, requestedModel string) (*Backend, string, bool) {
 	// 加权最少连接策略（Weighted Least-Connections）：
 	// 选择 ActiveConcurrency/Weight 最小的健康后端
 	// 使用随机起始索引打破平局，防止并发数相同时总是选择同一个后端

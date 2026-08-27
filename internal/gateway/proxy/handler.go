@@ -67,6 +67,9 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, passthrough b
 		p.trafficDumper.Dump(traceID, logger.Stage1ClientRequest, bodyBytes, false)
 	}
 
+	// 提取会话特征 Key (用于 KV Cache 亲和性粘性路由与内网客户端粘性)
+	sessionKey := ExtractSessionKey(c, bodyBytes, uid, c.ClientIP())
+
 	// 构造 BackendRequest
 	backendReq := &BackendRequest{
 		ModelID:     modelID,
@@ -77,6 +80,7 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, passthrough b
 		ClientIP:    c.ClientIP(),
 		UserAgent:   c.Request.UserAgent(),
 		Passthrough: passthrough,
+		SessionKey:  sessionKey,
 	}
 
 	// 调用核心工作流

@@ -203,6 +203,7 @@ type BackendRequest struct {
 	ClientIP    string
 	UserAgent   string
 	Passthrough bool // true = 不解析请求体，直通代理模式
+	SessionKey  string
 }
 
 // BackendResponse 后端响应
@@ -287,7 +288,7 @@ func (p *Proxy) authenticateAndCheckQuota(pctx *ProxyContext) bool {
 func (p *Proxy) selectBackend(pctx *ProxyContext) *Backend {
 	req := pctx.Request
 
-	backend, actualModelID, ok := p.lb.Next(req.ModelID, pctx.DefaultModel)
+	backend, actualModelID, ok := p.lb.Next(req.ModelID, pctx.DefaultModel, req.SessionKey)
 	if !ok {
 		pctx.RecordErrorUsage(http.StatusTooManyRequests, "all backends at concurrency capacity")
 		pctx.SendError(http.StatusTooManyRequests, "rate_limit_error", "all backends for model "+req.ModelID+" are at concurrency capacity, please retry later")
