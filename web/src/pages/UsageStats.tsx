@@ -55,9 +55,9 @@ const UsageStats: React.FC = () => {
     <div>
       <h2 style={{ marginBottom: 24 }}>使用统计</h2>
 
-      {/* 配额概览 */}
+      {/* 配额与会话概览 */}
       <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={12}>
+        <Col xs={24} md={8}>
           <Card>
             <Statistic
               title="今日请求次数"
@@ -71,14 +71,37 @@ const UsageStats: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col span={12}>
+        <Col xs={24} md={8}>
+          <Card>
+            <Statistic
+              title="今日会话分析"
+              value={quota.daily_sessions_count || 0}
+              suffix="个独立会话"
+            />
+            <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                <span>会话内请求:</span>
+                <span style={{ fontWeight: 'bold', color: '#13c2c2' }}>
+                  {quota.daily_session_requests || 0} 次 ({((quota.session_request_ratio || 0) * 100).toFixed(1)}%)
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>无会话调用:</span>
+                <span style={{ fontWeight: 'bold', color: '#fa8c16' }}>
+                  {quota.daily_no_session_requests || 0} 次 (均深 {(quota.avg_session_depth || 0).toFixed(1)} 次/会话)
+                </span>
+              </div>
+            </div>
+          </Card>
+        </Col>
+        <Col xs={24} md={8}>
           <Card>
             <Statistic
               title="可用模型数"
               value={quota.models_allowed?.length || 0}
               suffix="个"
             />
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: 8, maxHeight: 42, overflowY: 'auto' }}>
               {quota.models_allowed?.map((model: string) => (
                 <Tag key={model} style={{ margin: '0 4px 4px 0' }}>
                   {model}

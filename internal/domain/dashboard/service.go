@@ -308,13 +308,19 @@ func (bmc *BackendMetricsCollector) GetHistory() map[string][]BackendMetricsSnap
 	return result
 }
 
+// SessionStatsProvider 会话统计提供者接口
+type SessionStatsProvider interface {
+	GetGlobalSessionStats() (totalDistinctSessions, totalSessionReqs, totalNoSessionReqs int)
+}
+
 // Service 仪表板服务
 type Service struct {
-	db                 *sql.DB
-	hourlyCounter      *HourlyCounter
-	metricsCollector   *MetricsCollector
-	backendMetrics     *BackendMetricsCollector
-	concurrencyLimiter ConcurrencyStatsProvider
+	db                   *sql.DB
+	hourlyCounter        *HourlyCounter
+	metricsCollector     *MetricsCollector
+	backendMetrics       *BackendMetricsCollector
+	concurrencyLimiter   ConcurrencyStatsProvider
+	sessionStatsProvider SessionStatsProvider
 }
 
 // NewService 创建仪表板服务
@@ -334,6 +340,11 @@ func NewService(db *sql.DB) *Service {
 func (s *Service) SetConcurrencyLimiter(limiter ConcurrencyStatsProvider) {
 	s.concurrencyLimiter = limiter
 	go s.metricsLoop()
+}
+
+// SetSessionStatsProvider 设置会话统计提供者
+func (s *Service) SetSessionStatsProvider(provider SessionStatsProvider) {
+	s.sessionStatsProvider = provider
 }
 
 // metricsLoop 每5分钟采样一次并发数
@@ -393,13 +404,18 @@ func (s *Service) GetBackendMetricsHistory() map[string][]BackendMetricsSnapshot
 
 // DashboardStats 系统概览
 type DashboardStats struct {
-	TodayTotalRequests int64   `json:"today_total_requests"`  // 今日总请求
-	TodayInputTokens   int64   `json:"today_input_tokens"`    // 今日输入Token
-	TodayOutputTokens  int64   `json:"today_output_tokens"`   // 今日输出Token
-	ActiveUsers        int     `json:"active_users"`          // 今日活跃用户
-	TotalUsers         int     `json:"total_users"`           // 总用户数
-	PeakConcurrency    int     `json:"peak_concurrency"`      // 今日最高并发
-	AvgRequestsPerUser float64 `json:"avg_requests_per_user"` // 人均请求数
+	TodayTotalRequests     int64   `json:"today_total_requests"`      // 今日总请求
+	TodayInputTokens       int64   `json:"today_input_tokens"`        // 今日输入Token
+	TodayOutputTokens      int64   `json:"today_output_tokens"`       // 今日输出Token
+	TodaySessions          int     `json:"today_sessions"`            // 今日全局独立会话数
+	TodaySessionRequests   int64   `json:"today_session_requests"`    // 今日会话内请求数
+	TodayNoSessionRequests int64   `json:"today_no_session_requests"` // 今日无会话请求数
+	TodaySessionRatio      float64 `json:"today_session_ratio"`       // 会话请求占比
+	TodayAvgSessionDepth   float64 `json:"today_avg_session_depth"`   // 会话平均深度
+	ActiveUsers            int     `json:"active_users"`              // 今日活跃用户
+	TotalUsers             int     `json:"total_users"`               // 总用户数
+	PeakConcurrency        int     `json:"peak_concurrency"`          // 今日最高并发
+	AvgRequestsPerUser     float64 `json:"avg_requests_per_user"`     // 人均请求数
 }
 
 // TopUser TOP用户
@@ -498,6 +514,21 @@ func (s *Service) GetDashboardStats() (*DashboardStats, error) {
 			if p, ok := peak.(int); ok {
 				stats.PeakConcurrency = p
 			}
+		}
+	}
+
+	// 会话统计
+	if s.sessionStatsProvider != nil {
+		totalSessions, sessionReqs, noSessionReqs := s.sessionStatsProvider.GetGlobalSessionStats()
+		stats.TodaySessions = totalSessions
+		stats.TodaySessionRequests = int64(sessionReqs)
+		stats.TodayNoSessionRequests = int64(noSessionReqs)
+		totalSessAndNoSess := sessionReqs + noSessionReqs
+		if totalSessAndNoSess > 0 {
+			stats.TodaySessionRatio = float64(sessionReqs) / float64(totalSessAndNoSess)
+		}
+		if totalSessions > 0 {
+			stats.TodayAvgSessionDepth = float64(sessionReqs) / float64(totalSessions)
 		}
 	}
 

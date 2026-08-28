@@ -99,6 +99,7 @@ type Service struct {
 	apiKeyStore       *entity.APIKeyStore // 增加 APIKeyStore 依赖以便记录 Token 消耗
 	rateCounter       *RateCounter
 	dailyRequestCache *DailyRequestCounter
+	sessionTracker    *DailySessionTracker
 	dashboardRecorder DashboardRecorder
 }
 
@@ -164,6 +165,7 @@ func NewService(store *entity.QuotaStore, modelStore *entity.ModelStore, apiKeyS
 		apiKeyStore:       apiKeyStore,
 		rateCounter:       NewRateCounter(),
 		dailyRequestCache: NewDailyRequestCounter(),
+		sessionTracker:    NewDailySessionTracker(),
 		dashboardRecorder: dashboardRecorder,
 	}
 	// 启动每日清理任务
@@ -179,6 +181,7 @@ func (s *Service) dailyCleanupLoop() {
 
 	for range ticker.C {
 		s.dailyRequestCache.CleanupExpired()
+		s.sessionTracker.CleanupExpired(time.Now())
 	}
 }
 
@@ -357,8 +360,8 @@ func (s *Service) RecordRequest(userID uuid.UUID, modelID string, backendID stri
 	return nil
 }
 
-// RecordRequestTokens 记录一次请求并记录消耗的 Token
-func (s *Service) RecordRequestTokens(userID uuid.UUID, modelID string, apiKeyID uuid.UUID, backendID string, inputTokens, outputTokens int, durationMs int64) error {
+// RecordRequestTokens 记录一次请求并记录消耗的 Token 及会话状态
+func (s *Service) RecordRequestTokens(userID uuid.UUID, modelID string, apiKeyID uuid.UUID, backendID string, sessionKey string, inputTokens, outputTokens int, durationMs int64) error {
 	// 增加请求计数及 Token (每日配额)
 	err := s.store.IncrementUsage(userID, modelID, inputTokens, outputTokens)
 	if err != nil {
@@ -371,7 +374,11 @@ func (s *Service) RecordRequestTokens(userID uuid.UUID, modelID string, apiKeyID
 	}
 
 	// 更新内存缓存
-	s.dailyRequestCache.Add(userID.String(), time.Now())
+	now := time.Now()
+	s.dailyRequestCache.Add(userID.String(), now)
+	if s.sessionTracker != nil {
+		s.sessionTracker.RecordRequest(userID.String(), sessionKey, now)
+	}
 
 	// 记录小时级统计（用于仪表板）
 	if s.dashboardRecorder != nil {
@@ -379,6 +386,14 @@ func (s *Service) RecordRequestTokens(userID uuid.UUID, modelID string, apiKeyID
 	}
 
 	return nil
+}
+
+// GetGlobalSessionStats 获取全站今日会话统计
+func (s *Service) GetGlobalSessionStats() (int, int, int) {
+	if s.sessionTracker == nil {
+		return 0, 0, 0
+	}
+	return s.sessionTracker.GetGlobalStats(time.Now())
 }
 
 // GetQuotaStats 获取配额统计
@@ -402,6 +417,21 @@ func (s *Service) GetQuotaStats(userID uuid.UUID, policyName string) (map[string
 		return nil, err
 	}
 
+	// 获取会话统计
+	var sessionsCount, sessionReqs, noSessionReqs int
+	if s.sessionTracker != nil {
+		sessionsCount, sessionReqs, noSessionReqs = s.sessionTracker.GetUserStats(userID.String(), time.Now())
+	}
+	sessionRatio := float64(0)
+	avgDepth := float64(0)
+	totalReqs := sessionReqs + noSessionReqs
+	if totalReqs > 0 {
+		sessionRatio = float64(sessionReqs) / float64(totalReqs)
+	}
+	if sessionsCount > 0 {
+		avgDepth = float64(sessionReqs) / float64(sessionsCount)
+	}
+
 	// 处理 models_allowed：如果包含 *，返回所有模型名称列表
 	var modelsAllowed []string
 	if len(policy.Models) == 1 && policy.Models[0] == "*" {
@@ -418,11 +448,16 @@ func (s *Service) GetQuotaStats(userID uuid.UUID, policyName string) (map[string
 	}
 
 	return map[string]interface{}{
-		"daily_requests_used":  dailyRequests,
-		"daily_requests_limit": policy.RequestQuotaDaily,
-		"rate_limit":           policy.RateLimit,
-		"rate_window":          policy.RateLimitWindow,
-		"models_allowed":       modelsAllowed,
-		"reset_time":           "00:00",
+		"daily_requests_used":       dailyRequests,
+		"daily_requests_limit":      policy.RequestQuotaDaily,
+		"daily_sessions_count":      sessionsCount,
+		"daily_session_requests":    sessionReqs,
+		"daily_no_session_requests": noSessionReqs,
+		"session_request_ratio":     sessionRatio,
+		"avg_session_depth":         avgDepth,
+		"rate_limit":                policy.RateLimit,
+		"rate_window":               policy.RateLimitWindow,
+		"models_allowed":            modelsAllowed,
+		"reset_time":                "00:00",
 	}, nil
 }

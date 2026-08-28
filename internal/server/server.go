@@ -160,6 +160,7 @@ func (s *Server) initServices() {
 	s.proxyInstance.SetTrafficDumper(trafficDumper)
 
 	s.dashboardService.SetConcurrencyLimiter(s.limiter)
+	s.dashboardService.SetSessionStatsProvider(s.quotaService)
 }
 
 func (s *Server) setupRoutes() {

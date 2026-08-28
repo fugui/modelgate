@@ -94,12 +94,13 @@ func (pctx *ProxyContext) RecordUsage(statusCode, inputTokens, outputTokens int,
 		pctx.buildUsageRecord(statusCode, inputTokens, outputTokens, latencyMs, responsePayload, ttftMs),
 	)
 
-	// 记录请求并扣除 Token
+	// 记录请求并扣除 Token（同时记录会话统计）
 	_ = pctx.proxy.quotaService.RecordRequestTokens(
 		pctx.Request.UserID,
 		pctx.Request.ModelID,
 		pctx.Request.APIKeyID,
 		pctx.BackendID,
+		pctx.Request.SessionKey,
 		inputTokens,
 		outputTokens,
 		latencyMs,

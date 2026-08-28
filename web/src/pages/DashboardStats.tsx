@@ -3,6 +3,7 @@ import {
   Row,
   Col,
   Card,
+  Tag,
   Select,
   Space,
   Switch,
@@ -13,7 +14,7 @@ import {
   UserOutlined,
   CloudServerOutlined,
   ThunderboltOutlined,
-  HistoryOutlined,
+  CommentOutlined,
 } from '@ant-design/icons';
 import {
   Area,
@@ -37,6 +38,11 @@ interface DashboardData {
     peak_concurrency: number;
     today_requests: number;
     today_tokens: number;
+    today_sessions: number;
+    today_session_requests: number;
+    today_no_session_requests: number;
+    today_session_ratio: number;
+    today_avg_session_depth: number;
   };
   hourly_stats: {
     hour: string;
@@ -99,6 +105,11 @@ const DashboardStats: React.FC = () => {
           peak_concurrency: stats.peak_concurrency || 0,
           today_requests: stats.today_total_requests || 0,
           today_tokens: (stats.today_input_tokens || 0) + (stats.today_output_tokens || 0),
+          today_sessions: stats.today_sessions || 0,
+          today_session_requests: stats.today_session_requests || 0,
+          today_no_session_requests: stats.today_no_session_requests || 0,
+          today_session_ratio: stats.today_session_ratio || 0,
+          today_avg_session_depth: stats.today_avg_session_depth || 0,
         },
         hourly_stats: (hourlyRes.data.data || []).map((h: any) => {
           const stat: any = {
@@ -284,13 +295,36 @@ const DashboardStats: React.FC = () => {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <MetricCard
-            title="今日 Token 消耗"
-            value={formatTokens(summary.today_tokens)}
-            prefix={<HistoryOutlined style={{ color: '#f5222d' }} />}
-            valueStyle={{ color: '#f5222d' }}
+            title="今日活跃会话"
+            value={summary.today_sessions}
+            suffix={
+              summary.today_sessions > 0
+                ? `(均深 ${summary.today_avg_session_depth.toFixed(1)})`
+                : ''
+            }
+            prefix={<CommentOutlined style={{ color: '#13c2c2' }} />}
+            valueStyle={{ color: '#13c2c2' }}
           />
         </Col>
       </Row>
+
+      {/* 今日流量构成透视 */}
+      <Card size="small" style={{ marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <Space>
+            <span style={{ fontWeight: 'bold' }}>今日请求构成:</span>
+            <Tag color="cyan">
+              会话内请求: {summary.today_session_requests.toLocaleString()} 次 ({((summary.today_session_ratio || 0) * 100).toFixed(1)}%)
+            </Tag>
+            <Tag color="orange">
+              无会话独立请求: {summary.today_no_session_requests.toLocaleString()} 次 ({((1 - (summary.today_session_ratio || 0)) * 100).toFixed(1)}%)
+            </Tag>
+          </Space>
+          <span style={{ color: '#888', fontSize: 13 }}>
+            今日独立会话: <b style={{ color: '#13c2c2' }}>{summary.today_sessions}</b> 个 | 今日 Token 消耗: <b style={{ color: '#f5222d' }}>{formatTokens(summary.today_tokens)}</b>
+          </span>
+        </div>
+      </Card>
 
       {/* 24小时趋势 + TOP10用户 */}
       <Row gutter={16} style={{ marginBottom: 24 }}>

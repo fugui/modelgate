@@ -96,6 +96,21 @@ const AccessLogsTable: React.FC<AccessLogsTableProps> = ({
       },
     },
     {
+      title: '会话类型',
+      key: 'session_type',
+      width: 110,
+      render: (_: any, record: any) => {
+        if (record.is_session || record.session_key) {
+          return (
+            <AntTooltip title={`会话标识: ${record.session_key || '已关联会话'}`}>
+              <Tag color="cyan">会话请求</Tag>
+            </AntTooltip>
+          );
+        }
+        return <Tag color="default">无会话</Tag>;
+      },
+    },
+    {
       title: '模型',
       dataIndex: 'model_name',
       key: 'model_name',
@@ -217,6 +232,13 @@ const AccessLogsTable: React.FC<AccessLogsTableProps> = ({
                 <Descriptions.Item label="Path">{selectedLog.path}</Descriptions.Item>
                 <Descriptions.Item label="Model">{selectedLog.model_name || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Client IP">{selectedLog.client_ip}</Descriptions.Item>
+                <Descriptions.Item label="会话属性">
+                  {selectedLog.is_session || selectedLog.session_key ? (
+                    <Tag color="cyan">会话请求 ({selectedLog.session_key || '已关联'})</Tag>
+                  ) : (
+                    <Tag color="default">无会话 (单次独立请求)</Tag>
+                  )}
+                </Descriptions.Item>
                 <Descriptions.Item label="Status Code">
                   <Tag color={getStatusColor(selectedLog.status_code)}>
                     {selectedLog.status_code}

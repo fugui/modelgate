@@ -32,6 +32,8 @@ type AccessLog struct {
 	InputTokens     int               `json:"input_tokens"`     // 请求Tokens
 	OutputTokens    int               `json:"output_tokens"`    // 响应Tokens
 	DurationMs      int64             `json:"duration_ms"`      // 请求持续时间(毫秒)
+	IsSession       bool              `json:"is_session"`       // 是否为会话请求
+	SessionKey      string            `json:"session_key,omitempty"` // 会话标识
 }
 
 // SimpleAccessLog 简化版的访问日志（用于列表显示）
@@ -46,6 +48,8 @@ type SimpleAccessLog struct {
 	StatusCode    int       `json:"status_code"`
 	RequestBytes  int64     `json:"request_bytes"`
 	ResponseBytes int64     `json:"response_bytes"`
+	IsSession     bool      `json:"is_session"`
+	SessionKey    string    `json:"session_key,omitempty"`
 }
 
 // Beautify 对 User-Agent 进行脱敏/美化处理
@@ -66,6 +70,8 @@ func (log *AccessLog) ToSimple() SimpleAccessLog {
 		StatusCode:    log.StatusCode,
 		RequestBytes:  log.RequestBytes,
 		ResponseBytes: log.ResponseBytes,
+		IsSession:     log.IsSession,
+		SessionKey:    log.SessionKey,
 	}
 }
 
@@ -152,10 +158,10 @@ func (s *Service) Flush() {
 
 // RecordAccess 记录用户访问日志
 func (s *Service) RecordAccess(userID uuid.UUID, method, path, clientIP, userAgent string, modelName string, statusCode int, requestBytes, responseBytes int64, durationMs int64) {
-	s.RecordAccessDetailed(userID, method, path, clientIP, userAgent, modelName, statusCode, requestBytes, responseBytes, nil, "", nil, "", 0, 0, durationMs)
+	s.RecordAccessDetailed(userID, method, path, clientIP, userAgent, modelName, statusCode, requestBytes, responseBytes, nil, "", nil, "", 0, 0, durationMs, "")
 }
 
-// RecordAccessDetailed 记录用户访问日志（包含详细信息）
+// RecordAccessDetailed 记录用户访问日志（包含详细信息及会话标识）
 func (s *Service) RecordAccessDetailed(
 	userID uuid.UUID,
 	method, path, clientIP, userAgent string, modelName string,
@@ -168,6 +174,7 @@ func (s *Service) RecordAccessDetailed(
 	inputTokens int,
 	outputTokens int,
 	durationMs int64,
+	sessionKey string,
 ) {
 	s.logsMutex.Lock()
 	defer s.logsMutex.Unlock()
@@ -198,6 +205,8 @@ func (s *Service) RecordAccessDetailed(
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
 		DurationMs:      durationMs,
+		IsSession:       sessionKey != "",
+		SessionKey:      sessionKey,
 	}
 
 	// 存入 ring buffer

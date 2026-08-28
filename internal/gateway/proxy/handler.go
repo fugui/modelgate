@@ -66,6 +66,7 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, passthrough b
 
 	// 提取显式会话特征 Key (仅显式指定会话时用于 KV Cache 亲和性粘性路由)
 	sessionKey := ExtractSessionKey(c, bodyBytes)
+	c.Set("session_key", sessionKey)
 
 	// 构造 BackendRequest
 	backendReq := &BackendRequest{
