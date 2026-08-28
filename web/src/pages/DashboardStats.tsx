@@ -30,6 +30,7 @@ import {
   ComposedChart,
 } from 'recharts';
 import api from '../api';
+import { MetricCard } from '../components/dashboard/MetricCard';
 import { TopList } from '../components/dashboard/TopList';
 
 interface DashboardData {
@@ -303,51 +304,88 @@ const DashboardStats: React.FC = () => {
 
   return (
     <div className="dashboard-stats">
-      {/* 今日运行概览与流量透视 */}
-      <Card style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* 第一行：运行与总量概览 */}
-          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <span style={{ fontWeight: 'bold', fontSize: 14, minWidth: 100 }}>
-              <ThunderboltOutlined style={{ color: '#faad14', marginRight: 6 }} />
-              今日运行概览:
-            </span>
-            <Tag color="blue" style={{ fontSize: 13, padding: '4px 10px' }}>
-              <UserOutlined style={{ marginRight: 4 }} />
-              活跃用户: <b>{summary.active_users}</b> {summary.total_users ? `/ ${summary.total_users} 人` : '人'}
-            </Tag>
-            <Tag color="green" style={{ fontSize: 13, padding: '4px 10px' }}>
-              <CloudServerOutlined style={{ marginRight: 4 }} />
-              最高并发: <b>{summary.peak_concurrency}</b>
-            </Tag>
-            <Tag color="gold" style={{ fontSize: 13, padding: '4px 10px' }}>
-              <ThunderboltOutlined style={{ marginRight: 4 }} />
-              总请求数: <b>{summary.today_requests.toLocaleString()}</b> 次
-            </Tag>
-            <Tag color="magenta" style={{ fontSize: 13, padding: '4px 10px' }}>
-              <HistoryOutlined style={{ marginRight: 4 }} />
-              Token 消耗: <b>{formatTokens(summary.today_tokens)}</b>
-            </Tag>
-          </div>
-
-          {/* 第二行：会话与流量透视 */}
-          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <span style={{ fontWeight: 'bold', fontSize: 14, minWidth: 100 }}>
-              <CommentOutlined style={{ color: '#13c2c2', marginRight: 6 }} />
-              会话流量透视:
-            </span>
-            <Tag color="cyan" style={{ fontSize: 13, padding: '4px 10px' }}>
-              活跃会话: <b>{summary.today_sessions}</b> 个 {summary.today_sessions > 0 ? `(均深 ${summary.today_avg_session_depth.toFixed(1)} 次/会话)` : ''}
-            </Tag>
-            <Tag color="purple" style={{ fontSize: 13, padding: '4px 10px' }}>
-              会话内请求: <b>{summary.today_session_requests.toLocaleString()}</b> 次 ({((summary.today_session_ratio || 0) * 100).toFixed(1)}%)
-            </Tag>
-            <Tag color="orange" style={{ fontSize: 13, padding: '4px 10px' }}>
-              无会话独立调用: <b>{summary.today_no_session_requests.toLocaleString()}</b> 次 ({((1 - (summary.today_session_ratio || 0)) * 100).toFixed(1)}%)
-            </Tag>
-          </div>
-        </div>
-      </Card>
+      {/* 顶部 5 大核心指标卡片 */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 24, display: 'flex', flexWrap: 'wrap' }}>
+        <Col xs={24} sm={12} md={8} lg={8} style={{ flex: '1 1 200px' }}>
+          <MetricCard
+            title="今日活跃用户"
+            value={summary.active_users}
+            suffix="人"
+            icon={<UserOutlined />}
+            iconColor="#1890ff"
+            iconBg="#e6f7ff"
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>全站注册用户</span>
+                <b style={{ color: '#555' }}>{summary.total_users} 人</b>
+              </div>
+            }
+          />
+        </Col>
+        <Col xs={24} sm={12} md={8} lg={8} style={{ flex: '1 1 200px' }}>
+          <MetricCard
+            title="今日最高并发"
+            value={summary.peak_concurrency}
+            suffix="路"
+            icon={<CloudServerOutlined />}
+            iconColor="#52c41a"
+            iconBg="#f6ffed"
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>在线后端节点</span>
+                <b style={{ color: '#52c41a' }}>{backendIds.length} 节点</b>
+              </div>
+            }
+          />
+        </Col>
+        <Col xs={24} sm={12} md={8} lg={8} style={{ flex: '1 1 200px' }}>
+          <MetricCard
+            title="今日总请求"
+            value={summary.today_requests.toLocaleString()}
+            suffix="次"
+            icon={<ThunderboltOutlined />}
+            iconColor="#faad14"
+            iconBg="#fffbe6"
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>会话内请求</span>
+                <b style={{ color: '#13c2c2' }}>{summary.today_session_requests.toLocaleString()} 次 ({((summary.today_session_ratio || 0) * 100).toFixed(0)}%)</b>
+              </div>
+            }
+          />
+        </Col>
+        <Col xs={24} sm={12} md={8} lg={8} style={{ flex: '1 1 200px' }}>
+          <MetricCard
+            title="今日活跃会话"
+            value={summary.today_sessions}
+            suffix="个"
+            icon={<CommentOutlined />}
+            iconColor="#13c2c2"
+            iconBg="#e6fffb"
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>平均交互深度</span>
+                <b style={{ color: '#13c2c2' }}>{(summary.today_avg_session_depth || 0).toFixed(1)} 次/会话</b>
+              </div>
+            }
+          />
+        </Col>
+        <Col xs={24} sm={12} md={8} lg={8} style={{ flex: '1 1 200px' }}>
+          <MetricCard
+            title="今日 Token 消耗"
+            value={formatTokens(summary.today_tokens)}
+            icon={<HistoryOutlined />}
+            iconColor="#eb2f96"
+            iconBg="#fff0f6"
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>无会话独立调用</span>
+                <b style={{ color: '#fa8c16' }}>{summary.today_no_session_requests.toLocaleString()} 次</b>
+              </div>
+            }
+          />
+        </Col>
+      </Row>
 
       {/* 24小时趋势 + TOP10用户 */}
       <Row gutter={16} style={{ marginBottom: 24 }}>
