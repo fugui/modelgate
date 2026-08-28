@@ -3,6 +3,7 @@ package proxy
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -13,16 +14,46 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-func TestExtractSessionKey_FromHeaders(t *testing.T) {
+func TestExtractTraceID(t *testing.T) {
+	headers := []string{
+		"X-Request-ID",
+		"Request-ID",
+		"X-Trace-ID",
+		"X-Correlation-ID",
+	}
+
+	for _, h := range headers {
+		t.Run(h, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request, _ = http.NewRequest("POST", "/v1/chat/completions", nil)
+			c.Request.Header.Set(h, "custom-trace-999")
+
+			traceID, source := ExtractTraceID(c)
+			assert.Equal(t, "custom-trace-999", traceID)
+			assert.Equal(t, "header:"+h, source)
+		})
+	}
+
+	t.Run("GeneratedWhenMissing", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest("POST", "/v1/chat/completions", nil)
+
+		traceID, source := ExtractTraceID(c)
+		assert.True(t, strings.HasPrefix(traceID, "req-"))
+		assert.Equal(t, "generated", source)
+	})
+}
+
+func TestExtractSessionInfo_FromHeaders(t *testing.T) {
 	headers := []string{
 		"X-Session-ID",
-		"X-Session-Id",
 		"X-Conversation-ID",
-		"X-Conversation-Id",
 		"Session-ID",
-		"Session-Id",
 		"Conversation-ID",
-		"Conversation-Id",
+		"X-Chat-ID",
+		"Chat-ID",
 	}
 
 	for _, h := range headers {
@@ -32,34 +63,42 @@ func TestExtractSessionKey_FromHeaders(t *testing.T) {
 			c.Request, _ = http.NewRequest("POST", "/v1/chat/completions", nil)
 			c.Request.Header.Set(h, "sess-12345")
 
-			key := ExtractSessionKey(c, nil)
-			assert.Equal(t, "hdr:sess-12345", key)
+			info := ExtractSessionInfo(c, nil)
+			assert.Equal(t, "hdr:sess-12345", info.Key)
+			assert.Equal(t, "header:"+h, info.Source)
+			assert.Equal(t, "sess-12345", info.RawValue)
 		})
 	}
 }
 
-func TestExtractSessionKey_FromBodyExplicit(t *testing.T) {
+func TestExtractSessionInfo_FromBodyExplicit(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request, _ = http.NewRequest("POST", "/v1/chat/completions", nil)
 
 	// 1. session_id in body
 	body1 := []byte(`{"model": "gpt-4", "session_id": "sess-body-01"}`)
-	key1 := ExtractSessionKey(c, body1)
-	assert.Equal(t, "body:session:sess-body-01", key1)
+	info1 := ExtractSessionInfo(c, body1)
+	assert.Equal(t, "body:session:sess-body-01", info1.Key)
+	assert.Equal(t, "body:session_id", info1.Source)
+	assert.Equal(t, "sess-body-01", info1.RawValue)
 
 	// 2. conversation_id in body
 	body2 := []byte(`{"model": "gpt-4", "conversation_id": "conv-body-02"}`)
-	key2 := ExtractSessionKey(c, body2)
-	assert.Equal(t, "body:conv:conv-body-02", key2)
+	info2 := ExtractSessionInfo(c, body2)
+	assert.Equal(t, "body:conv:conv-body-02", info2.Key)
+	assert.Equal(t, "body:conversation_id", info2.Source)
+	assert.Equal(t, "conv-body-02", info2.RawValue)
 
 	// 3. chat_id in body
 	body3 := []byte(`{"model": "gpt-4", "chat_id": "chat-body-03"}`)
-	key3 := ExtractSessionKey(c, body3)
-	assert.Equal(t, "body:chat:chat-body-03", key3)
+	info3 := ExtractSessionInfo(c, body3)
+	assert.Equal(t, "body:chat:chat-body-03", info3.Key)
+	assert.Equal(t, "body:chat_id", info3.Source)
+	assert.Equal(t, "chat-body-03", info3.RawValue)
 }
 
-func TestExtractSessionKey_WithoutExplicitSessionReturnsEmpty(t *testing.T) {
+func TestExtractSessionInfo_WithoutExplicitSessionReturnsEmpty(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request, _ = http.NewRequest("POST", "/v1/chat/completions", nil)
@@ -71,6 +110,8 @@ func TestExtractSessionKey_WithoutExplicitSessionReturnsEmpty(t *testing.T) {
 			{"role": "user", "content": "Hello!"}
 		]
 	}`)
-	key := ExtractSessionKey(c, body)
-	assert.Equal(t, "", key, "Regular requests without explicit session IDs must return empty string to enable least-connections load balancing")
+	info := ExtractSessionInfo(c, body)
+	assert.Equal(t, "", info.Key, "Regular requests without explicit session IDs must return empty key")
+	assert.Equal(t, "none", info.Source)
+	assert.Equal(t, "", info.RawValue)
 }
