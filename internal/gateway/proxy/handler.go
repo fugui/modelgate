@@ -55,8 +55,8 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, passthrough b
 		return
 	}
 
-	// 提前获取/生成 TraceID 并记录来源
-	traceID, traceSource := ExtractTraceID(c)
+	// 提前获取/生成 TraceID
+	traceID, _ := ExtractTraceID(c)
 	c.Request.Header.Set("X-Request-ID", traceID)
 
 	// Dump 阶段 1（客户端原始请求）
@@ -65,31 +65,7 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, passthrough b
 	}
 
 	// 提取显式会话特征 Key (仅显式指定会话时用于 KV Cache 亲和性粘性路由)
-	sessInfo := ExtractSessionInfo(c, bodyBytes)
-	if sessInfo.Key == "" {
-		logger.Infow("[No-Session] Request has no explicit session identifier, using least-connections load balancing",
-			"trace_id", traceID,
-			"trace_source", traceSource,
-			"path", c.Request.URL.Path,
-			"model", modelID,
-			"user_id", uid.String(),
-			"client_ip", c.ClientIP(),
-			"user_agent", c.Request.UserAgent(),
-		)
-	} else {
-		logger.Infow("[Sticky-Session] Request has explicit session identifier",
-			"trace_id", traceID,
-			"trace_source", traceSource,
-			"session_key", sessInfo.Key,
-			"session_source", sessInfo.Source,
-			"session_raw_value", sessInfo.RawValue,
-			"path", c.Request.URL.Path,
-			"model", modelID,
-			"user_id", uid.String(),
-			"client_ip", c.ClientIP(),
-			"user_agent", c.Request.UserAgent(),
-		)
-	}
+	sessionKey := ExtractSessionKey(c, bodyBytes)
 
 	// 构造 BackendRequest
 	backendReq := &BackendRequest{
@@ -101,7 +77,7 @@ func (p *Proxy) HandleProxyRequest(c *gin.Context, proto Protocol, passthrough b
 		ClientIP:    c.ClientIP(),
 		UserAgent:   c.Request.UserAgent(),
 		Passthrough: passthrough,
-		SessionKey:  sessInfo.Key,
+		SessionKey:  sessionKey,
 	}
 
 	// 调用核心工作流
