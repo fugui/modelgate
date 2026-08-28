@@ -14,6 +14,7 @@ import {
   UserOutlined,
   CloudServerOutlined,
   ThunderboltOutlined,
+  HistoryOutlined,
   CommentOutlined,
 } from '@ant-design/icons';
 import {
@@ -76,7 +77,8 @@ interface DashboardData {
 
   backend_metrics: {
     time_label: string;
-    [backendId: string]: number | string; // dynamic keys: backend_xxx for latency values
+    timestamp?: number;
+    [key: string]: any;
   }[];
   backend_ids: string[];
 }
@@ -141,29 +143,36 @@ const DashboardStats: React.FC = () => {
           const raw: Record<string, { timestamp: number; time_label: string; avg_latency_ms: number; request_count: number }[]> = backendMetricsRes.data.data || {};
           const backendIds = Object.keys(raw);
           if (backendIds.length === 0) {
-            return { backend_metrics: [] as any[], backend_ids: [] as string[] };
+            return { backend_metrics: [], backend_ids: [] };
           }
-          // 收集所有时间戳并按时间排序（解决跨天排序问题）
-          const timeMap = new Map<number, string>(); // timestamp -> time_label
-          backendIds.forEach(id => raw[id]?.forEach(s => {
-            if (!timeMap.has(s.timestamp)) timeMap.set(s.timestamp, s.time_label);
-          }));
-          const timestamps = Array.from(timeMap.keys()).sort((a, b) => a - b);
-          // 构建每个时间点的行数据
-          const chartData = timestamps.map(ts => {
-            const row: any = { time_label: timeMap.get(ts) };
-            backendIds.forEach(id => {
-              const snap = raw[id]?.find(s => s.timestamp === ts);
-              row[`${id}_latency`] = snap ? Math.round(snap.avg_latency_ms * 100) / 100 : null;
-              row[`${id}_requests`] = snap ? snap.request_count : 0;
+
+          // 收集所有时间标签并保持顺序
+          const timeLabelMap = new Map<string, { timestamp: number; time_label: string; [key: string]: any }>();
+          backendIds.forEach((backendId) => {
+            (raw[backendId] || []).forEach((item) => {
+              if (!timeLabelMap.has(item.time_label)) {
+                timeLabelMap.set(item.time_label, {
+                  timestamp: item.timestamp,
+                  time_label: item.time_label,
+                });
+              }
+              const point = timeLabelMap.get(item.time_label)!;
+              point[`${backendId}_latency`] = Math.round(item.avg_latency_ms * 100) / 100;
+              point[`${backendId}_requests`] = item.request_count;
             });
-            return row;
           });
-          return { backend_metrics: chartData, backend_ids: backendIds };
+
+          // 按时间戳排序
+          const backendMetrics = Array.from(timeLabelMap.values()).sort(
+            (a, b) => a.timestamp - b.timestamp
+          );
+
+          return { backend_metrics: backendMetrics, backend_ids: backendIds };
         })(),
       });
-    } catch (error: any) {
-      message.error('获取统计数据失败: ' + (error.response?.data?.error || error.message));
+    } catch (err) {
+      console.error('Failed to fetch dashboard stats:', err);
+      message.error('获取统计数据失败');
     } finally {
       setLoading(false);
     }
@@ -171,84 +180,108 @@ const DashboardStats: React.FC = () => {
 
   useEffect(() => {
     fetchStats();
-    // 每 5 分钟刷新一次
-    const timer = setInterval(fetchStats, 5 * 60 * 1000);
-    return () => clearInterval(timer);
+    // 每30秒自动刷新一次
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
   }, []);
 
-  if (loading) {
-    return <Card loading={true} />;
+  if (loading && !data) {
+    return (
+      <div style={{ textAlign: 'center', padding: '100px 0' }}>
+        <p>加载数据中...</p>
+      </div>
+    );
   }
 
   if (!data) {
-    return <Empty description="无法加载数据" />;
+    return (
+      <Empty description="暂无数据" style={{ padding: '100px 0' }} />
+    );
   }
 
   const { summary, hourly_stats: hourlyStats, model_stats: modelStats, metrics_history: metricsHistory, backend_metrics: backendMetrics, backend_ids: backendIds } = data;
-  const visibleBackends = selectedBackends.length > 0 ? selectedBackends : backendIds;
+  const visibleBackends: string[] = selectedBackends.length > 0 ? selectedBackends : backendIds;
 
-  const uniqueModels = Array.from(
-    new Set(hourlyStats.flatMap((stat) => (stat.models ? Object.keys(stat.models) : [])))
-  );
-  const chartColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#eb2f96', '#13c2c2', '#fa8c16'];
-
-  const formatTokens = (num: number) => {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(2) + 'M';
+  const formatTokens = (tokens: number) => {
+    if (tokens >= 1000000) {
+      return `${(tokens / 1000000).toFixed(1)}M`;
     }
-    if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
+    if (tokens >= 1000) {
+      return `${(tokens / 1000).toFixed(1)}K`;
     }
-    return num.toString();
+    return tokens.toLocaleString();
   };
 
-  const formatLatency = (ms: number | null | undefined) => {
-    if (ms == null) return '-';
-    if (ms < 1000) return `${Math.round(ms)} ms`;
-    const seconds = ms / 1000;
-    if (seconds < 60) return `${seconds.toFixed(2)} s`;
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = Math.round(seconds % 60);
-    return `${minutes}m ${remainingSeconds}s`;
+  const formatLatency = (ms: number) => {
+    if (ms >= 1000) {
+      return `${(ms / 1000).toFixed(2)}s`;
+    }
+    return `${ms}ms`;
   };
 
-  const renderTokens = (_: any, record: any) => (
-    <span>
-      <span style={{ color: '#fa8c16' }}>↑{formatTokens(record.input_tokens || 0)}</span>
-      <span style={{ margin: '0 4px' }}>/</span>
-      <span style={{ color: '#722ed1' }}>↓{formatTokens(record.output_tokens || 0)}</span>
-    </span>
-  );
+  // 格式化 Token 显示：将数量转换为紧凑的 K/M 格式
+  const formatTokensCompact = (tokens: number): string => {
+    if (tokens >= 1_000_000) {
+      return `${(tokens / 1_000_000).toFixed(1)}M`;
+    }
+    if (tokens >= 1_000) {
+      return `${(tokens / 1_000).toFixed(1)}K`;
+    }
+    return tokens.toString();
+  };
 
-  const totalModelRequests = modelStats.reduce((sum, item) => sum + (item.request_count || 0), 0);
+  // 自定义渲染 Token 柱状单元格：展示输入/输出细分和总计标签
+  const renderTokens = (_: any, record: any) => {
+    const input = record.input_tokens || 0;
+    const output = record.output_tokens || 0;
+    const total = input + output;
+
+    if (total === 0) {
+      return <span style={{ color: '#bbb' }}>-</span>;
+    }
+
+    const inputPercent = Math.round((input / total) * 100);
+    const outputPercent = 100 - inputPercent;
+
+    return (
+      <div style={{ minWidth: 160 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 2 }}>
+          <span style={{ color: '#1890ff' }}>入: {formatTokensCompact(input)} ({inputPercent}%)</span>
+          <span style={{ color: '#52c41a' }}>出: {formatTokensCompact(output)} ({outputPercent}%)</span>
+        </div>
+        <div style={{ height: 6, display: 'flex', borderRadius: 3, overflow: 'hidden', background: '#f0f0f0' }}>
+          <div style={{ width: `${inputPercent}%`, background: '#1890ff' }} />
+          <div style={{ width: `${outputPercent}%`, background: '#52c41a' }} />
+        </div>
+        <div style={{ fontSize: 11, color: '#888', textAlign: 'right', marginTop: 1 }}>
+          总量: {formatTokensCompact(total)}
+        </div>
+      </div>
+    );
+  };
 
   const modelColumns = [
     {
-      title: '模型',
+      title: '模型名称',
       dataIndex: 'model_id',
       key: 'model_id',
-      render: (text: string) => (
-        <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#1890ff' }}>
-          {text}
-        </span>
-      ),
+      render: (text: string) => <Tag color="blue">{text}</Tag>,
     },
     {
       title: '请求数',
       dataIndex: 'request_count',
       key: 'request_count',
-      sorter: (a: any, b: any) => (a.request_count || 0) - (b.request_count || 0),
-    },
-    {
-      title: '请求占比',
-      key: 'percentage',
-      render: (_: any, record: any) => {
-        const pct = totalModelRequests > 0 ? ((record.request_count || 0) / totalModelRequests) * 100 : 0;
+      render: (count: number) => {
+        const total = summary.today_requests || 1;
+        const percent = Math.round((count / total) * 100);
         return (
-          <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-            <span style={{ width: '45px', marginRight: '8px' }}>{pct.toFixed(1)}%</span>
-            <div style={{ flex: 1, height: '6px', backgroundColor: '#f5f5f5', borderRadius: '3px', overflow: 'hidden' }}>
-              <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#1890ff', borderRadius: '3px' }} />
+          <div style={{ minWidth: 120 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 2 }}>
+              <span>{count.toLocaleString()} 次</span>
+              <span style={{ color: '#888' }}>{percent}%</span>
+            </div>
+            <div style={{ height: 4, borderRadius: 2, overflow: 'hidden', background: '#f0f0f0' }}>
+              <div style={{ width: `${percent}%`, height: '100%', background: '#faad14' }} />
             </div>
           </div>
         );
@@ -263,17 +296,19 @@ const DashboardStats: React.FC = () => {
     },
   ];
 
-
-
-
+  const uniqueModels = Array.from(
+    new Set(hourlyStats.flatMap((stat) => (stat.models ? Object.keys(stat.models) : [])))
+  );
+  const chartColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#eb2f96', '#13c2c2', '#fa8c16'];
 
   return (
     <div className="dashboard-stats">
       {/* 今日运行概览与流量透视 */}
       <Card style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-          <Space size="middle" wrap>
-            <span style={{ fontWeight: 'bold', fontSize: 15 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* 第一行：运行与总量概览 */}
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <span style={{ fontWeight: 'bold', fontSize: 14, minWidth: 100 }}>
               <ThunderboltOutlined style={{ color: '#faad14', marginRight: 6 }} />
               今日运行概览:
             </span>
@@ -289,8 +324,19 @@ const DashboardStats: React.FC = () => {
               <ThunderboltOutlined style={{ marginRight: 4 }} />
               总请求数: <b>{summary.today_requests.toLocaleString()}</b> 次
             </Tag>
+            <Tag color="magenta" style={{ fontSize: 13, padding: '4px 10px' }}>
+              <HistoryOutlined style={{ marginRight: 4 }} />
+              Token 消耗: <b>{formatTokens(summary.today_tokens)}</b>
+            </Tag>
+          </div>
+
+          {/* 第二行：会话与流量透视 */}
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <span style={{ fontWeight: 'bold', fontSize: 14, minWidth: 100 }}>
+              <CommentOutlined style={{ color: '#13c2c2', marginRight: 6 }} />
+              会话流量透视:
+            </span>
             <Tag color="cyan" style={{ fontSize: 13, padding: '4px 10px' }}>
-              <CommentOutlined style={{ marginRight: 4 }} />
               活跃会话: <b>{summary.today_sessions}</b> 个 {summary.today_sessions > 0 ? `(均深 ${summary.today_avg_session_depth.toFixed(1)} 次/会话)` : ''}
             </Tag>
             <Tag color="purple" style={{ fontSize: 13, padding: '4px 10px' }}>
@@ -299,10 +345,6 @@ const DashboardStats: React.FC = () => {
             <Tag color="orange" style={{ fontSize: 13, padding: '4px 10px' }}>
               无会话独立调用: <b>{summary.today_no_session_requests.toLocaleString()}</b> 次 ({((1 - (summary.today_session_ratio || 0)) * 100).toFixed(1)}%)
             </Tag>
-          </Space>
-          <div style={{ fontSize: 14, fontWeight: 'bold' }}>
-            <span style={{ color: '#888', marginRight: 6 }}>今日 Token 消耗:</span>
-            <span style={{ color: '#f5222d', fontSize: 16 }}>{formatTokens(summary.today_tokens)}</span>
           </div>
         </div>
       </Card>
