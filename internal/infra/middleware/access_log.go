@@ -221,12 +221,26 @@ func shouldRecordHeader(key string) bool {
 	// 转换为小写进行比较
 	keyLower := strings.ToLower(key)
 
-	// 只记录关键头信息，避免敏感信息泄露
+	// 明确过滤敏感授权头
+	if keyLower == "authorization" || keyLower == "cookie" || keyLower == "set-cookie" || keyLower == "proxy-authorization" {
+		return false
+	}
+
+	// 允许记录的关键头信息（包含追踪与会话标识）
 	allowedHeaders := []string{
 		"content-type",
 		"accept",
 		"user-agent",
 		"x-request-id",
+		"request-id",
+		"x-trace-id",
+		"x-correlation-id",
+		"x-session-id",
+		"x-conversation-id",
+		"session-id",
+		"conversation-id",
+		"x-chat-id",
+		"chat-id",
 		"x-real-ip",
 		"x-forwarded-for",
 		"accept-encoding",
