@@ -1,7 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Descriptions, Tag, Statistic, Row, Col, Progress } from 'antd';
+import { Card, Tag, Row, Col, Progress } from 'antd';
+import {
+  ThunderboltOutlined,
+  CommentOutlined,
+  ApartmentOutlined,
+  FieldTimeOutlined,
+  AppstoreOutlined,
+} from '@ant-design/icons';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../api';
+import { MetricCard } from '../components/dashboard/MetricCard';
 import AccessLogsTable from '../components/AccessLogsTable';
 
 const UsageStats: React.FC = () => {
@@ -55,77 +63,99 @@ const UsageStats: React.FC = () => {
     <div>
       <h2 style={{ marginBottom: 24 }}>使用统计</h2>
 
-      {/* 配额与会话概览 */}
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col xs={24} md={8}>
-          <Card>
-            <Statistic
-              title="今日请求次数"
-              value={quota.daily_requests_used || 0}
-              suffix={`/ ${quota.daily_requests_limit || 0}`}
-            />
-            <Progress
-              percent={requestUsagePercent}
-              status={requestUsagePercent > 90 ? 'exception' : 'active'}
-              style={{ marginTop: 8 }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card>
-            <Statistic
-              title="今日会话分析"
-              value={quota.daily_sessions_count || 0}
-              suffix="个独立会话"
-            />
-            <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                <span>会话内请求:</span>
-                <span style={{ fontWeight: 'bold', color: '#13c2c2' }}>
-                  {quota.daily_session_requests || 0} 次 ({((quota.session_request_ratio || 0) * 100).toFixed(1)}%)
-                </span>
+      {/* 顶部个人配额与会话运行指标卡片 */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 24, display: 'flex', flexWrap: 'wrap' }}>
+        <Col xs={24} sm={12} md={8} lg={8} style={{ flex: '1 1 200px' }}>
+          <MetricCard
+            title="今日请求 / 限额"
+            value={quota.daily_requests_used?.toLocaleString() || 0}
+            suffix={quota.daily_requests_limit ? `/ ${quota.daily_requests_limit.toLocaleString()} 次` : '次'}
+            icon={<ThunderboltOutlined />}
+            iconColor="#1890ff"
+            iconBg="#e6f7ff"
+            footer={
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>已用配额</span>
+                  <b style={{ color: requestUsagePercent > 90 ? '#f5222d' : '#1890ff' }}>{requestUsagePercent}%</b>
+                </div>
+                <Progress percent={requestUsagePercent} size="small" showInfo={false} status={requestUsagePercent > 90 ? 'exception' : 'active'} />
               </div>
+            }
+          />
+        </Col>
+        <Col xs={24} sm={12} md={8} lg={8} style={{ flex: '1 1 200px' }}>
+          <MetricCard
+            title="今日活跃会话"
+            value={quota.daily_sessions_count || 0}
+            suffix="个"
+            icon={<CommentOutlined />}
+            iconColor="#13c2c2"
+            iconBg="#e6fffb"
+            footer={
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>无会话调用:</span>
-                <span style={{ fontWeight: 'bold', color: '#fa8c16' }}>
-                  {quota.daily_no_session_requests || 0} 次 (均深 {(quota.avg_session_depth || 0).toFixed(1)} 次/会话)
-                </span>
+                <span>会话内请求</span>
+                <b style={{ color: '#13c2c2' }}>{quota.daily_session_requests || 0} 次 ({((quota.session_request_ratio || 0) * 100).toFixed(0)}%)</b>
               </div>
-            </div>
-          </Card>
+            }
+          />
         </Col>
-        <Col xs={24} md={8}>
-          <Card>
-            <Statistic
-              title="可用模型数"
-              value={quota.models_allowed?.length || 0}
-              suffix="个"
-            />
-            <div style={{ marginTop: 8, maxHeight: 42, overflowY: 'auto' }}>
-              {quota.models_allowed?.map((model: string) => (
-                <Tag key={model} style={{ margin: '0 4px 4px 0' }}>
-                  {model}
-                </Tag>
-              ))}
-            </div>
-          </Card>
+        <Col xs={24} sm={12} md={8} lg={8} style={{ flex: '1 1 200px' }}>
+          <MetricCard
+            title="平均会话深度"
+            value={(quota.avg_session_depth || 0).toFixed(1)}
+            suffix="次/会话"
+            icon={<ApartmentOutlined />}
+            iconColor="#722ed1"
+            iconBg="#f9f0ff"
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>无会话独立调用</span>
+                <b style={{ color: '#fa8c16' }}>{quota.daily_no_session_requests || 0} 次</b>
+              </div>
+            }
+          />
+        </Col>
+        <Col xs={24} sm={12} md={8} lg={8} style={{ flex: '1 1 200px' }}>
+          <MetricCard
+            title="速率限制与重置"
+            value={quota.rate_limit || 0}
+            suffix={`次/${quota.rate_window || 60}s`}
+            icon={<FieldTimeOutlined />}
+            iconColor="#52c41a"
+            iconBg="#f6ffed"
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>重置时间</span>
+                <b style={{ color: '#555' }}>{quota.reset_time || '每日 00:00'}</b>
+              </div>
+            }
+          />
+        </Col>
+        <Col xs={24} sm={12} md={8} lg={8} style={{ flex: '1 1 200px' }}>
+          <MetricCard
+            title="授权可用模型"
+            value={quota.models_allowed?.length || 0}
+            suffix="个模型"
+            icon={<AppstoreOutlined />}
+            iconColor="#faad14"
+            iconBg="#fffbe6"
+            footer={
+              <div style={{ display: 'flex', overflowX: 'auto', gap: 4, whiteSpace: 'nowrap', paddingBottom: 2 }}>
+                {quota.models_allowed && quota.models_allowed.length > 0 ? (
+                  quota.models_allowed.map((model: string) => (
+                    <Tag key={model} style={{ margin: 0, fontSize: 11, padding: '0 4px' }}>
+                      {model}
+                    </Tag>
+                  ))
+                ) : (
+                  <span style={{ color: '#aaa' }}>全模型可用</span>
+                )}
+              </div>
+            }
+          />
         </Col>
       </Row>
-
-      {/* 配额详情 */}
-      <Card title="配额详情" style={{ marginBottom: 24 }}>
-        <Descriptions bordered column={2}>
-          <Descriptions.Item label="速率限制">
-            {quota.rate_limit} 请求/{quota.rate_window || 60}秒
-          </Descriptions.Item>
-          <Descriptions.Item label="每日请求限额">
-            {quota.daily_requests_limit?.toLocaleString() || '无限制'}
-          </Descriptions.Item>
-          <Descriptions.Item label="重置时间">
-            {quota.reset_time || '每日 00:00'}
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
 
       {/* 最近访问记录 */}
       <Card title="最近20次访问" style={{ marginBottom: 24 }}>
