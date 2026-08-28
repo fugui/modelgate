@@ -14,7 +14,6 @@ import {
   UserOutlined,
   CloudServerOutlined,
   ThunderboltOutlined,
-  HistoryOutlined,
   CommentOutlined,
 } from '@ant-design/icons';
 import {
@@ -30,7 +29,6 @@ import {
   ComposedChart,
 } from 'recharts';
 import api from '../api';
-import { MetricCard } from '../components/dashboard/MetricCard';
 import { TopList } from '../components/dashboard/TopList';
 
 interface DashboardData {
@@ -271,63 +269,41 @@ const DashboardStats: React.FC = () => {
 
   return (
     <div className="dashboard-stats">
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={12} lg={6}>
-          <MetricCard
-            title="今日活跃用户"
-            value={summary.active_users}
-            suffix={summary.total_users ? `/ ${summary.total_users} 总` : ''}
-            prefix={<UserOutlined style={{ color: '#1890ff' }} />}
-            valueStyle={{ color: '#1890ff' }}
-          />
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <MetricCard
-            title="今日最高并发"
-            value={summary.peak_concurrency}
-            prefix={<CloudServerOutlined style={{ color: '#52c41a' }} />}
-            valueStyle={{ color: '#52c41a' }}
-          />
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <MetricCard
-            title="今日总请求"
-            value={summary.today_requests}
-            prefix={<ThunderboltOutlined style={{ color: '#faad14' }} />}
-            valueStyle={{ color: '#faad14' }}
-          />
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <MetricCard
-            title="今日 Token 消耗"
-            value={formatTokens(summary.today_tokens)}
-            prefix={<HistoryOutlined style={{ color: '#f5222d' }} />}
-            valueStyle={{ color: '#f5222d' }}
-          />
-        </Col>
-      </Row>
-
-      {/* 今日会话与流量构成透视 */}
-      <Card size="small" style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+      {/* 今日运行概览与流量透视 */}
+      <Card style={{ marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <Space size="middle" wrap>
-            <span style={{ fontWeight: 'bold' }}>
-              <CommentOutlined style={{ color: '#13c2c2', marginRight: 6 }} />
-              今日会话与流量分析:
+            <span style={{ fontWeight: 'bold', fontSize: 15 }}>
+              <ThunderboltOutlined style={{ color: '#faad14', marginRight: 6 }} />
+              今日运行概览:
             </span>
-            <Tag color="cyan">
-              今日活跃会话: <b>{summary.today_sessions}</b> 个 {summary.today_sessions > 0 ? `(平均深度 ${summary.today_avg_session_depth.toFixed(1)} 次/会话)` : ''}
+            <Tag color="blue" style={{ fontSize: 13, padding: '4px 10px' }}>
+              <UserOutlined style={{ marginRight: 4 }} />
+              活跃用户: <b>{summary.active_users}</b> {summary.total_users ? `/ ${summary.total_users} 人` : '人'}
             </Tag>
-            <Tag color="blue">
-              会话内请求: {summary.today_session_requests.toLocaleString()} 次 ({((summary.today_session_ratio || 0) * 100).toFixed(1)}%)
+            <Tag color="green" style={{ fontSize: 13, padding: '4px 10px' }}>
+              <CloudServerOutlined style={{ marginRight: 4 }} />
+              最高并发: <b>{summary.peak_concurrency}</b>
             </Tag>
-            <Tag color="orange">
-              无会话独立调用: {summary.today_no_session_requests.toLocaleString()} 次 ({((1 - (summary.today_session_ratio || 0)) * 100).toFixed(1)}%)
+            <Tag color="gold" style={{ fontSize: 13, padding: '4px 10px' }}>
+              <ThunderboltOutlined style={{ marginRight: 4 }} />
+              总请求数: <b>{summary.today_requests.toLocaleString()}</b> 次
+            </Tag>
+            <Tag color="cyan" style={{ fontSize: 13, padding: '4px 10px' }}>
+              <CommentOutlined style={{ marginRight: 4 }} />
+              活跃会话: <b>{summary.today_sessions}</b> 个 {summary.today_sessions > 0 ? `(均深 ${summary.today_avg_session_depth.toFixed(1)} 次/会话)` : ''}
+            </Tag>
+            <Tag color="purple" style={{ fontSize: 13, padding: '4px 10px' }}>
+              会话内请求: <b>{summary.today_session_requests.toLocaleString()}</b> 次 ({((summary.today_session_ratio || 0) * 100).toFixed(1)}%)
+            </Tag>
+            <Tag color="orange" style={{ fontSize: 13, padding: '4px 10px' }}>
+              无会话独立调用: <b>{summary.today_no_session_requests.toLocaleString()}</b> 次 ({((1 - (summary.today_session_ratio || 0)) * 100).toFixed(1)}%)
             </Tag>
           </Space>
-          <span style={{ color: '#888', fontSize: 13 }}>
-            今日活跃用户: <b style={{ color: '#1890ff' }}>{summary.active_users}</b> 人 | 今日 Token: <b style={{ color: '#f5222d' }}>{formatTokens(summary.today_tokens)}</b>
-          </span>
+          <div style={{ fontSize: 14, fontWeight: 'bold' }}>
+            <span style={{ color: '#888', marginRight: 6 }}>今日 Token 消耗:</span>
+            <span style={{ color: '#f5222d', fontSize: 16 }}>{formatTokens(summary.today_tokens)}</span>
+          </div>
         </div>
       </Card>
 
