@@ -60,6 +60,13 @@ const AccessLogsTable: React.FC<AccessLogsTableProps> = ({
       .replace(/>/g, "&gt;");
   };
 
+  const renderProtocolTag = (path: string) => {
+    if (!path) return '-';
+    if (path.includes('/v1/messages')) return <Tag color="purple">Anthropic</Tag>;
+    if (path.includes('/v1/responses')) return <Tag color="cyan">Responses</Tag>;
+    return <Tag color="blue">OpenAI</Tag>;
+  };
+
   const baseColumns = [
     {
       title: '时间',
@@ -89,11 +96,7 @@ const AccessLogsTable: React.FC<AccessLogsTableProps> = ({
       dataIndex: 'path',
       key: 'protocol',
       width: 100,
-      render: (path: string) => {
-        if (!path) return '-';
-        if (path.includes('/v1/messages')) return <Tag color="purple">Anthropic</Tag>;
-        return <Tag color="blue">OpenAI</Tag>;
-      },
+      render: (path: string) => renderProtocolTag(path),
     },
     {
       title: '会话类型',
@@ -230,6 +233,7 @@ const AccessLogsTable: React.FC<AccessLogsTableProps> = ({
                 {isAdmin && <Descriptions.Item label="User Name">{userMap[selectedLog.user_id] || selectedLog.user_id}</Descriptions.Item>}
                 <Descriptions.Item label="Method">{selectedLog.method}</Descriptions.Item>
                 <Descriptions.Item label="Path">{selectedLog.path}</Descriptions.Item>
+                <Descriptions.Item label="协议">{renderProtocolTag(selectedLog.path)}</Descriptions.Item>
                 <Descriptions.Item label="Model">{selectedLog.model_name || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Client IP">{selectedLog.client_ip}</Descriptions.Item>
                 <Descriptions.Item label="会话属性">
